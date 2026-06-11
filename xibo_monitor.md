@@ -5,7 +5,8 @@ manager state, queue dispatch, resume/rerun behavior, remote Linux users, or TPU
 alias hygiene. For basic user-facing TPU operations, read `tpu.md` first.
 
 Project-local source snapshots are preserved verbatim in
-`project_agents_archive.md`.
+`project_agents_archive.md`. Legacy sandbox notes are preserved verbatim in
+`external_memory_archive.md`.
 
 ## Active Code Paths
 
@@ -220,6 +221,28 @@ accounts on TPU VMs.
   `tpu kill-remote <tpu> remote_user=<linux_user>` for scoped kill.
 - Do not kill PPIDs from `ps`; many workers have PPID 1. Kill only matching
   process PIDs and TPU device-holder PIDs.
+
+## Implementation Pitfalls From Sandbox Notes
+
+- `tmux display-message -p '#S:#I'` can report the active window, not the
+  intended current pane's window. Use the pane id target:
+  `pane_id=$TMUX_PANE; tmux display-message -p -t "$pane_id" '#S:#I'`.
+- A function that acquires a lock must not exit while still holding that lock,
+  or monitor/queue code can deadlock.
+- Resume work should happen in the staged directory because the source checkout
+  may have changed after the original job launched.
+- For complex command argument passing, prefer positional arguments when that is
+  what the existing xibo scripts expect.
+- JSON and log parsing must be strict about type and case: `"3" != 3` and
+  `"PREEMPTED" != "preempted"`.
+- In f-strings, avoid using the same quote character inside expression braces as
+  the surrounding string.
+- `KeyboardInterrupt` is not caught by `except Exception`.
+- `gcloud` can reconnect automatically. For SSH commands that should not keep a
+  tmux pane alive, add `--ssh-flag="-n"`. When killing remote processes, also
+  kill the parent if it restarts children.
+- A remote crash may fail before writing useful text to `output.log`; absence of
+  log output is not proof that the command never started.
 
 ## External Xibo Locking
 
