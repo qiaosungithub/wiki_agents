@@ -1,108 +1,75 @@
-# Project Agent Index
+# Project Index
 
-This workspace contains many project checkouts. Agent memory has been
-centralized in this folder so a new agent can start from one place. This index
-tells a new agent where to look first and which shared wiki file covers the same
-topic.
+This workspace contains many project checkouts. Agent memory is centralized in
+`wiki_agents`; most scattered `AGENTS.md` / `CLAUDE.md` files were archived and
+then removed from the checkout tree.
 
-Full verbatim snapshots of the discovered `AGENTS.md` files are preserved in
-`project_agents_archive.md`. Verbatim snapshots of non-AGENTS memory files are
-preserved in `external_memory_archive.md`.
+Use this file only to map a project to the right topic docs. Detailed rules live
+in those topic docs or in the verbatim archives.
 
 ## Always Read First
 
 1. `/kmh-nfs-ssd-us-mount/code/qiao/work/AGENTS.md`
 2. `/kmh-nfs-ssd-us-mount/code/qiao/work/wiki_agents/AGENTS.md`
-3. This index and the matching topic file.
-4. A project-local `AGENTS.md` if one still exists.
+3. This index.
+4. The topic docs listed for the checkout you are touching.
 
 ## Project Groups
 
-| Project / path | What it is | Shared wiki to read |
+| Project / path | What it is | Read |
 |---|---|---|
-| `jax_llava/` | Current JAX LLaVA training/data/eval code and LLaVA-1.5 reproduction memory. | `vlm_training.md`, `tpu.md`, `spreadsheet_logging.md` |
-| `jax_llava_late_fusion_13_5ed73eb/` | Copy with the same JAX LLaVA project notes as `jax_llava`. | `vlm_training.md` |
-| `jax_llava_late_fusion_22_5ed73eb/` | Copy with the same JAX LLaVA project notes as `jax_llava`. | `vlm_training.md` |
-| `jax_llava_master_39b30fb_before_late_fusion/` | Pre-late-fusion JAX LLaVA snapshot with shared reproduction/checkpoint notes. | `vlm_training.md` |
-| `PaliGemma-baseline/` | Current PaliGemma / PrefixMAE training baseline, two-stage curriculum, HSDP notes. | `vlm_training.md`, `tpu.md`, `spreadsheet_logging.md` |
-| `beifen-Paligemma/` | PaliGemma worktree with full stateful dataloader and two-stage notes. | `vlm_training.md` |
-| `eue3a5qr-sft-new-pipeline/` | SFT worktree copied from pretrain stagedir for WandB run `eue3a5qr`. | `vlm_training.md` |
-| `beifen/` | Dataset upload and visual sanity report scripts. | `vlm_training.md` |
+| `jax_llava/` | Current JAX LLaVA training/data/eval code and LLaVA-1.5 reproduction work. | `vlm_training.md`, `vlm_data.md`, `vlm_checkpointing.md`, `xibo_queue.md`, `spreadsheet_logging.md` |
+| `jax_llava_late_fusion_13_5ed73eb/` | JAX LLaVA late-fusion snapshot with same legacy notes as `jax_llava`. | `vlm_training.md`, `vlm_checkpointing.md` |
+| `jax_llava_late_fusion_22_5ed73eb/` | JAX LLaVA late-fusion snapshot with same legacy notes as `jax_llava`. | `vlm_training.md`, `vlm_checkpointing.md` |
+| `jax_llava_master_39b30fb_before_late_fusion/` | Pre-late-fusion JAX LLaVA snapshot. | `vlm_training.md`, `vlm_data.md`, `vlm_checkpointing.md` |
+| `PaliGemma-baseline/` | PaliGemma / PrefixMAE training baseline, two-stage curriculum, HSDP notes. | `vlm_training.md`, `vlm_checkpointing.md`, `tpu.md`, `spreadsheet_logging.md` |
+| `beifen-Paligemma/` | PaliGemma worktree with stateful dataloader and two-stage notes. | `vlm_training.md`, `vlm_data.md`, `vlm_checkpointing.md` |
+| `eue3a5qr-sft-new-pipeline/` | SFT worktree copied from pretrain stagedir for WandB run `eue3a5qr`. | `vlm_training.md`, `vlm_checkpointing.md`, `project_agents_archive.md` |
+| `beifen/` | Dataset upload and visual sanity report scripts. | `vlm_data.md` |
 | `one-benchmark-suite/` | Benchmark registry package; not a training framework. | `project_agents_archive.md`, `external_memory_archive.md` |
-| `tpu_manager/` | Local MONITOR queue/resume working copy for `sqa`. | `tpu.md`, `xibo_monitor.md` |
-| `xibo_tpu_manager_linux_user_sandbox_20260601/` | Sandbox copy of the xibo manager with remote Linux user support. | `xibo_monitor.md`, `tpu.md` |
+| `tpu_manager/` | Local SQA `MONITOR.py` queue/resume working copy. | `xibo_monitor.md`, `xibo_queue.md`, `xibo_resume.md`, `tpu.md` |
+| `xibo_tpu_manager_linux_user_sandbox_20260601/` | Sandbox copy of xibo manager with remote Linux user support. | `xibo_monitor.md`, `xibo_queue.md`, `xibo_resume.md` |
 | `nnflow_jax/` | JAX implementation for "Generative Modeling Through Drifting". | `external_memory_archive.md` |
-| `wiki_agents/` | Shared cross-repository operational memory. | this folder |
+| `wiki_agents/` | Shared cross-repository operational memory. | `AGENTS.md`, then the file being edited |
 
-## Duplicate Rule Groups
+## Duplicate Legacy Rule Groups
 
 - `jax_llava/AGENTS.md`, `jax_llava_late_fusion_13_5ed73eb/AGENTS.md`, and
-  `jax_llava_late_fusion_22_5ed73eb/AGENTS.md` were identical at the time this
-  wiki was reorganized.
+  `jax_llava_late_fusion_22_5ed73eb/AGENTS.md` were identical when archived.
 - Several PaliGemma/JAX LLaVA worktrees share HSDP, SFT dataset, stateful
-  dataloader, durable checkpoint, and queue semantics. Those shared rules are
-  consolidated in `vlm_training.md`; still read the local file for worktree-
-  specific baseline differences.
-- `tpu_manager/AGENTS.md` and
-  `xibo_tpu_manager_linux_user_sandbox_20260601/AGENTS.md` overlap but are not
-  identical. `tpu_manager/` describes the active local MONITOR flow, while the
-  xibo sandbox describes the broader manager architecture and remote Linux user
-  implementation.
+  dataloader, durable checkpoint, and queue semantics. Those rules are now
+  split across `vlm_training.md`, `vlm_data.md`, `vlm_checkpointing.md`, and
+  `xibo_queue.md`.
+- The archived `tpu_manager` and xibo sandbox AGENTS snapshots overlap but are
+  not identical. The active local monitor is summarized in `xibo_monitor.md`;
+  queue-specific behavior is in `xibo_queue.md`; resume-specific behavior is in
+  `xibo_resume.md`.
 
-## One-Benchmark-Suite Rules
+## Project-Specific Archives
 
-`one-benchmark-suite` is a stable machine-readable benchmark registry package.
-Do not add training code, launch scripts, model trees, or broad framework
-abstractions.
-
-The legacy `CLAUDE.md` content is archived in `external_memory_archive.md`; it
-is the detailed orientation for coding agents in that checkout.
-
-Each benchmark directory should keep the 9-file layout:
-
-```text
-__init__.py
-README.md
-metadata.yaml
-config.py
-data.py
-metrics.py
-_impl.py
-benchmark.py
-sanity_check.py
-```
-
-`metrics.py` must remain pure Python / numpy and must not import JAX, torch,
-transformers, fsspec, or webdataset. Heavy imports belong in `_impl.py` or lazy
-helper functions. Fast tests are:
-
-```bash
-python -m tests.run_sanity_checks
-python -m unittest discover tests/
-```
-
-Zone-dependent config paths use the literal `💣` placeholder; call
-`one_benchmark_suite.resolve_zone(cfg, zone)` before real GCS evals.
-
-## Beifen Dataset Operations Summary
-
-See `vlm_training.md` for current upload counts and same-zone rules. The short
-version: upload/report from same-region TPU VMs, use `/dev/shm` for staging,
-upload tar shards only, and store grouped `qas`/`refs` per image.
-
-## Nnflow JAX Summary
-
-The legacy `nnflow_jax/CLAUDE.md` is archived in `external_memory_archive.md`.
-Key reminders: keep interfaces deep and modular, avoid copy-paste duplication,
-add dummy tests before real compute, understand `energy_loss.py` and
-`energy_bank.py` before changing drifting dynamics, and choose GCS service
-account keys by zone.
+- All discovered legacy `AGENTS.md` files are preserved in
+  `project_agents_archive.md`.
+- Legacy non-AGENTS memory files are preserved in `external_memory_archive.md`.
+  This includes `one-benchmark-suite/CLAUDE.md`, `nnflow_jax/CLAUDE.md`,
+  `xibo_tpu_manager_linux_user_sandbox_20260601/NOTES.md`, and the old root
+  agent notes file.
+- For `one-benchmark-suite`, the short rule is: keep it a benchmark registry,
+  keep benchmark metrics pure Python/numpy, keep sanity checks CPU-only, and do
+  not reintroduce training code. Read the archives for full details.
+- For `nnflow_jax`, the short rule is: keep interfaces modular/deep, add dummy
+  tests before real compute, understand `energy_loss.py` and `energy_bank.py`
+  before changing drifting dynamics, and choose GCS service-account keys by
+  zone. Read `external_memory_archive.md` for full details.
+- For old VLM investigations that are not current daily procedure, search
+  `project_agents_archive.md` by heading or phrase. Useful anchors include
+  `PaliGemma SFT From Pretrain`, `ImageNet kNN / Remote Environment Notes`,
+  `valid_tokens_per_sample`, and `llava-ov-1.5-instruct-image-shuffled-v1`.
 
 ## Updating This Index
 
-When adding a new checkout-level agent-memory file:
+When a new checkout or project-family memory appears:
 
-1. Add the project to this index.
-2. If the rule is reusable across projects, add it to the relevant wiki file.
-3. Regenerate or update `project_agents_archive.md` or
-   `external_memory_archive.md` so exact source text remains preserved.
+1. Add the project to the table.
+2. Put reusable operational knowledge in the narrowest topic file.
+3. Preserve exact source text in `project_agents_archive.md` or
+   `external_memory_archive.md` only when the original wording matters.

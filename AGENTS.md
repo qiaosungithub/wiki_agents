@@ -1,100 +1,80 @@
 # Shared Agent Memory
 
-This folder is the cross-repository operational wiki for
-`/kmh-nfs-ssd-us-mount/code/qiao/work`. It is meant to get a new agent oriented
-quickly from one place.
+This folder is the canonical operational memory for
+`/kmh-nfs-ssd-us-mount/code/qiao/work`. The root workspace `AGENTS.md` is only a
+bootstrap pointer into this folder.
 
-Exact snapshots of discovered source `AGENTS.md` files are preserved in
-`project_agents_archive.md`. Exact snapshots of other agent-memory files such
-as `CLAUDE.md`, `NOTES.md`, and `agents_*.md` are preserved in
-`external_memory_archive.md`.
+Use this file as a router. It should stay short. Task-specific rules belong in
+the narrowest topic file listed below, and exact legacy source text belongs only
+in the archive files.
 
-## Quick Start For A New Agent
+## How To Start
 
-1. Read `/kmh-nfs-ssd-us-mount/code/qiao/work/AGENTS.md`.
-2. Read this file.
-3. Read `project_index.md` for the checkout you will edit.
-4. If a project-local `AGENTS.md` still exists, read it before editing that
-   subtree; after the centralization cleanup, absence is expected for many
-   checkouts.
-5. Read the topic guide that matches the task:
-   - TPU status, queue, launch, resume, zombie holders: `tpu.md`
-   - MONITOR internals, xibo state, remote Linux users: `xibo_monitor.md`
-   - VLM/PaliGemma/JAX LLaVA training memory: `vlm_training.md`
-   - Spreadsheet and WandB result logging: `spreadsheet_logging.md`
-   - Long-running experiment loop practices: `research_loop.md`
-   - Remote debug jobs and common JAX/TPU pitfalls: `debug.md`
-   - Shared SSD cleanup: `storage_cleanup.md`
-   - Project checkout index: `project_index.md`
-   - Verbatim legacy memory archive: `project_agents_archive.md`,
-     `external_memory_archive.md`
+1. Read this file.
+2. Use `project_index.md` to identify the checkout or project family.
+3. Read the topic guide for the task before acting.
+4. Read archive files only when you need the old verbatim source text or want to
+   recover context not yet summarized into a topic guide.
 
-## Hard Rules
+## General Hard Rules
 
 - Do not push code changes unless the user explicitly asks for a push in the
   current request.
-- Before editing a project, read that project's local `AGENTS.md` if it exists;
-  otherwise use `project_index.md` plus the relevant topic guide.
-- Avoid cross-region or cross-zone GCS transfer. Prefer run logs, WandB, and
-  spreadsheet metadata over scanning benchmark datasets. If data access is
-  unavoidable, use the same-zone bucket and stop before any cross-region copy or
-  bulk read.
-- For spreadsheet result logging, obey the stop-on-OOD rule in
-  `spreadsheet_logging.md`: new benchmarks, missing/renamed metrics,
-  non-comparable eval settings, discontinuous loss, conflicting existing cells,
-  or any other out-of-distribution behavior means do not write to the sheet;
-  report the anomaly and wait.
-- For TPU work, do not decide ownership or zombie status from `tou` alone. Use
-  manager state, tmux state, and remote process/device-holder state.
-- For shared operational records, preserve exact source details when possible.
-  If a local project rule becomes broadly reusable, add it to the matching
-  `wiki_agents/*.md` topic file and update the exact archive.
-- If the user asks to align or update SFT code from a `tmp` folder, interpret
-  the target as that `tmp` folder unless they explicitly say to modify the
-  current repository.
-- When comparing current code with a stagedir copy such as `../tmp`, ask before
-  making ambiguous cross-repo changes, and keep local repo changes uncommitted
-  unless instructed otherwise.
+- Do not overwrite, revert, or clean up user changes in a dirty worktree unless
+  the user explicitly asks for that exact operation.
+- Avoid cross-region or cross-zone GCS payload movement. Prefer run logs, WandB,
+  sidecar manifests, summaries, and spreadsheet metadata. If payload access is
+  unavoidable, prove the job is running in the same region/zone-family as the
+  bucket before reading or copying data.
+- Before destructive cleanup, identify the filesystem and owner, preserve a
+  manifest when deleting shared data, and use the storage guide.
+- If a task-specific guide defines a hard stop, follow that guide. Examples:
+  spreadsheet out-of-distribution behavior, TPU zombie ownership, and xibo
+  resume safety are not general rules; they live in their topic files.
 
 ## Task Routing
 
 | Task | Read |
 |---|---|
-| Find or claim TPU, check jobs, read logs, handle stale holders | `tpu.md` |
-| Modify local MONITOR queue/resume logic | `xibo_monitor.md`, `project_agents_archive.md` |
-| Modify xibo manager sandbox / remote Linux user support | `xibo_monitor.md`, `project_agents_archive.md`, `external_memory_archive.md` |
-| Edit JAX LLaVA / PaliGemma training code | `vlm_training.md`, `project_agents_archive.md` |
-| Upload VLM datasets or generate visual reports | `vlm_training.md`, `project_agents_archive.md` |
-| Log WandB results into the sheet | `spreadsheet_logging.md`, `vlm_training.md` |
-| Run a long experiment-management loop | `research_loop.md`, project notes/results |
-| Debug on a remote TPU with a toy config | `debug.md`, `tpu.md` |
-| Clean NFS/SSD disk pressure | `storage_cleanup.md` |
-| Understand which checkout has which rules | `project_index.md` |
+| Find/claim TPU, check jobs, inspect logs, diagnose stale holders | `tpu.md` |
+| Modify or diagnose SQA monitor queue dispatch | `xibo_monitor.md`, `xibo_queue.md` |
+| Modify or diagnose xibo resume/rerun/checkpoint-source behavior | `xibo_monitor.md`, `xibo_resume.md` |
+| Work with remote Linux users, xibo locks, or ka sheet compatibility | `xibo_monitor.md` |
+| Edit JAX LLaVA / PaliGemma / VLM training code | `vlm_training.md` |
+| Work on VLM datasets, upload/count/report data, or dataset locality | `vlm_data.md` |
+| Work on VLM checkpointing, dataloader resume, final eval restore | `vlm_checkpointing.md` |
+| Log WandB results into the spreadsheet | `spreadsheet_logging.md`, `spreadsheet_logging_playbook.md` |
+| Run a long experiment-management loop | `research_loop.md` |
+| Run remote TPU debug/smoke jobs | `debug.md`, `tpu.md` |
+| Clean shared SSD, local root/home, Codex WALs, or monitor temp dirs | `storage_cleanup.md` |
+| Understand checkout/project-specific rules | `project_index.md` |
+| Recover exact legacy instructions | `project_agents_archive.md`, `external_memory_archive.md` |
 
-## Current High-Value Memory
+## File Map
 
-- LLaVA-1.5 reproduction tracking, target metrics, SFT data recipe, HSDP memory
-  constraints, stateful dataloader resume, two-stage PaliGemma curriculum, and
-  durable checkpoint conventions are consolidated in `vlm_training.md`.
-- TPU user-facing operations and zombie-holder diagnosis are in `tpu.md`.
-- Low-level queue/resume invariants, alias hygiene, `tou`/`yizhitou` refresh
-  flow, remote Linux user isolation, and xibo lock semantics are in
-  `xibo_monitor.md`.
-- Spreadsheet logging defaults to
-  `PaliGemma-baseline-cleaned-20260608` and must follow the hard stop rule in
-  `spreadsheet_logging.md`.
-- Shared SSD cleanup guidance, including the 2026-06-08/09 staging cleanup
-  incident and safe large-file deletion procedure, is in `storage_cleanup.md`.
-- Non-AGENTS legacy agent memory is archived exactly in
-  `external_memory_archive.md`, including one-benchmark-suite Claude guidance,
-  nnflow_jax Claude guidance, root agent notes, and xibo sandbox mistake notes.
+| File | Purpose |
+|---|---|
+| `project_index.md` | Compact map from checkout names to the docs that matter. |
+| `tpu.md` | User-facing TPU operations and ownership/zombie diagnosis. |
+| `xibo_monitor.md` | Xibo/SQA monitor architecture, active paths, remote users, locks. |
+| `xibo_queue.md` | Queue semantics, TPU selection, `tou` refresh, alias hygiene. |
+| `xibo_resume.md` | Resume/rerun invariants, checkpoint-source logic, recovery incidents. |
+| `vlm_training.md` | VLM training overview, reproduction targets, model/HSDP/curriculum rules. |
+| `vlm_data.md` | VLM dataset recipes, upload/counting rules, region-local data notes. |
+| `vlm_checkpointing.md` | Durable checkpoints, stateful dataloader, checkpoint/eval restore notes. |
+| `spreadsheet_logging.md` | Spreadsheet logging policy and hard-stop rule. |
+| `spreadsheet_logging_playbook.md` | Step-by-step spreadsheet logging workflow. |
+| `research_loop.md` | Long-running experiment loop pattern. |
+| `debug.md` | Remote TPU debug workflow and common JAX/TPU pitfalls. |
+| `storage_cleanup.md` | Shared NFS/SSD and local disk cleanup procedures. |
+| `project_agents_archive.md` | Verbatim archived `AGENTS.md` source snapshots. |
+| `external_memory_archive.md` | Verbatim archived non-AGENTS memory files. |
 
-## Maintenance Checklist
+## Maintenance
 
-When adding or changing shared memory:
-
-1. Put cross-repo operational knowledge in the narrowest topic file here.
-2. Add or update `project_index.md` if a new checkout-level memory file appears.
-3. Update `project_agents_archive.md` or `external_memory_archive.md` when exact
-   source text should be preserved.
-4. Keep this file short; it should remain a routing page, not a history dump.
+- Keep this file as a router, not a history dump.
+- Put new operational knowledge in the narrowest topic file.
+- Keep archives append-only unless regenerating them intentionally from source
+  snapshots.
+- Update `project_index.md` when a new checkout or project family becomes
+  active.

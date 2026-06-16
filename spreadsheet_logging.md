@@ -1,7 +1,9 @@
 # Spreadsheet / WandB Result Logging
 
 Use this guide when the user sends a WandB run name, run link, or log path and
-asks to record benchmark results into the experiment spreadsheet.
+asks to record benchmark results into the experiment spreadsheet. For the
+step-by-step procedure intended for a new agent, read
+`spreadsheet_logging_playbook.md` after this file.
 
 ## Primary Sheet
 
@@ -38,14 +40,16 @@ available, and wait for the user's instruction before any spreadsheet write.
 
 ## Normal Logging Workflow
 
-1. Read `wiki_agents/AGENTS.md`, this file, and the relevant project-local
-   `AGENTS.md`.
+1. Read `wiki_agents/AGENTS.md`, this file, and
+   `spreadsheet_logging_playbook.md`.
 2. Identify the target spreadsheet tab and row before writing.
    - Default to the cleaned tab, not the legacy source tab.
    - Insert results into the comparable experiment block rather than appending
      to the end. For pretrain+SFT pairs in the PaliGemma ablation block, use
      two adjacent rows: the pretrain run row first, then the SFT run row.
-3. Pull metrics from WandB/logs only; avoid reading benchmark datasets.
+3. Pull metrics from WandB/logs only; avoid reading benchmark datasets. If VLM
+   data or checkpoint locality matters, read `vlm_data.md` and
+   `vlm_checkpointing.md`.
 4. Normalize metric names to the sheet columns. For the current VLM table:
    `MME-P / MME-S`, `VQAv2`, `TextVQA`, `RefCOCOg`, `MMBench`,
    `POPE (adv F1)`, `ImageNet KNN`, `VStar`, `OCRBench`, `MMVP`,

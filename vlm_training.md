@@ -1,17 +1,25 @@
-# VLM Training Memory
+# VLM Training Overview
 
-Shared memory for JAX LLaVA, PaliGemma-baseline, Beifen dataset operations, and related VLM reproduction work. Project-local `AGENTS.md` files remain authoritative for edits inside a checkout.
+Shared training memory for JAX LLaVA, PaliGemma-baseline,
+`beifen-Paligemma`, and related VLM reproduction work.
+
+This file is the training overview. Put dataset/upload/counting details in
+`vlm_data.md`; put checkpoints, stateful dataloader resume, and final-eval
+restore details in `vlm_checkpointing.md`.
 
 ## Read Order
 
 When working on VLM training code:
 
-1. Read this shared memory.
-2. Read the project-local `AGENTS.md` in the checkout you are editing.
-3. For TPU launch/resume work, also read `tpu.md` and `xibo_monitor.md`.
-4. For result logging, also read `spreadsheet_logging.md`.
+1. Read this file.
+2. Read `vlm_data.md` for dataset recipes or region-local data rules.
+3. Read `vlm_checkpointing.md` for checkpoint/resume/eval-only work.
+4. For TPU launch/resume work, read `tpu.md`, `xibo_queue.md`, and
+   `xibo_resume.md`.
+5. For result logging, read `spreadsheet_logging.md` and
+   `spreadsheet_logging_playbook.md`.
 
-The exact project-local source snapshots are preserved in
+Exact legacy project-local snapshots are preserved in
 `project_agents_archive.md`.
 
 ## Active LLaVA-1.5 Reproduction Tracking
@@ -42,55 +50,7 @@ The exact project-local source snapshots are preserved in
   stage 1 median `5.63` steps/s all points (`5.69` filtered >2 steps/s);
   stage 2 median `3.91` steps/s all points (`3.94` filtered >2 steps/s).
 
-## Durable Pretrained Checkpoint Convention
-
-- Shell helper `ltgcp <absolute_local_logdir>` maps `ltg(local_logdir)` from
-  `gs://<regional-bucket>/qiao_zhicheng_hanhong_files/...` to
-  `gs://<same-regional-bucket>/pretrained-ckpts/qiao_zhicheng_hanhong_files/...`
-  and copies recursively.
-- Buckets under `pretrained-ckpts/` are treated as durable and should not be
-  cleaned with ordinary run logs. When a training job successfully finishes,
-  mirror the latest final `checkpoint_<step>` into the same bucket's
-  `pretrained-ckpts/qiao_zhicheng_hanhong_files/...` prefix.
-- `jax_llava` and `beifen-Paligemma` checkpoint loaders should resolve
-  `load_from_pretrained` params-only restores by first checking the normal
-  zone-local bucket path, then the same-zone `pretrained-ckpts` fallback.
-- xibo launch should preflight finetune configs with `load_from_pretrained`:
-  if the normal target-zone checkpoint and same-zone pretrained checkpoint are
-  both missing, but another zone has the pretrained copy, copy latest
-  `checkpoint_<step>` from pretrained to pretrained before starting the job.
-
-## SFT Dataset Loader Notes
-
-- Stage-2/SFT mixes use shuffled image-level LLaVA-OV1.5 plus VQAv2, OKVQA,
-  A-OKVQA, OCRVQA, GQA, TextCaps, Visual Genome QA, Visual Genome detection,
-  and RefCOCO.
-- Dataset aliases for the four LLaVA-1.5 missing SFT datasets are registered in
-  `utils/data_util.py` as `okvqa-train`, `aokvqa-train`, `ocrvqa-train`, and
-  `refcoco-train`.
-- OKVQA and OCRVQA use the short-answer VQA prompt:
-  `Answer the question using a single word or phrase.`
-- A-OKVQA expands each grouped QA into four cyclic multiple-choice rotations;
-  the target is the correct option letter. This preserves the LLaVA-1.5
-  reported ~66K A-OKVQA SFT scale.
-- OCRVQA is uploaded as the full 801K-QA train split, but the SFT recipe samples
-  it near the LLaVA-1.5 ~80K scale through mix weights.
-- RefCOCO stores COCO absolute `xywh` boxes and grouped refs per image. Training
-  expands one phrase-to-box item per ref and formats targets as `<loc....>`
-  tokens using the same `format_detection_prompt()` used by RefCOCOg eval.
-- Grounded detection training and RefCOCOg eval share this instruction:
-  `Locate the region described by this phrase: ...` followed by
-  `Output exactly four location tokens, indicating up, left, down, right.`
-- `configs/finetune_config.yml` samples 10 Visual Genome detection regions per
-  image via `dataset.genome_det_regions_per_image: 10`.
-- Online VQAv2 eval may be capped at 10% with
-  `eval.online_vqav2_sample_fraction = 0.1`; final eval uses the configured full
-  `eval.vqav2_num_samples` unless explicitly overridden.
-- MMBench uses `eval.mmbench_max_txt_len=512` and shortens hints/questions/options
-  structurally before raw truncation so answer choices and the final option-letter
-  instruction survive.
-
-## HSDP / PJIT / Memory Rules
+## HSDP / PJIT / Model Rules
 
 - `model.prompt_causal` defaults to `True`: image prefix tokens are
   bidirectional while prompt/text tokens remain causal.
@@ -114,35 +74,27 @@ The exact project-local source snapshots are preserved in
 - `LlavaGemma.generate_beam_search(...)` is cumulative-logprob beam search, not
   a greedy alias. It keeps EOS beams alive and decodes only the last prompt
   hidden state during prefill to avoid `[B, prompt_len, vocab]` logits.
-
-## Stateful Dataloader Resume
-
-- Enable with `dataset.stateful_dataloader: True`; current JAX LLaVA remote
-  config enables it by default.
-- Requires `torchdata==0.8.0`. Missing `torchdata.stateful_dataloader` should
-  fail fast.
-- Sidecars are written beside model checkpoints at
-  `checkpoint_<step>/dataloader_state/process_<rank>.pkl`.
-- Exact restore is valid only for the same process count, process-local batch
-  size, worker count, prefetch factor, data roots/types, mix weights, seed
-  offset, and topology.
-- Stateful resume serializes WebDataset cursors, shuffle buffers, RandomMix
-  state, worker RNGs, and topology metadata. Buffer entries use `(url, key)`
-  references rather than raw image bytes and hydrate by searching the same-zone
-  shard on restore.
-- Normal `load_from` resume folds checkpoint step into `dataset.data_seed_offset`.
-  `load_from_pretrained` is params-only and starts with `step_offset=0`.
-- GCS training roots must match `config.zone` before glob/listing or WebDataset
-  reads; mismatches raise immediately to prevent cross-region transfer.
-- Missing/inaccessible WebDataset paths are fatal. Do not replace these guards
-  with retry loops around nonexistent buckets or paths.
+- Late-fusion `txt_feature_layer>0` can be slow under HSDP if the text-prefix LM
+  blocks are frozen but their outputs still receive gradients. The active fix is
+  `model.stop_gradient_text_features=None` auto-inferred to true when the
+  text-prefix side is frozen, so the frozen text-only prefix is treated as a
+  fixed feature while image/connector gradients through the later full-sequence
+  LM blocks remain intact. Set it explicitly false only if intentionally training
+  through that text-prefix path, for example loc embedding experiments.
 
 ## PaliGemma / Two-Stage Curriculum
 
 - The active remote entry is `main.py --config=configs/load_config.py:remote_run`,
   backed by `configs/remote_run_config.yml`.
-- `qsqa <dir>` stages the current working tree and queues through MONITOR. Patch
+- `qsqa` stages the current working tree and queues through MONITOR, now
+  auto-selecting the first free xibo working-dir id in `2..99`. Use
+  `qsqa dir=<dir>` or `qsqa <dir>` only when a specific id is required. Patch
   `remote_run_config.yml` to the exact variant before each queue call.
+- When writing or editing `logging.wandb_notes`, preserve the monitor cost-class
+  tokens from the source run. For low-cost VLM jobs this often means keeping
+  `MAE-B`, `jit`, `unify-base`, or `llava-1.5 reproduction`; otherwise queue may
+  classify the job as high-cost and wait for `v6e-64` / `v5p-128` instead of
+  using `v6e-32` / `v5p-64`.
 - As of 2026-06-08, the runnable baseline is
   `training.curriculum: pretrain_sft_two_stage`.
 - Stage 1 is a 150K-step 512-resolution pretrain mix with `laion-aes`, `cc12m`,
@@ -168,41 +120,28 @@ The exact project-local source snapshots are preserved in
 - The stage boundary checkpoint must be saved even when the stage length is not
   divisible by `checkpoint_per_step`.
 
-## Pretrain Efficiency Notes
+## Curriculum Implementation Fixes
 
-- On 2026-06-10, CC12M text length was sampled from same-zone GCS shards. With
-  Gemma3 tokenizer and actual caption prompt sampler, mean was 94.71 tokens,
-  median 96, p75 124, p90 148, p95 162, p99 229, max 410.
-- Truncation at 64 tokens affects 69.67% of sampled examples and retains 61.09%
-  of tokens; 128 affects 20.73% and retains 93.61%; 160 affects 5.73% and
-  retains 97.73%; 256 affects 0.47% and retains 99.77%.
-- Recommendation: do not use stage-1 `max_txt_length=64` when CC12M has
-  meaningful weight. `128` is a reasonable speed/coverage tradeoff, while `160`
-  preserves nearly all sampled text.
-- Perception Encoder scale should be recorded as samples/examples seen, not
-  unique dataset size and not text tokens. The paper reports 58B samples seen
-  for B/L and 86B for G over repeated long schedules.
-
-## Beifen Dataset Operations
-
-- Never move dataset payloads across regions. Upload/report jobs should run on a
-  TPU VM in the same region/zone family as the target bucket.
-- Bucket convention: `gs://kmh-gcp-${ZONE_SHORT}/data`, where `ZONE_SHORT` is
-  derived from the VM zone.
-- Keep download/cache/staging under `/dev/shm`; do not stage images on NFS, SSD,
-  or home directories.
-- Upload datasets as tar shards only, not scattered single-image files.
-- For datasets with multiple questions/refs per image, store one image record
-  with grouped `qas` or `refs`.
-- `upload_vlm_sft_missing.sh` and `VLM-SFT-Missing-upload.py` upload OKVQA,
-  A-OKVQA, OCRVQA, and RefCOCO. The launcher enforces same-region bucket prefixes
-  and `/dev/shm` cache roots.
-- Verified upload counts per region:
-  OKVQA train `8,998` image records / `9,009` QA / 5 shards;
-  A-OKVQA train `16,540` image records / `17,056` QA / 9 shards;
-  OCRVQA train `166,022` image records / `801,579` QA / 84 shards;
-  RefCOCO train `16,994` image records / `42,404` refs / 9 shards.
-- Visual sanity reports use `run_vlm_data_visual_report.sh` and
-  `VLM-Data-Visual-Report.py`; current us-central1 report is
-  `reports/vlm_data_visual_report_us-central1_20260531T205902Z.html` and covers
-  32 dataset entries with 3/3 samples and no warnings.
+- 2026-06-12 locked-config fix: every key in the curriculum stage override
+  allowlist must be predeclared in `configs/default.py` before absl locks the
+  config. Missing defaults such as `training.siglip_warmup_steps` cause
+  `_build_curriculum_stage_config` to raise `KeyError` before training starts.
+  `beifen-Paligemma` and `PaliGemma-baseline` now declare no-op defaults for the
+  stage-only fields and baseline uses `with dataset_config.unlocked()` plus
+  explicit `del` instead of unsupported `ConfigDict.pop()`.
+- 2026-06-15 wandb logging fix: window 7692 failed after restore/compile during
+  `write_texts(... stage2_vis_samples ...)` because the wandb async service
+  raised `AssertionError` inside `wandb.log`. This is a logging robustness issue,
+  not a checkpoint/dataloader/JAX failure. `../jax_llava` and
+  `../beifen-Paligemma` now wrap wandb init/config/log/finish calls so failures
+  emit `[WARNING] wandb ... failed; training will continue`. Text logging falls
+  back to `output.log`; image logging falls back to local PNG files.
+- 2026-06-15 speed baseline: do not compare stage-1 projector pretrain speed
+  with stage-2 visual-instruction SFT speed. In the
+  `stage2_visual_instruction_sft` v5p-64 HSDP/JIT jobs with `batch_size=512`,
+  `freeze_image_encoder=true`, `freeze_lm=false`, and shuffled OV1.5 SFT data,
+  steady training is about `1.6 steps/s` around steps 2300-2400. The parent
+  20260614 run logged stage-1 projector pretrain around `4.0-4.4 steps/s`, but
+  its stage-2 SFT logged `1.60-1.62 steps/s` at 2300-2400. Window 7703's
+  `1.63 steps/s` is therefore normal for that stage; its bug was the checkpoint
+  save failure, not input throughput.

@@ -2,7 +2,10 @@
 
 Generated on 2026-06-11 from AGENTS.md files under `/kmh-nfs-ssd-us-mount/code/qiao/work`.
 
-This archive preserves source agent instructions verbatim for cross-repo memory. Project-local `AGENTS.md` files remain authoritative when editing inside that project.
+This archive preserves source agent instructions verbatim for cross-repo memory.
+Many scattered project-local `AGENTS.md` files were later removed after their
+content was centralized into topic guides. Treat this file as an exact historical
+archive, not as the primary starting point.
 
 
 ---
@@ -2298,4 +2301,3 @@ To release a stuck lock by hand: `tpu rl/unlock <code|data|queue|legacy|apply>`.
   back up `data.json` first.
 - "Debug a stuck lock" → `tpu rl <type>` from the CLI, or edit
   `lock.json` and set the offending `status` to `false`.
-

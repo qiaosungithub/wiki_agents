@@ -217,6 +217,7 @@ Spot TPUs can be preempted. The auto-resume script handles this automatically:
 ```
 
 **Do not modify the resume logic** and **do not manually relaunch** preempted jobs — the monitor will do it.
+For monitor implementation details, read `xibo_resume.md` and `xibo_queue.md`.
 
 When `MONITOR.py` sees an error job whose old TPU still exists but `tou` reports
 it as BUSY, it logs `按卡没了处理` and reruns/resumes the job on another TPU. That
