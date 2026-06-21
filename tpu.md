@@ -1,131 +1,116 @@
-# TPU Management Guide
+# TPU Operations Guide
 
-## Infrastructure overview
+TPU jobs are scheduled, launched, monitored, and resumed by **`unified_infra`** (see
+`infra_overview.md`, `infra_scheduling.md`, `infra_resume.md`). This file covers the
+**user-facing day-to-day**: checking jobs and logs through `infra`, finding/holding
+cards, diagnosing stale "zombie" holders, and the **legacy `tpu` (xibo) commands that
+are still worth using** for a few specific tasks.
 
-TPU jobs run on Google Cloud TPUs managed via the `xibo_tpu_manager` system. Jobs are tracked in a Google Spreadsheet and a local `data.json`.
+The old `xibo_tpu_manager` + `tpu_manager/MONITOR.py` no longer schedule or resume
+jobs. Do **not** use `tpu run` / `tpu resume` / `tpu rerun` / `qsqa` / `data.json`
+to manage jobs — use `infra`. A handful of legacy `tpu` subcommands remain the best
+tool for their job and are listed under "Legacy `tpu` commands" below.
 
-Key paths:
-- TPU manager: `/home/jzc/zhichengjiang/working/xibo_tpu_manager/`
-- Python binary: `/kmh-nfs-ssd-us-mount/code/hanhong/miniforge3/bin/python`
-- Shorthand alias: `tpu` = `<python> <manager>/tpu.py`
+## Quick Reference (new infra)
 
----
+Mutating commands need `export INFRA_DAEMON_URL=http://10.130.0.83:8765` (already in
+`.bash_aliases`). Read-only commands need nothing.
 
-## Finding available TPUs
+```bash
+infra check                  # rich status of YOUR jobs (alias: ics)
+infra list                   # flat list
+infra info <job_id>          # placement, stage_dir, output.log, dispatch log,
+                             #   nodes (checkpoint trail), dead_runs (failed attempts)
+infra logs <job_id> [-f]     # tail output.log   (cl/gl/tl aliases also work)
+infra queue --types=… --regions=… -- main.py --config=…   # launch (see infra_scheduling.md)
+infra debug --types=v5p-64 --minutes=60                   # reserve a card, run nothing
+infra kill <job_id>          # stop a running/reserved job
+infra cancel <job_id>        # remove a pending job
+infra clean [ids…]           # forget terminal job-chains
+```
+
+Shell helpers (`.bash_aliases`): `ics` = `infra check`; `ka` opens
+`jobs.json`+`pool.json`; `cl <id>` opens that job's `output.log`; `gl <id>` prints
+its path; `tl <id>` tails it; `gest <id>` prints its `stage_dir`. `<id>` is a full
+8-char hex id or a unique prefix.
+
+## Finding Available TPUs (`tou`)
+
+`tou` (interactive alias for `wrap_master.py`) shows live TPU visibility — zone,
+IDLE/BUSY, and holder Linux users:
 
 ```bash
 python /kmh-nfs-ssd-us-mount/code/qiao/work/tpu_dls/wrap_master.py
 ```
 
-Look for `[IDLE]` entries. Only use **v5p ≤ 64 chips** or **v6e ≤ 32 chips**.
+By default it prints cached audit records from
+`/kmh-nfs-ssd-us-mount/code/qiao/work/tpu_dls/.tpu_audit_records.json`. Use
+`--cache false` to force a fresh audit (SSHes to each TPU and runs
+`sudo lsof -t /dev/accel* /dev/vfio/*`). In non-interactive shells, run the python
+command directly.
 
-`tou` is only an interactive shell alias from `/home/sqa/.bashrc`:
+Caveats:
 
-```bash
-python /kmh-nfs-ssd-us-mount/code/qiao/work/tpu_dls/wrap_master.py
-```
+- `users=[…]` are the **remote Linux users** holding accelerator devices, not
+  necessarily the experiment owner. Under unified_infra, each job runs as its own
+  remote Linux account (`job.user`), so the holder usually *is* the owner; older
+  shared-tooling jobs often ran as remote user `sqa`.
+- IDLE alone is **not** proof a card is free — a freshly created job can look IDLE
+  before worker processes appear. The daemon also re-checks reservations and
+  environment before launch.
+- Capacity comes from the 申卡 allocator (`tpu_request_manager`) + the idle sweep,
+  not from you hand-picking cards. To grab a card for **interactive** work, use
+  `infra debug` rather than manually claiming one.
 
-In non-interactive shells, run the Python command directly. By default it prints
-cached audit records from:
-
-```bash
-/kmh-nfs-ssd-us-mount/code/qiao/work/tpu_dls/.tpu_audit_records.json
-```
-
-Use `--cache false` to force a fresh audit. A fresh audit SSHes to each TPU and
-checks accelerator holders with:
-
-```bash
-sudo lsof -t /dev/accel* /dev/vfio/*
-```
-
-The `users=[...]` shown by `tou` are remote Linux users that hold accelerator
-devices. They are not necessarily the real experiment owner. In particular, many
-jobs launched through shared tooling run as remote user `sqa`.
-
----
-
-## Claiming and launching a job
+## Reading Logs
 
 ```bash
-# 1. Claim the TPU (creates a lock so others don't take it)
-tpu zhan <full_tpu_name> <user>
-
-# 2. Launch the job (stages code, SSHes in, runs training)
-tpu run <full_tpu_name> <user> dir=<N> [--config.key=value ...]
+infra logs <job_id>           # tail output.log
+infra logs <job_id> -f        # follow
+infra logs <job_id> --what dispatch -f   # the mount/zhan/launch (dispatch) log
+cl <job_id>                   # open output.log in the editor
+gl <job_id>                   # print the output.log path
+grep -E "eval_accuracy|eval epoch|Error|Traceback|saved to" "$(gl <job_id>)" | tail -20
 ```
 
-- `dir=N` selects which project directory to use (check with `tpu ls <user>`).
-- Code is rsynced from the current working directory to a timestamped staging dir at launch. Always be on the right branch before launching.
-- To bypass the "maybe dead job" confirmation prompt: add `-f` flag to `tpu run`.
-- `tpu run` also accepts `--config.*` overrides passed through to the training script.
+Logs live at `/kmh-nfs-ssd-us-mount/logs/<user>/<taskname>/<ts>_<salt>_<vm>_<zone>__…/output.log`.
+`infra info <job_id>` also prints `dead_runs` lines pointing at the `output.log` of
+each **previous failed attempt** — use those to debug a job that resumed past a crash.
 
-Shorthand (defined in `~/.bash_aliases`):
-```bash
-ftmd <full_name> <alias>   # = tpu zhan + tpu fang + tmd (mount disk)
-```
+### Reading job status correctly
 
----
+- `infra check` is the authoritative live view. One row per job-chain; the `RST`
+  column is `restarts·lastCkptStep`.
+- A "could not open log file" note on a card is not by itself failure — confirm the
+  job is training by grepping the log for recent step counts.
+- Checkpoint-save output (orbax messages) can look like errors in naive scanners.
+  Always read the actual log before concluding a job failed; rely on the daemon's
+  `classify.py` decision (see `infra_resume.md`), not a bare "Traceback" match.
 
-## Monitoring jobs
+## Diagnosing Stale / Zombie TPU Holders
 
-```bash
-tpu check <user>           # show all job statuses (alias: tcs = tpu check sqa)
-tpu monitor <user> col=2   # live monitor (alias: tms)
-```
+A "zombie" = a remote process still holding the accelerator while no live job owns
+it. Do not decide from `tou` alone. Confirm all three signals:
 
-### Attributing `sqa` TPU occupancy
+1. **Infra state:** `infra check` / `infra info` shows no active job for that exact
+   TPU. (For any leftover legacy jobs, the old `data.json` is history, not an owner.)
+2. **Window state:** no live tmux window on the infra host launched that process.
+3. **Remote state:** `sudo lsof -t /dev/accel* /dev/vfio/*` still finds Python
+   processes whose `ps` cmdline points at an old `--workdir=…`, often `PPID=1`, stale
+   log mtime, no matching live job.
 
-When `tou` reports `users=['sqa']`, identify the real owner in this order:
-
-For a full report across all currently `sqa`-held TPUs, use:
-
-```bash
-detect_zombie
-```
-
-This alias runs:
+For a full report across `sqa`-held TPUs, the legacy helper still works:
 
 ```bash
-python /kmh-nfs-ssd-us-mount/code/qiao/work/tpu_manager/detect_zombie.py
+detect_zombie            # = python tpu_manager/detect_zombie.py  (--refresh / --no-bell)
 ```
 
-The script uses `tou`'s shared cache, refreshes it if it is stale, SSHes to every
-BUSY TPU whose remote holders include Linux user `sqa`, reads the real
-accelerator-holding processes, extracts `--workdir=...`, and correlates that
-logdir with xibo `data.json` plus local tmux windows. If `tou` refresh times out,
-it falls back to the existing cache and marks stale selections with fresh remote
-probe states such as `NOT_SQA`. Use `detect_zombie --refresh` when you explicitly
-want to force a full `tou` refresh first.
+It refreshes the `tou` cache, SSHes to BUSY TPUs whose holders include Linux user
+`sqa`, reads the real accelerator-holding processes, extracts `--workdir=…`, and
+correlates with manager/tmux state. Treat its `data.json` correlation as **legacy**;
+cross-check against `infra info` for unified_infra jobs.
 
-The text report intentionally hides the remote `users=['sqa']` detail and prints
-the inferred real owner as `holder=<user>`; different holders are colorized in
-interactive output. Use `--no-color` for plain text output. By default the
-command emits a terminal bell when the report finishes; use `--no-bell` to
-disable it.
-
-Output states:
-
-| State | Meaning |
-|-------|---------|
-| `LIVE` | Remote holder matches an active xibo job/window. |
-| `ZOMBIE` | Remote holder matches only inactive/superseded manager state. |
-| `ZOMBIE?` | No `data.json` match and the local log is stale; likely orphaned, but verify before killing. |
-| `UNKNOWN` | No `data.json` match, but the log is recent or unavailable. |
-| `NOT_SQA` | `tou` cache selected the TPU, but a fresh remote probe shows the holder is no longer `sqa`. |
-
-1. Match the TPU name or logdir against xibo manager state:
-
-```bash
-jq -r '.users | to_entries[] as $u
-  | $u.value.job_data[]?
-  | select(.tpu=="kmh-tpuvm-...")
-  | [$u.key,.windows_id,.status,.job_tags,.log_dir] | @tsv' \
-  /kmh-nfs-ssd-us-mount/code/zhichengjiang/working/xibo_tpu_manager/data.json
-```
-
-2. If manager status looks stale, SSH to the TPU and inspect the actual process
-holding the accelerator:
+To inspect a TPU's real holders directly:
 
 ```bash
 gcloud compute tpus tpu-vm ssh <tpu> --zone <zone> --worker=all --ssh-flag=-n \
@@ -136,131 +121,41 @@ gcloud compute tpus tpu-vm ssh <tpu> --zone <zone> --worker=all --ssh-flag=-n \
     done'
 ```
 
-3. Map `--workdir=...` or the process cwd back to the owner. Common patterns:
+Only call it a zombie when the remote holder is real **and** the infra/tmux owner is
+gone or superseded. If the log is still moving and a matching active job exists, it
+is a live job even if a scanner prints "Error".
 
-| Path pattern | Real owner signal |
-|--------------|-------------------|
-| `/kmh-nfs-ssd-us-mount/logs/sqa/text-jit/...` | usually `bird` via xibo `data.json` |
-| `/kmh-nfs-ssd-us-mount/logs/sqa/sqa_Flow_matching/...` | often `cyx` or `yinuo`; check `data.json` |
-| `/kmh-nfs-ssd-us-mount/logs/sqa/yinuo_clip/...` | `yinuo` |
-| `/kmh-nfs-ssd-us-mount/logs/sqa/paligemma-baseline/...` | `sqa` unless another xibo user owns the matching window |
-| `/kmh-nfs-ssd-us-mount/logs/jzc/xibo_manager_for_agents/...` | `jzc` agent infra, not xibo `data.json` |
+## Legacy `tpu` Commands (still useful)
 
-If `data.json` says `finished` or `error` but `lsof` still shows Python
-processes, treat it as a stale or orphaned accelerator holder until the owner
-confirms whether it should be killed.
+These xibo `tpu` subcommands are **kept** because they remain the most convenient
+tool. `tpu` is aliased to the xibo `tpu.py`. Do **not** use them for scheduling or
+resume — only for the specific tasks below.
 
-Status meanings:
-- `Compiling` — JAX compilation in progress (normal, takes a few minutes)
-- `Running` / `Unknown` — training in progress
-- `Error` — may be a real crash OR a false positive from checkpoint-save log output
+- **`tpu cc …`** — cross-region checkpoint copy. Still the helper for copying a final
+  `checkpoint_<step>` to all allowed eval regions before an eval-only run (see
+  `vlm_checkpointing.md` / `infra_resume.md`).
+- **`tpu mount-disk <name> [--force]`** — manually mount the NFS disk + zone-local
+  env wheels on a card. Infra does this automatically at dispatch; use it for ad-hoc
+  work on a card you reserved yourself (e.g. a hand-run remote debug). Require both
+  the `.disk_mounted` marker **and** `mountpoint -q /kmh-nfs-ssd-us-mount`; put
+  `--force` after the name.
+- **`tpu kill-remote <tpu> [remote_user=<user>]`** — kill stale remote processes on a
+  VM. Bare `tpu kill-remote <tpu>` is an all-user kill; scope it with
+  `remote_user=<user>`. Kill only matching process PIDs and device-holder PIDs; do
+  **not** kill PPIDs (many workers have PPID 1).
+- **`tpu zhan <tpu> <user>`** — manually write a reservation lock. Prefer `infra
+  debug` for interactive holds; use `zhan` only for one-off manual coordination.
+  Remember infra honors foreign (non-`unified`) locks and will refuse a card you
+  hold under your own name (see `infra_overview.md`).
 
-**Always verify "Error" status** by reading the actual log file before taking action. Checkpoint saves print orbax messages that `tpu check` misclassifies as errors.
+## Handling Preemptions
 
----
+Spot TPUs get preempted. **The daemon auto-resumes** — do not manually relaunch a
+preempted job. A resumable failure puts the same job back to PENDING and it
+re-dispatches onto the next matching card, restoring from its last checkpoint (see
+`infra_resume.md`). Only intervene to:
 
-## Reading logs
-
-```bash
-# Get the log directory for a given tmux window ID
-python /kmh-nfs-ssd-us-mount/code/qiao/work/tpu_manager/see_log.py <window_id>
-
-# Then grep for eval results or errors
-grep -E "eval_accuracy|eval epoch|Error|Traceback" <logdir>/output.log | tail -20
-```
-
-Logs live at `/kmh-nfs-ssd-us-mount/logs/<user>/<taskname>/<timestamp>_<tpu>_<zone>__<tags>/output.log`.
-
----
-
-## Registering a new TPU
-
-Use `register_tpu_and_write_spreadsheet` to register a new machine in both `data.json` and the Google Spreadsheet simultaneously:
-
-```bash
-python -c "
-import sys
-sys.path.insert(0, '/home/jzc/zhichengjiang/working/xibo_tpu_manager')
-from utils.logger import register_tpu_and_write_spreadsheet
-register_tpu_and_write_spreadsheet(
-    full_name='kmh-tpuvm-v6e-8-spot-gzy-XXXXXX',
-    zone='us-east5-b',          # or asia-northeast1-b
-    pre=False,
-    spot=True,
-    tpu_alias='v6e-8-tmp53',    # with 'e' — used in tpu run commands
-    spreadsheet_name='v6-8-tmp53'  # without 'e' — written to spreadsheet column B
-)
-"
-```
-
-**Do NOT use `tpu register` (interactive)** — it only writes `data.json`, not the spreadsheet. `tpu run` will fail with "not found in sheet" if the spreadsheet entry is missing.
-
-### Alias naming convention
-
-The alias number range encodes the zone:
-
-| Zone | v6e-8 alias range | Example |
-|------|-------------------|---------|
-| asia-northeast1-b | `v6e-8-tmp201+` / `v6-8-tmp201+` | v6e-8-tmp201 |
-| us-east5-b | `v6e-8-tmp51+` / `v6-8-tmp51+` | v6e-8-tmp51 |
-
-Always check the zone of the machine before picking an alias number. Grep `data.json` to find the next free number in the correct range.
-
----
-
-## Handling preemptions
-
-Spot TPUs can be preempted. The auto-resume script handles this automatically:
-
-```
-/kmh-nfs-ssd-us-mount/code/qiao/work/tpu_manager/MONITOR.py
-```
-
-**Do not modify the resume logic** and **do not manually relaunch** preempted jobs — the monitor will do it.
-For monitor implementation details, read `xibo_resume.md` and `xibo_queue.md`.
-
-When `MONITOR.py` sees an error job whose old TPU still exists but `tou` reports
-it as BUSY, it logs `按卡没了处理` and reruns/resumes the job on another TPU. That
-path does not kill the old TPU's remote Python processes. The `tpu resume` /
-`tpu rerun` command kills processes on the new target TPU before launch, but it
-does not clean the previous TPU after the replacement job has been created.
-
-If `tou` still shows the old TPU busy after a rerun, verify the holder with
-`lsof`/`ps` first. If it is a stale orphan from the old job, release the remote
-device with:
-
-```bash
-tpu kill-remote <full_tpu_name>
-```
-
-`tpu clean <user>` and `tmux kill-window` clean local manager/tmux state; they do
-not guarantee that orphaned remote `main.py` or `pt_data_worker` processes are
-gone.
-
-### Judging zombie TPU holders
-
-Do not decide from `tou` alone. A faithful zombie judgement needs all three
-signals:
-
-1. Manager state: `tpu check <user>` or `data.json` has no active, current job
-for the exact TPU/logdir. Old statuses such as `finished`, `killed`, `rerunned`,
-`resumed`, or `error` with a newer child are not active owners.
-2. Tmux state: the recorded local tmux window is gone, or the only remaining
-window is not the one that launched the remote process.
-3. Remote state: `sudo lsof -t /dev/accel* /dev/vfio/*` still finds Python
-processes whose `ps` command line points at an old `--workdir=...` logdir, often
-with `PPID=1`, stale log mtime, and no matching live window.
-
-Only call it a zombie when the remote holder is real but the manager/tmux owner
-is gone or superseded. If the log is still moving and there is a matching active
-window/job, it is a live job even if `tpu check` prints `Error` or `Unknown`.
-
----
-
-## Closing stale windows
-
-After a job errors and is relaunched in a new window, clean up the old window:
-
-```bash
-tmux kill-window -t <user>:<window_id>
-```
+- Stop a job whose **bug** you want to fix: `infra kill <id>` (running) or
+  `infra cancel <id>` (pending), fix, then `infra queue` again.
+- Clean a **confirmed zombie** remote holder the daemon's teardown couldn't reach:
+  `tpu kill-remote <tpu> remote_user=<user>` after verifying with `lsof`/`ps`.

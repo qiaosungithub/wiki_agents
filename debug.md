@@ -2,7 +2,17 @@
 
 ## Overview
 
-Remote debugging runs your code on a TPU VM using a minimal toy config. The pipeline is:
+Remote debugging runs your code on a TPU VM using a minimal toy config.
+
+**Getting a card to debug on (unified_infra):** use `infra debug --types=v5p-64
+--minutes=60` to reserve a matching card, mount the disk, and open an idle tmux
+window in your staged code on the infra host (see `infra_scheduling.md`). Attach
+with `tmux attach -t infra` and run your commands there. Debug reservations never
+resume and auto-release when the window closes or the time expires. This replaces
+hand-claiming a card with `tpu zhan`.
+
+Once you have a card (via `infra debug`, or one you reserved/mounted yourself with
+`tpu mount-disk`), the in-VM smoke-run pipeline is:
 
 1. `ka.sh` — select the target VM and infer its zone
 2. `debug_remote.sh` — stage code, clear old state, SSH in, and run
@@ -131,3 +141,19 @@ tail -f $LOGDIR/output.log | grep -E "Error|Traceback|step=|acc=|score="
 ```
 
 If the VM is preempted, SSH will fail with exit code 255 or messages like `ABORTED` / `resource not found`. Re-claim the VM and rerun.
+
+## Recent Remote Smoke Records
+
+- 2026-06-20 `PaliGemma-baseline` HSDP sync smoke passed on
+  `kmh-tpuvm-v5p-64-spot-keya-t2agk7` in `us-central1-a` after
+  `tpu.py mount-disk ... --force` installed the zone-local env wheel
+  (`jax 0.6.2`, `wandb 0.27.2`, `promise`). The smoke used
+  `bash debug_remote.sh kmh-tpuvm-v5p-64-spot-keya-t2agk7 us-central1-a`.
+  Fresh run trained stage 1 to `checkpoint_1`, stage 2 to `checkpoint_2`, and
+  wrote 8 dataloader sidecars. Resume run restored `checkpoint_2` fully, trained
+  to `checkpoint_3`, ran tiny VQAv2 final eval, and wrote 8 dataloader sidecars.
+  The same-zone us-central1 TPU/bucket/data path was used; no cross-region data
+  transfer was needed.
+- Before remote debug, do not trust `READY/HEALTHY` alone. Check all workers for
+  `/dev/vfio/0` users and `/tmp/libtpu_lockfile`, and verify JAX imports. Some
+  READY TPUs are held by another user or have a stale lock/process.

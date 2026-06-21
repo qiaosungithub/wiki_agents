@@ -86,10 +86,26 @@ If the user gives a name such as `swift-durian-55`, search the expected project
 first. If there are multiple matches, compare notes, config, timestamps, and
 tmux/output logs before writing.
 
-### Window ID
+### Job identifier (infra id vs legacy window id)
 
-When the user says `window 7620` or just `7620`, they usually mean a tmux
-window in the `sqa` tmux session that was created by the TPU manager.
+A user-referenced run id is one of two kinds:
+
+- **unified_infra job id** — an **8-char hex** (e.g. `a2056e02`) or a unique prefix.
+  This is the current system. Resolve it with `infra info <id>` (status, `stage_dir`,
+  `output.log`, `nodes`, `dead_runs`) and `infra logs <id>` / `cl <id>`. The
+  `dead_runs` entries point at the `output.log` of each prior attempt, useful when a
+  run resumed past a crash.
+- **legacy xibo window id** — a **4-digit number** (e.g. `7620`), a tmux window in
+  the old `sqa` session created by the TPU manager. Use this path only for historical
+  runs that predate unified_infra.
+
+If unsure which kind, an 8-char hex is an infra job; a bare 4-digit number is a
+legacy window.
+
+### Legacy Window ID
+
+When the user says `window 7620` or just `7620` (4-digit), they mean a tmux
+window in the `sqa` tmux session that was created by the old TPU manager.
 
 Use:
 
@@ -124,11 +140,11 @@ not treat an absent tmux window as proof that the job never ran.
 
 ### Job ID
 
-In this workspace, a user saying `job 7620` usually means the same xibo/TPU
-manager job whose `windows_id` is `7620`. Confirm in `tpu_manager/sqa.json`
-or the full TPU manager state before relying on it. Queue records and monitor
-logs can also mention jobs, but the spreadsheet logging target should be tied
-back to the actual WandB run and logdir.
+A user saying `job <id>` most often means a unified_infra job id (8-char hex);
+resolve with `infra info <id>`. A 4-digit `job 7620` is a legacy xibo job whose
+`windows_id` is `7620` — confirm in `tpu_manager/sqa.json` or the full TPU manager
+state before relying on it. Either way, the spreadsheet logging target should be
+tied back to the actual WandB run and logdir, not the id alone.
 
 ### `output.log`
 
@@ -390,6 +406,9 @@ and which cells were colored red.
 ## Common Cases
 
 ### User says `log 7620, 7609`
+
+(4-digit numbers ⇒ legacy xibo window ids. For 8-char hex ids, resolve each with
+`infra info <id>` / `infra logs <id>` instead of capturing a tmux pane.)
 
 1. Treat `7620` and `7609` as tmux/xibo window ids.
 2. Capture `sqa:7620` and `sqa:7609`.

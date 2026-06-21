@@ -43,10 +43,16 @@ The three usual offenders:
 3. **`staging/`** — normally small. If it is large, someone accidentally copied a
    big file into their code each time they staged, so the large file is duplicated
    across many staging copies. Track down the oversized file and stop it from being
-   copied. Staging snapshots live at `staging/<user>/<timestamp>-<hash>-code/`; old
-   snapshots (more than a few days old) are safe to delete since the code has already
-   been pushed to the TPU and resume re-stages from the work dir. To find the
-   offending big file, inspect one snapshot: `du -sh <snapshot>/* | sort -rh`.
+   copied. Staging snapshots live at `staging/<user>/<timestamp>-<hash>-code/`. To
+   find the offending big file, inspect one snapshot: `du -sh <snapshot>/* | sort -rh`.
+   **Important under unified_infra:** a job re-dispatches from its recorded
+   `stage_dir` on every resume (it does **not** re-stage from the work dir). So a
+   staging snapshot still referenced by an **active or resumable** job-chain must
+   **not** be deleted, or resume fails with `cd … No such file or directory`. Only
+   snapshots not referenced by any live `pool.json`/`jobs.json` job are safe to
+   remove; prefer deleting the large *files* inside old snapshots (below) over whole
+   dirs, and cross-check `gest <id>` / `infra info <id>` (which lists each chain's
+   `stage_dir` and its `nodes`/`dead_runs` stage_dirs) before mass-deleting.
 
 Practical notes from a 2026-06-08 cleanup:
 - The SSD had `staging/` at ~987G (the biggest abnormal consumer), `code/` ~929G
@@ -84,13 +90,14 @@ Practical notes from a 2026-06-08 cleanup:
 
 ## Local Root/Home Disk
 
-The local root filesystem can fill independently of the shared NFS mount. This
-can break monitor workers before a TPU job even starts. Symptoms include:
+The local root filesystem can fill independently of the shared NFS mount. On the
+infra host this can break the daemon's dispatch workers before a TPU job even
+starts. Symptoms include:
 
 - `df -h /` shows 100%.
-- Monitor workers print errors such as
-  `No space left on device: '/tmp/tpu_monitor_gcloud_configs/...'`.
-- `tpu run/resume` or gcloud commands fail before creating a tmux window.
+- Dispatch workers fail with `No space left on device` (see a job's dispatch log
+  via `infra info <id>` / `errors.log` category `dispatch_failed`).
+- gcloud commands (mount/zhan/ssh) fail before the job reaches RUNNING.
 
 Do not start with a full recursive `du -sh /` unless you are prepared to wait.
 Prefer targeted local-only checks:
@@ -164,23 +171,20 @@ Do not kill unrelated Codex/agent sessions just to release the WAL; checkpoint,
 verify, and truncate the WAL is the lower-risk recovery when the root disk is
 already full.
 
-### Monitor Temp Cleanup
+### Infra Daemon / Worker Temp Cleanup
 
-`MONITOR.py` non-blocking workers copy gcloud config into
-`/tmp/tpu_monitor_gcloud_configs/...`. If a worker crashes or the root disk was
-full, stale directories can accumulate. They are small, but clearing them is
-safe only after checking there are no active monitor workers:
+`unified_infra` keeps its working state under `$INFRA_STATE_DIR`
+(`unified_infra/state/`), not in `/tmp`: dispatch workers log to `worker_logs/`,
+mount locks live in `mount_locks/`, and hard failures go to `errors.log`. These are
+small and self-managed; do not hand-delete them while the daemon is running. If the
+infra host's `/` fills, the usual culprit is still Codex WAL / tool caches under
+`/home/sqa` (above), not infra state.
 
-```bash
-python - <<'PY'
-import MONITOR
-MONITOR.USER = 'sqa'
-print('inflight', sorted(MONITOR._monitor_inflight_worker_tpus()))
-PY
-rm -rf /tmp/tpu_monitor_gcloud_configs/*
-mkdir -p /tmp/tpu_monitor_gcloud_configs
-```
+If gcloud sqlite-lock or config races appear, the daemon's workers isolate their
+gcloud config per worker; let the daemon recycle them rather than clearing files
+under a running worker. Check `infrad status` and `errors.log` first.
 
-Do not clear arbitrary `/tmp` training state while jobs are running. For xibo
-remote Linux-user mode, only explicit all-user kill paths are allowed to clean
-global TPU `/tmp` state.
+Do not clear arbitrary `/tmp` training state while jobs are running. On the TPU VMs
+themselves, only an explicit all-user kill path (legacy `tpu kill-remote <tpu>` with
+no `remote_user=`) is allowed to clean global `/tmp` TPU state — per-job remote
+Linux-user state is otherwise isolated and should not be wiped.

@@ -7,12 +7,16 @@ A pattern for running long-horizon ML experiments with an autonomous agent loop.
 ## Core loop (every wake cycle)
 
 1. **Re-read the research notes file** — prevents context drift and keeps goals in focus.
-2. **Check job status** — identify which jobs are running, errored, or finished.
-3. **Read latest eval logs** — extract new metric values from log files.
+2. **Check job status** — `infra check` (alias `ics`): which job-chains are running,
+   failed, or finished, and their `RST` (restarts·lastCkptStep).
+3. **Read latest eval logs** — extract new metric values (`infra logs <id>` / `cl`).
 4. **Update results tracking** — record new checkpoints in the results file.
-5. **Diagnose errors** — distinguish real code bugs from false positives (e.g. checkpoint-save noise).
+5. **Diagnose errors** — distinguish real code bugs from false positives (e.g.
+   checkpoint-save noise); the daemon's `classify.py` already auto-resumes infra
+   failures, so focus on jobs that went terminal (FAILED, not resuming).
 6. **Plan next steps** — decide whether to launch new experiments, kill underperformers, or wait.
-7. **Clean up** — close stale tmux windows from replaced/fixed jobs.
+7. **Clean up** — `infra clean` forgets terminal job-chains. The daemon manages tmux
+   windows itself; you do not close windows by hand.
 
 ---
 
@@ -45,21 +49,23 @@ Real bugs show Python tracebacks. Preemptions show infra-level failure messages.
 
 | Error type | Action |
 |------------|--------|
-| Python traceback (code bug) | Fix the code, commit, relaunch in a new window |
-| Preemption / infra failure | Do nothing — auto-resume handles it |
+| Python traceback (code bug) / OOM | Terminal — the daemon stops it (FAILED). Fix the code, then `infra queue` a fresh job |
+| Preemption / infra failure | Do nothing — the daemon auto-resumes the same job-chain |
 | False positive (checkpoint noise) | Ignore, confirm job is training normally |
 
 When relaunching after a code fix:
-- Make sure you're on the correct branch before staging.
-- Close the old error window after the new job is confirmed running.
+- Make sure you're on the correct branch before queueing (`infra queue` stages the
+  current working tree).
+- The old job stays as a terminal FAILED chain; `infra clean <id>` to forget it once
+  you no longer need its `dead_runs` logs for debugging.
 
 ---
 
 ## Tracking experiments
 
 For each run, record:
-- **Window ID** (tmux handle)
-- **TPU name and alias**
+- **Job ID** (the infra 8-char hex id — stable across the whole resume chain)
+- **TPU name and zone**
 - **Config** (key hyperparams: model, lr, batch size, epochs)
 - **Architecture** (any non-default choices)
 - **Eval checkpoints table** (epoch → accuracy, with notes on trends)
@@ -102,7 +108,8 @@ Before launching:
 Always pass a descriptive `wandb_notes` string at launch:
 
 ```bash
-tpu run <tpu> <user> dir=N --config.logging.wandb_notes="<experiment-tag>"
+infra queue --types=… --regions=… \
+    -- main.py --config=… --config.logging.wandb_notes="<experiment-tag>"
 ```
 
 This becomes the WandB run description and is the primary way to identify runs in the tracking system. Do not leave it as the default.

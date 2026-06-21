@@ -14,8 +14,8 @@ When working on VLM training code:
 1. Read this file.
 2. Read `vlm_data.md` for dataset recipes or region-local data rules.
 3. Read `vlm_checkpointing.md` for checkpoint/resume/eval-only work.
-4. For TPU launch/resume work, read `tpu.md`, `xibo_queue.md`, and
-   `xibo_resume.md`.
+4. For TPU launch/resume work, read `tpu.md`, `infra_scheduling.md`, and
+   `infra_resume.md`.
 5. For result logging, read `spreadsheet_logging.md` and
    `spreadsheet_logging_playbook.md`.
 
@@ -82,19 +82,73 @@ Exact legacy project-local snapshots are preserved in
   LM blocks remain intact. Set it explicitly false only if intentionally training
   through that text-prefix path, for example loc embedding experiments.
 
+## ImageNet KNN Baselines
+
+- 2026-06-17 full TFDS ImageNet KNN under the current `eval_imagenet_knn.py`
+  protocol uses `model.encode_image(...)` and mean-pools CLIP patch tokens. For
+  `openai/clip-vit-large-patch14-336` this is a pure CLIP-L image-tower metric,
+  not a connector/Gemma metric.
+- A no-`load_from` CLIP-L init eval on us-east5 TFDS produced
+  `knn_full_acc_raw_final=71.193` and
+  `knn_full_acc_pca_whitened_final=77.963`.
+- Window 7796's final checkpoint at step 52180 produced the exact same numbers
+  (`71.193` raw / `77.963` PCA-whitened), so its ImageNet KNN is just the frozen
+  CLIP-L baseline. A spreadsheet value around `51` is likely from a different
+  encoder/protocol, for example MAE/PaliGemma, not CLIP-L.
+- 2026-06-17 follow-up: window 7796's W&B config showed top-level
+  `training.freeze_image_encoder=false`, but the effective curriculum stage
+  config had `training.stage1.freeze_image_encoder=true` and
+  `training.stage2.freeze_image_encoder=true`. `_build_curriculum_stage_config`
+  applies stage-specific overrides, so always inspect `training.stageN.*` when
+  judging what trained. A rerun of the CFG 1:1:1 LLaVA-1.5 recipe was queued as
+  `dir=51` with `training.stage2.freeze_image_encoder=false` and W&B notes
+  prefix `[stage2 unfreeze image encoder rerun]`. The original run's
+  `checkpoint_2180` stage boundary had already been removed from all three
+  buckets, so the rerun starts from scratch and redoes the short frozen stage 1
+  before entering unfrozen stage 2.
+
 ## PaliGemma / Two-Stage Curriculum
 
+- 2026-06-20 sync rule: `PaliGemma-baseline` should track
+  `beifen-Paligemma`'s data, prompt, eval, config, stateful dataloader,
+  curriculum, Qwen/Gemma, and logging behavior, but must keep the
+  jit-style HSDP/FSDP execution path instead of reverting to pmap. When copying
+  beifen changes over, preserve `config.sharding="hsdp"`, `prepare_pjit_funcs`,
+  HSDP activation constraints, hidden-space token xent, sharded TrainState init,
+  and mesh-aware host-local batch handling.
+- `PaliGemma-baseline` should follow `beifen-Paligemma` for vendored dependency
+  layout: `big_vision` and `gemma` are symlinks to
+  `/kmh-nfs-ssd-us-mount/code/hanhong/shared/{big_vision,gemma}`, not duplicate
+  checked-out directories.
+- For HSDP/FSDP local batch sizing, do not blindly divide global batch by
+  `jax.process_count()`. Infer the process-local batch from the data mesh axes:
+  in HSDP the final mesh axis is the model axis, so only the preceding axes
+  shard batch/data arrays. A bad implementation fails with
+  `Invalid host data ... process data has N elements. Process addresses M
+  elements`.
+- HSDP activation constraints should use explicit `NamedSharding(mesh, spec)`.
+  Calling `jax.lax.with_sharding_constraint(..., PartitionSpec(...))` during
+  `jax.eval_shape(model.init)` can fail because there is no active mesh.
+- Row-level location-token training with frozen LM embeddings is implemented by
+  keeping the full embedding leaf trainable and zeroing non-location rows in the
+  update. In that mode it is valid for the frozen-params tree to be empty.
 - The active remote entry is `main.py --config=configs/load_config.py:remote_run`,
-  backed by `configs/remote_run_config.yml`.
-- `qsqa` stages the current working tree and queues through MONITOR, now
-  auto-selecting the first free xibo working-dir id in `2..99`. Use
-  `qsqa dir=<dir>` or `qsqa <dir>` only when a specific id is required. Patch
-  `remote_run_config.yml` to the exact variant before each queue call.
-- When writing or editing `logging.wandb_notes`, preserve the monitor cost-class
-  tokens from the source run. For low-cost VLM jobs this often means keeping
-  `MAE-B`, `jit`, `unify-base`, or `llava-1.5 reproduction`; otherwise queue may
-  classify the job as high-cost and wait for `v6e-64` / `v5p-128` instead of
-  using `v6e-32` / `v5p-64`.
+  backed by `configs/remote_run_config.yml`. Patch `remote_run_config.yml` to the
+  exact variant before each queue call, then queue with `infra queue` (see
+  `infra_scheduling.md`):
+  ```bash
+  infra queue --types=v5p-64 --regions=us-central1,us-east5 \
+      -- main.py --config=configs/load_config.py:remote_run \
+      --config.logging.wandb_notes="<experiment-tag>"
+  ```
+  `infra queue` stages the current working tree itself; there is no `qsqa` /
+  xibo working-dir-id flow anymore.
+- The daemon does **not** auto-classify cost from `wandb_notes`; you choose the
+  card by setting `--types`/`--regions` yourself. Still keep meaningful cost-class
+  tokens in `logging.wandb_notes` (e.g. `MAE-B`, `jit`, `unify-base`,
+  `llava-1.5 reproduction`) so a human reading the run knows its intended size, and
+  follow the cost-class conventions in `infra_scheduling.md` (low-cost →
+  `v6e-32`/`v5p-64`; high-cost → `v6e-64`/`v5p-128`; `MAE-L`+large LM needs v5p).
 - As of 2026-06-08, the runnable baseline is
   `training.curriculum: pretrain_sft_two_stage`.
 - Stage 1 is a 150K-step 512-resolution pretrain mix with `laion-aes`, `cc12m`,
@@ -111,6 +165,13 @@ Exact legacy project-local snapshots are preserved in
   `< stage1_steps` restores pretrain fully; `== stage1_steps` restores params
   only into SFT and starts a fresh optimizer; between stage boundary and final
   step restores SFT fully.
+- In `beifen-Paligemma`, stage-boundary params-only restore supports increasing
+  PrefixMAE `model.num_learnable_tokens` between stages. Existing
+  `learnable_tokens` / `learnable_pos_embed` rows are copied exactly and appended
+  rows are Gaussian-initialized from the old bank's mean/std. Configure
+  `model.learnable_token_resize_stats` as `scalar` or `per_channel`. Shrinking K
+  is intentionally unsupported; full same-stage resume should still use matching
+  shapes.
 - Two-stage does not support `load_from_pretrained`; use `finetune: True` for a
   standalone SFT from a pretrain checkpoint.
 - Stage 2 logs/saves global steps but uses stage-local offset for SFT dataloader

@@ -29,17 +29,22 @@ in the archive files.
 - Before destructive cleanup, identify the filesystem and owner, preserve a
   manifest when deleting shared data, and use the storage guide.
 - If a task-specific guide defines a hard stop, follow that guide. Examples:
-  spreadsheet out-of-distribution behavior, TPU zombie ownership, and xibo
+  spreadsheet out-of-distribution behavior, TPU zombie ownership, and infra
   resume safety are not general rules; they live in their topic files.
 
 ## Task Routing
 
+Jobs are scheduled/run/resumed by `unified_infra` (the `infra` CLI + central
+daemon). The old `xibo_tpu_manager` / `MONITOR.py` no longer schedule jobs; a few
+legacy `tpu` commands (`tpu cc`, `tpu mount-disk`, `detect_zombie`) are kept and
+documented in `tpu.md` / `infra_overview.md`.
+
 | Task | Read |
 |---|---|
-| Find/claim TPU, check jobs, inspect logs, diagnose stale holders | `tpu.md` |
-| Modify or diagnose SQA monitor queue dispatch | `xibo_monitor.md`, `xibo_queue.md` |
-| Modify or diagnose xibo resume/rerun/checkpoint-source behavior | `xibo_monitor.md`, `xibo_resume.md` |
-| Work with remote Linux users, xibo locks, or ka sheet compatibility | `xibo_monitor.md` |
+| Check jobs, inspect logs, find/hold a TPU, diagnose stale holders | `tpu.md` |
+| Understand the infra daemon, control plane, state files, locks, error log | `infra_overview.md` |
+| Queue a job, set allowed types/regions, scheduling/sampling, debug runs, 申卡 signals | `infra_scheduling.md` |
+| Understand resume/rerun, the single-job chain, `dead_runs`, classify, recovery | `infra_resume.md` |
 | Edit JAX LLaVA / PaliGemma / VLM training code | `vlm_training.md` |
 | Work on VLM datasets, upload/count/report data, or dataset locality | `vlm_data.md` |
 | Work on VLM checkpointing, dataloader resume, final eval restore | `vlm_checkpointing.md` |
@@ -55,10 +60,10 @@ in the archive files.
 | File | Purpose |
 |---|---|
 | `project_index.md` | Compact map from checkout names to the docs that matter. |
-| `tpu.md` | User-facing TPU operations and ownership/zombie diagnosis. |
-| `xibo_monitor.md` | Xibo/SQA monitor architecture, active paths, remote users, locks. |
-| `xibo_queue.md` | Queue semantics, TPU selection, `tou` refresh, alias hygiene. |
-| `xibo_resume.md` | Resume/rerun invariants, checkpoint-source logic, recovery incidents. |
+| `tpu.md` | User-facing TPU operations, log reading, zombie diagnosis, legacy `tpu` helpers. |
+| `infra_overview.md` | `unified_infra` architecture, daemon/control plane, state files, locks, error log. |
+| `infra_scheduling.md` | Queueing, scheduling/sampling, TPU selection/pinning, debug runs, 申卡 signals. |
+| `infra_resume.md` | Single-job chain, `nodes`/`dead_runs`, resume-vs-terminal classify, recovery. |
 | `vlm_training.md` | VLM training overview, reproduction targets, model/HSDP/curriculum rules. |
 | `vlm_data.md` | VLM dataset recipes, upload/counting rules, region-local data notes. |
 | `vlm_checkpointing.md` | Durable checkpoints, stateful dataloader, checkpoint/eval restore notes. |

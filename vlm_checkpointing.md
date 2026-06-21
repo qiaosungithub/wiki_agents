@@ -17,10 +17,12 @@ checkpoint-save incidents.
 - `jax_llava` and `beifen-Paligemma` checkpoint loaders should resolve
   `load_from_pretrained` params-only restores by first checking the normal
   zone-local bucket path, then the same-zone `pretrained-ckpts` fallback.
-- xibo launch should preflight finetune configs with `load_from_pretrained`:
-  if the normal target-zone checkpoint and same-zone pretrained checkpoint are
-  both missing, but another zone has the pretrained copy, copy latest
-  `checkpoint_<step>` from pretrained to pretrained before starting the job.
+- Before queueing a finetune config with `load_from_pretrained`, preflight the
+  checkpoint locality yourself (the infra daemon does not do this): if the normal
+  target-zone checkpoint and same-zone pretrained checkpoint are both missing, but
+  another zone has the pretrained copy, copy the latest `checkpoint_<step>` from
+  pretrained to pretrained with `tpu cc` before queueing. Once a job checkpoints it
+  pins to that zone, so the checkpoint must already be in the region you queue into.
 - Before launching a manual `eval_only` job or a completed-curriculum "just
   final eval" rerun from an existing final checkpoint, first copy that final
   `checkpoint_<step>` to every allowed eval region:
@@ -98,12 +100,14 @@ checkpoint-save incidents.
   `Checkpoint at step ... saved to ...` completion log. This preserves the rule
   "dataloader state before checkpoint completion" without pre-creating Orbax's
   checkpoint directory.
-- 2026-06-15 follow-up: window 7702 showed why sidecar log wording matters.
-  `find_saving_window.py` briefly misread `Dataloader state saved to
-  .../_pending_dataloader_state/checkpoint_2400/...` as a completed checkpoint.
-  The monitor finder now only accepts model-checkpoint completion lines, and
-  `jax_llava` / `beifen-Paligemma` log sidecar writes as `written at` instead of
-  `saved to`.
+- 2026-06-15 follow-up: a legacy-xibo incident (window 7702) showed why sidecar log
+  wording matters — the old `find_saving_window.py` briefly misread `Dataloader
+  state saved to .../_pending_dataloader_state/checkpoint_2400/...` as a completed
+  checkpoint. The fix has two halves still in force: (a) `jax_llava` /
+  `beifen-Paligemma` log sidecar writes as `written at`, never `saved to`; and
+  (b) checkpoint discovery accepts only the model-checkpoint completion line
+  (`saved to … step_N`). `unified_infra`'s `resume.py` (`saved_step`) follows the
+  same rule, so a bare `Saving` or a sidecar line never counts as a checkpoint.
 
 ## Checkpoint Writer Incidents
 
@@ -162,6 +166,20 @@ checkpoint-save incidents.
   for the current pmap path; if this code is moved to a true pjit/HSDP global
   sharded TrainState, use the JAX LLaVA all-process sharded Orbax path instead
   of process-0 replica-0 save.
+- 2026-06-20 PaliGemma-baseline sync: after pulling logic from
+  `beifen-Paligemma`, keep `PaliGemma-baseline` on the JAX LLaVA-style
+  all-process sharded Orbax checkpoint path. Do not all-gather the TrainState
+  before saving; the state leaves JIT as global sharded `jax.Array`s and Orbax
+  saves/restores the addressable shards with target sharding. Pending dataloader
+  sidecars are still written before checkpoint save and finalized under
+  `checkpoint_N/dataloader_state/` only after the Orbax checkpoint completes.
+- In `PaliGemma-baseline` exact stateful dataloader resume, keep the data seed
+  fixed when restoring loader state. The saved sampler RNG/cursors define the
+  stream; adding step offset to the seed after restore breaks exact replay.
+- For curriculum stage boundaries in `PaliGemma-baseline`, params-only restore
+  may need to interpolate patch positional embeddings and resize learnable
+  tokens before sharding the tree onto the HSDP mesh. Full same-stage resume
+  should restore the exact target TrainState and assert the restored step.
 
 ## Final Eval Restore
 
