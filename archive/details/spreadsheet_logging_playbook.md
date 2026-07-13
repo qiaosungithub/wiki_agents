@@ -327,6 +327,23 @@ After inserting a row, clear inherited metric backgrounds in `F:V`, then apply
 red only to below-trivial cells. This avoids carrying old red cells into a new
 row.
 
+### Label-column red = encoder misconfig (separate from trivial-score red)
+
+The label columns `A:D` are a **second, independent** red signal: they are red
+**if and only if the run's encoder architecture is set wrong** — i.e. the run
+intended encoder "426" (`enc_num_patch_sa_layers=4`, `enc_num_cross_attn_layers=2`,
+`enc_num_token_sa_layers=6`) but actually ran "420"
+(`enc_num_token_sa_layers=0`, the long-standing token-self-attention bug). The
+`[wrong config]` blocks (e.g. rows 146–148) have `A:D` red across all stage rows;
+a correctly-configured run must have `A:D` white. This is unrelated to the
+trivial-score `F:V` metric reds.
+
+Because `insert_rows(inherit_from_before=True)` copies the row above's format,
+inserting below a `[wrong config]` block inherits its red `A:D`. So clear
+**`A:E` as well as `F:V`** after inserting, then re-apply red to `A:D` **only if
+this run's encoder is genuinely misconfigured**. Verify from the run config /
+`output.log`: `enc_num_token_sa_layers=6` ⇒ correct 426 ⇒ keep `A:D` white.
+
 ## Writing The Sheet
 
 Use the service account from `GOOGLE_APPLICATION_CREDENTIALS` when available.

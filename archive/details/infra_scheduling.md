@@ -24,6 +24,19 @@ infra queue --stage-dir /…/staging/<user>/<ts>-…-code --types=v6e-32 --regio
 
 - The command after `--` is the script + its `--config.*` overrides, run on the
   TPU. Set `logging.wandb_notes` here (see below), do not rely on config files.
+- **Run-defining parameters belong in the staged dir's config files, NOT in CLI
+  `--config.X` overrides** (user rule, 2026-07-13): when rerunning/varying a job,
+  copy the staged dir, edit `configs/remote_run_config.yml` in place (lr changes,
+  top-level `load_from:` for stage reruns, …) with a short comment naming the job
+  id + rationale, then `infra queue --stage-dir <new-dir>` with a bare command.
+  Reason: the staged dir alone must fully reproduce the run; CLI flags live only
+  in pool.json. `wandb_notes` (the job name) is the one exception — it stays on
+  the CLI. Resume safety is unchanged: monitor resumes inject env `LOAD_FROM`
+  (env wins over the config file) and `strip_resume_overrides()` drops stale CLI
+  flags. Stage-boundary rerun recipe: point `load_from:` at a log dir whose MAX
+  saved ckpt is exactly the boundary step (e.g. 150000 → params-only restore +
+  fresh optimizer, starts the next stage); pin `--regions` to the ckpt bucket's
+  region (`gs://kmh-gcp-<region>/…`). First applied: ea923558.
 - **Staging happens at queue time** by rsync from your code dir; staging
   **rejects code dirs > 1.5 MB** after standard excludes. The staged snapshot must
   be visible from the daemon host (shared NFS). The job keeps that exact
@@ -124,6 +137,19 @@ assumed provisioned, but the daemon still runs mount-disk (idempotent) + a
 `jax.devices()` check (all types except v5p, which is exempt) before launch. You
 can also call `infra signal` by hand to point the daemon at a card you know is
 ready. Signals can be **duplicated/concurrent**; the daemon dedupes by card.
+
+**All 申卡 cards are one shared pool.** A card is **not** owned by the user in its
+name (`zongyili-*`, `xianbang-*`, …) — every allocator signals the *same* daemon, and
+the daemon schedules **any** user's pending job onto **any** matching ready card (the
+fair-sampling above). So if you have a pending job and see a **READY card the daemon
+isn't using**, it just means that card's allocator never signaled *our* daemon: it
+won't be in `tpus.json`, and the idle-sweep only re-checks cards it already knows. Any
+admin can run `infra signal <full_name> --zone=<z> --type=<t>` **by hand** to pull it
+into the pool — your pending job then schedules onto it. The pre-launch mount-disk
+(plus `jax.devices()` for non-v5p) still gates it, so hand-signaling a
+wedged/unreachable card just fails dispatch and re-queues; it won't run a job on a
+broken card. (Flaky SSH on a freshly-created spot card can make this mount step stall
+or fail — try the next ready card.)
 
 If the 申卡 script seems stuck, check it is appending to `signals.jsonl` and that
 the daemon is draining (`infrad status`, `errors.log`). Signals may be HMAC-gated
