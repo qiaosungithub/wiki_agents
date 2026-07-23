@@ -47,10 +47,12 @@ working under `/kmh-nfs-ssd-us-mount/code/qiao/work`.
 |---|---|
 | Find a checkout or understand project boundaries | `projects.md` |
 | Queue, inspect, resume, debug, or clean up TPU jobs | `infra.md` |
-| Change JAX LLaVA, PaliGemma, VLM data, or checkpoints | `vlm.md` |
+| Change VLM training, checkpointing, resume, or eval code | `vlm_training.md` |
+| Upload VLM datasets, audit adapters/coordinates, prepare eval mirrors | `vlm_data.md` |
 | Log WandB results into the experiment spreadsheet | `spreadsheet.md` |
 | Manage a long-running experiment loop | `research.md` |
-| Produce a paper deep-reading report | `paper_reading.md` |
+| Write a paper deep-reading report | `paper_reading.md` |
+| Lay out or debug a report's HTML/PDF rendering | `paper_rendering.md` |
 | Reclaim shared NFS or local disk space | `storage.md` |
 
 ## Evidence Order
@@ -68,6 +70,10 @@ When facts disagree, prefer this order:
 - Keep core guides short and decision-oriented.
 - Record a rule only when a future agent cannot cheaply infer it from code or
   when violating it has a meaningful cost.
-- Replace stale facts instead of appending incident diaries.
+- Replace stale facts instead of appending incident diaries. Never record live
+  state (mirror completeness, job status) in a guide; record how to verify it.
+- Put dated audit evidence (scan counts, validation numbers, status snapshots)
+  under `archive/audits/` and keep only the derived rule plus a pointer in the
+  guide. Delete audit snapshots once they are too old to be evidence.
 - Preserve detailed or superseded text under `archive/` when it remains useful
   for forensics. Never route a new agent there by default.

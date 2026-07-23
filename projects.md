@@ -6,10 +6,10 @@ and git state before editing it.
 | Project family | Purpose | Core context |
 |---|---|---|
 | `unified_infra/` | Current TPU scheduler, daemon, state store, dispatch, and resume | `infra.md`; then `unified_infra/README.md`, `docs/resume_rules.md`, and `docs/robustness.md` |
-| `jax_llava/` and its late-fusion snapshots | JAX LLaVA training, data, and evaluation | `vlm.md` |
-| `PaliGemma-baseline/` | JIT/HSDP PaliGemma and PrefixMAE baseline | `vlm.md` |
-| `beifen-Paligemma/` | Related pmap PaliGemma implementation and data pipeline | `vlm.md` |
-| `beifen/` | Dataset upload and visual checks | `vlm.md` |
+| `jax_llava/` and its late-fusion snapshots | JAX LLaVA training, data, and evaluation | `vlm_training.md`, `vlm_data.md` |
+| `PaliGemma-baseline/` | JIT/HSDP PaliGemma and PrefixMAE baseline | `vlm_training.md`, `vlm_data.md` |
+| `beifen-Paligemma/` | Related pmap PaliGemma implementation and data pipeline | `vlm_training.md`, `vlm_data.md` |
+| `beifen/` | Dataset upload and visual checks | `vlm_data.md` |
 | `project_one_ssl/` | Project One v5 three-stream MAE/DAE baseline | Native `CLAUDE.md`, `docs/REPO_GUIDE.html`, and `docs/AGENT_CONTEXT.md` |
 | `one-benchmark-suite/` | Benchmark registry, not a training framework | Native docs; archives only for old context |
 | `nnflow_jax/` | JAX implementation of Generative Modeling Through Drifting | Native docs; archives only for old context |
@@ -34,16 +34,10 @@ and git state before editing it.
   the user's target path and branch before transferring a fix between them.
 - The live agent chat is `code/sqa/agent-web` (React/Vite + Node/TS), not the
   older dirty rollback checkout `code/sqa/claude-web-chat`. Confirm tmux
-  `webchat` and runner busy state before restarting it; frontend changes also
-  require an explicit `npm run build` because `run.sh` is not a watcher. The
-  family instance is `webchat_family` / port 8800 and must keep its independent
-  `~/.local/share/agent-web-family/{claude,codex,uploads}` homes and token; never
-  export those homes into shell startup files because local `gpt list` and
-  `claude list` are intentionally owner-only. Treat every session created for
-  agent-web testing as disposable: track its ID, close its runner, and remove
-  its transcript, registry/lock, upload, and operation-sidecar state in
-  teardown/`finally`; verify no test session or process remains visible after
-  the test. Prefer isolated temporary homes and never bulk-delete real sessions.
+  `webchat` (or `webchat_family`) and runner busy state before restarting
+  either instance, and treat every session created for testing as disposable
+  with full teardown. Operational detail (build step, family-instance
+  isolation, test-session hygiene) is in that repository's `AGENTS.md`.
 
 ## Native Instructions
 
