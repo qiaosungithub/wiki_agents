@@ -40,10 +40,20 @@ must not silently force it into the existing schema.
 - The main POPE column is adversarial F1, not macro F1.
 - ImageNet KNN protocols such as raw and PCA-whitened are not interchangeable.
 - Greedy and beam-search VStar/VisWiz values are not interchangeable.
+- MMVP uses the official 150-pair both-correct accuracy, not 300-item accuracy.
+  Its random-choice baseline is `25%`: mark a comparable post-fix score red
+  only when it is strictly below `25%`. Keep legacy item-accuracy results
+  purple as protocol-invalid rather than applying the red threshold to them.
+- The cleaned tab places CVBench in `W`, VLMs Are Blind in `X`, WandB/run in
+  `Y`, and the legacy 15-benchmark composite in `Z`. CVBench uses the official
+  source-balanced score with a protocol-aligned random-choice floor of
+  `42.4889%` (displayed `42.49`). VLMs Are Blind uses the official eight-task
+  mean and its published uniform-random floor of `24.00%`. Mark comparable
+  values red only when they are strictly below their respective floors.
 - RefCOCOg valid-answer count is a diagnostic placed in the note when already
   logged; write `n/a` rather than opening result data solely to compute it.
 - Label cells `A:D` are red only for a verified encoder misconfiguration. Metric
-  cells `F:V` use a separate below-trivial-score signal. Inserting a row can
+  cells `F:X` use a separate below-trivial-score signal. Inserting a row can
   inherit both formats, so clear inherited backgrounds before reapplying either.
 
 For bulk reformatting or structural cleanup, duplicate the worksheet first

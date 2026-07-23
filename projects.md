@@ -15,6 +15,7 @@ and git state before editing it.
 | `nnflow_jax/` | JAX implementation of Generative Modeling Through Drifting | Native docs; archives only for old context |
 | `tpu_manager/` and xibo snapshots | Legacy scheduler/monitor code | `infra.md`; do not treat old JSON as current job state |
 | `readings/vision-related/tutorials/` | Paper deep-reading reports | `paper_reading.md` |
+| `/kmh-nfs-ssd-us-mount/code/sqa/agent-web/` | Deployed Claude Code + Codex web chats at `chat.kaiming.me` and the session-isolated family site `family-chat.kaiming.me` (outside this workspace) | Native `README.md`; live tmux sessions `webchat` and `webchat_family` |
 
 ## Project Boundaries That Are Easy To Miss
 
@@ -31,6 +32,18 @@ and git state before editing it.
   current scheduler instead of copying that launch section blindly.
 - Snapshot and backup checkouts are not automatically the active source. Confirm
   the user's target path and branch before transferring a fix between them.
+- The live agent chat is `code/sqa/agent-web` (React/Vite + Node/TS), not the
+  older dirty rollback checkout `code/sqa/claude-web-chat`. Confirm tmux
+  `webchat` and runner busy state before restarting it; frontend changes also
+  require an explicit `npm run build` because `run.sh` is not a watcher. The
+  family instance is `webchat_family` / port 8800 and must keep its independent
+  `~/.local/share/agent-web-family/{claude,codex,uploads}` homes and token; never
+  export those homes into shell startup files because local `gpt list` and
+  `claude list` are intentionally owner-only. Treat every session created for
+  agent-web testing as disposable: track its ID, close its runner, and remove
+  its transcript, registry/lock, upload, and operation-sidecar state in
+  teardown/`finally`; verify no test session or process remains visible after
+  the test. Prefer isolated temporary homes and never bulk-delete real sessions.
 
 ## Native Instructions
 

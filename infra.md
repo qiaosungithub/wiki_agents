@@ -15,7 +15,7 @@ infra queue --types=<types> --regions=<regions> -- <command>
 infra debug --types=<type> --minutes=<n>
 infra cancel <job_id>   # pending
 infra kill <job_id>     # running or reserved
-infra clean <job_id>    # terminal history
+infra clean <job_id>    # terminal history (bulk clean without a job id prompts to confirm)
 ```
 
 Read-only commands inspect shared state directly. Mutating commands go through
@@ -50,9 +50,13 @@ helpers already exist: `ics`, `ka`, `cl`, `gl`, `tl`, and `gest`.
   checkpoint locality. `laion-400m` work is restricted to its Asia-local copy;
   LLaVA-1.5 reproduction is v5-family work; large MAE plus large LM models may
   require v5p memory.
-- Do not assume a scheduler can move checkpoints across zones. For eval-only
-  work, either pin compute to an existing local checkpoint or deliberately make
-  region-local copies before queueing.
+- Before every launch, determine whether the job consumes a checkpoint and make
+  an explicit locality decision before queueing: either pin compute to the
+  checkpoint's region, or *copy the checkpoint* into all possible regions with suitable
+  capacity. For eval-only work, you do not need to pin to the source region by default when
+  compatible idle compute exists elsewhere. A copy plan must also cover any
+  missing region-local eval data; queue only after validating the checkpoint's
+  completion marker and the copied object set, sizes, and checksums. Please note that **cross-region copying is by default not allowed**. Cross region data transfer **costs money**. Only one-time, small amount copy is allowed, where copying one checkpoint is allowed.
 
 ## Failure Model
 
