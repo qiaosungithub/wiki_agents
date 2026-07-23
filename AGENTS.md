@@ -16,8 +16,9 @@ working under `/usr/local/google/home/qiaos/work`.
 
 - This is a shared research workspace with many independent repositories. A task's
   scope is the checkout the user named, not the whole workspace.
-- Training data and checkpoints are region-local. Metadata is cheap to inspect;
-  large payloads are not safe to move or read across regions by default.
+- Training data and checkpoints for **Kaiming Group Code (Type 1)** are region-local.
+  For these projects, large payloads are not safe to move or read across regions by default.
+  This restriction does NOT apply to Google Internal Research Code (Type 2).
 - Agent memory should capture durable decisions and non-obvious invariants.
   Exact commands, incident timelines, job ids, and old configurations belong in
   source docs, live state, experiment records, or `archive/`.
@@ -27,8 +28,8 @@ working under `/usr/local/google/home/qiaos/work`.
 - Push only when the user's current request explicitly asks for a push.
 - Preserve user changes. Never revert, overwrite, or clean a dirty worktree as
   collateral work.
-- Avoid cross-region or cross-zone data and checkpoint access. If payload access
-  is necessary, first prove compute and storage locality.
+- Avoid cross-region or cross-zone data and checkpoint access **for Kaiming Group Code**.
+  If payload access is necessary for those projects, first prove compute and storage locality.
 - Before deleting shared or local data, identify the filesystem, owner, active
   references, and recovery path. Use a manifest for shared or bulk deletion.
 - Treat external writes as transactions: establish identity and target, validate

@@ -18,10 +18,11 @@ and never record mirror status in memory — re-verify live before scheduling.
 
 - Use `beifen/upload_data.py` with `beifen/data_upload/datasets.json`; old
   per-dataset launchers are legacy and retained adapters refuse direct use.
-- Queue through unified infra. Only worker 0 writes, and all payload/cache/tmp
+- Queue through the job scheduler. Only worker 0 writes, and all payload/cache/tmp
   paths stay under `/dev/shm`.
-- Derive locality from VM metadata and restrict GCS payload access to the
-  matching `gs://kmh-gcp-${ZONE_SHORT}/data`; fail closed otherwise.
+- For Kaiming Group Code (Type 1), derive locality from VM metadata and restrict
+  GCS payload access to the matching `gs://kmh-gcp-${ZONE_SHORT}/data`; fail
+  closed otherwise.
 - Payload objects are deterministic tar shards, never scattered records. Only
   bounded manifest/summary/progress/commit/checksum/`_SUCCESS` metadata is loose.
 

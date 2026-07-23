@@ -3,6 +3,16 @@
 Use this file to find the right source of truth. Read the checkout's own docs
 and git state before editing it.
 
+## Code Categories
+
+Workspace repositories fall into two categories:
+1. **Kaiming Group Code (Type 1)**: Code from the Kaiming group (e.g., `PaliGemma-baseline`, `jax_llava`, `beifen-Paligemma`, `beifen`). This machine is used solely to execute TPU tasks for these repositories.
+2. **Google Internal Research Code (Type 2)**: Code natively for Google internal research (e.g., `project_one_ssl`, `one-benchmark-suite`, `nnflow_jax`).
+
+*Note: Certain global constraints, such as the strict prohibition of cross-region data/checkpoint transfer, apply **only** to Type 1 (Kaiming Group) code.*
+
+## Repositories
+
 | Project family | Purpose | Core context |
 |---|---|---|
 

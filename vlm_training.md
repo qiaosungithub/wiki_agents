@@ -7,9 +7,9 @@ project-native configs remain authoritative.
 
 ## First Principles
 
-- Keep data, checkpoints, and compute in the same region; locality and
-  checkpoint-copy policy are defined in `infra.md`. Validate locality before
-  listing or opening GCS payloads, and fail fast on missing paths.
+- For Kaiming Group Code (Type 1), keep data, checkpoints, and compute in the
+  same region. Validate locality before listing or opening GCS payloads, and
+  fail fast on missing paths.
 - Preserve each checkout's execution model. A correct pmap checkpointing pattern
   is not automatically correct for a globally sharded JIT/HSDP TrainState.
 - Treat the staged config as the experiment definition. WandB and the tracking
@@ -69,9 +69,9 @@ write. Re-evaluate this distinction if a checkout changes execution model.
 - A final-eval-only run should restore model state without constructing or
   restoring the original training dataloader. This allows evaluation on a
   different compatible topology.
-- An eval checkpoint still has to be local to the selected region. Copy it
-  deliberately or pin the job per `infra.md`; do not rely on a remote bucket
-  read.
+- For Kaiming Group Code (Type 1), an eval checkpoint still has to be local to
+  the selected region. Copy it deliberately or pin the job; do not rely on a
+  remote bucket read.
 - Benchmark data roots, scoring protocols, and mirror validation for the
   default Stage-3 final eval (DocVQA, RealWorldQA) are in `vlm_data.md`.
 
