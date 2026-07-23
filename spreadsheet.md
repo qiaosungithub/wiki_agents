@@ -18,9 +18,8 @@ must not silently force it into the existing schema.
 
 ## Transaction
 
-1. Resolve the input to an exact WandB run and, when relevant, an exact infra job
-   attempt. An 8-character id is normally unified infra; a 4-digit id may be a
-   legacy tmux window.
+1. Resolve the input to an exact WandB run and, when relevant, an exact job
+   attempt.
 2. Read the nearby sheet rows before choosing a target. Reuse a clearly matching
    blank row or insert beside the closest comparable experiment, not at the end
    by default.

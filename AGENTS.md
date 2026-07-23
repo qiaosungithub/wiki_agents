@@ -1,7 +1,7 @@
 # Workspace Memory
 
 This folder contains the small amount of shared context an agent needs before
-working under `/kmh-nfs-ssd-us-mount/code/qiao/work`.
+working under `/usr/local/google/home/qiaos/work`.
 
 ## Start Here
 
@@ -14,11 +14,8 @@ working under `/kmh-nfs-ssd-us-mount/code/qiao/work`.
 
 ## Workspace Model
 
-- This is a shared research workspace with many independent repositories and a
-  shared NFS mount. A task's scope is the checkout the user named, not the whole
-  workspace.
-- `unified_infra` and its `infra` CLI are the current TPU job system. Legacy
-  xibo tools remain only for a few inspection, mount, copy, and cleanup tasks.
+- This is a shared research workspace with many independent repositories. A task's
+  scope is the checkout the user named, not the whole workspace.
 - Training data and checkpoints are region-local. Metadata is cheap to inspect;
   large payloads are not safe to move or read across regions by default.
 - Agent memory should capture durable decisions and non-obvious invariants.
@@ -46,7 +43,6 @@ working under `/kmh-nfs-ssd-us-mount/code/qiao/work`.
 | Task | Read |
 |---|---|
 | Find a checkout or understand project boundaries | `projects.md` |
-| Queue, inspect, resume, debug, or clean up TPU jobs | `infra.md` |
 | Change VLM training, checkpointing, resume, or eval code | `vlm_training.md` |
 | Upload VLM datasets, audit adapters/coordinates, prepare eval mirrors | `vlm_data.md` |
 | Log WandB results into the experiment spreadsheet | `spreadsheet.md` |
