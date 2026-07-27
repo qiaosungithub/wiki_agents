@@ -1,0 +1,28 @@
+Storage cleanup manifest
+Timestamp: 2026-07-25T17:45:29Z
+Filesystem: /kmh-nfs-ssd-us-mount (shared NFS)
+Authorization: explicit user request in the active Codex session
+
+DELETE 7621136384 /kmh-nfs-ssd-us-mount/code/hanhong/envs/visarc
+Reason: user explicitly authorized removal of the hanhong visarc environment.
+Checks: no local process/open-file reference; zhh has no active or pending unified-infra jobs.
+Recovery: recreate the Python environment from project requirements if needed.
+
+DELETE 2010804224 /kmh-nfs-ssd-us-mount/staging/sqa/hf-cache
+Reason: user explicitly authorized removal of all staging hf-cache directories; this is the only match at depth <= 3.
+Checks: no local process/open-file reference and no reference in current sqa active/pending staged code, output logs, or dispatch logs.
+Recovery: Hugging Face artifacts can be downloaded again.
+
+DELETE 648908800 /kmh-nfs-ssd-us-mount/staging/sqa/env_override_wheels
+Reason: cached JAX/libtpu wheels; user requested verification and cleanup if unused.
+Checks: no local process/open-file reference and no reference in current sqa active/pending staged code, output logs, dispatch logs, current infra source, or shell history.
+Recovery: wheel filenames preserve exact versions and can be downloaded again.
+
+Expected reclaimed allocated space: 10280849408 bytes.
+
+Result:
+- All three paths were removed successfully and verified absent.
+- During deletion, /staging/j_austin_eth3d_sweep grew from about 60.7 GB to
+  120.5 GB. This unrelated concurrent write masked the reclaimed space in df.
+- Post-delete /staging/sqa measured 45,310,238,720 bytes after removal of its
+  hf-cache and env_override_wheels directories.
