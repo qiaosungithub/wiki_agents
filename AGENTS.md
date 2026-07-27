@@ -30,7 +30,14 @@ working under `/usr/local/google/home/qiaos/work`.
 - Keep user-facing responses concise and natural. Lead with the outcome, use
   plain Chinese, and avoid jargon, repetition, long preambles, or unnecessary
   structure. Explain technical terms only when they help the user decide or act.
-- Push only when the user's current request explicitly asks for a push.
+- The operator's default policy is "push whenever you like" — do not ask
+  before `git push` for routine work. Push proactively at natural
+  checkpoints (a feature works end-to-end, a bug is fixed, a session is
+  about to end). Push IMMEDIATELY without asking if the edit tooling has
+  shown any sign of file corruption (partial writes, `Rename failed`
+  errors, unexpected duplicated blocks, syntax errors after a supposedly
+  successful edit) so the working state is preserved on the remote before
+  the next edit potentially compounds the damage.
 - Preserve user changes. Never revert, overwrite, or clean a dirty worktree as
   collateral work.
 - Before changing code, verify the task premise against the current state:
