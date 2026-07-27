@@ -27,9 +27,21 @@ working under `/usr/local/google/home/qiaos/work`.
 - Converse with the user in Chinese. Write repository artifacts in English
   unless a task guide explicitly requires another content language, as
   `paper_reading.md` does.
+- Keep user-facing responses concise and natural. Lead with the outcome, use
+  plain Chinese, and avoid jargon, repetition, long preambles, or unnecessary
+  structure. Explain technical terms only when they help the user decide or act.
 - Push only when the user's current request explicitly asks for a push.
 - Preserve user changes. Never revert, overwrite, or clean a dirty worktree as
   collateral work.
+- Before changing code, verify the task premise against the current state:
+  reproduce when feasible, inspect the relevant code, tests, and recent history,
+  and compare current behavior with the acceptance criteria. "No change needed"
+  is a valid outcome, but failed reproduction alone is not proof; account for
+  partial or incorrect prior fixes.
+- Before claiming completion, re-read the original request and acceptance
+  criteria, run the most relevant available checks, read their complete output,
+  and compare the result with the request, not with the patch. State anything
+  that remains unverified.
 - For Type 1 projects, never read or move data and checkpoint payloads across
   regions or zones by default. Prove compute and storage locality first; see
   `data_locality.md`.
