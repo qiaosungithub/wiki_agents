@@ -1,3 +1,6 @@
+# Historical one-off diagnostic preserved for provenance.
+# The experiment id is stale; do not use this as an active shared utility.
+
 import asyncio
 from xmanager import xm
 from xmanager import xm_abc

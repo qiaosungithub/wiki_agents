@@ -19,13 +19,26 @@ project, then revisit both every cycle.
 
 ## Durable Records
 
-For every run, retain the job id, WandB identity, staged config or commit,
-important hyperparameters, data recipe, region/accelerator type, logdir, metric timeline,
-status, and conclusion.
+For every run, retain the job id, tracker identity (WandB, XManager, or another
+backend), staged config or commit, important hyperparameters, data recipe,
+region/accelerator type, logdir, metric timeline, status, and conclusion.
 
-Use descriptive `wandb_notes` so humans can identify the purpose and cost class
+Use descriptive run notes so humans can identify the purpose and cost class
 without reconstructing the launch command. Do not let prose notes override the
-effective stage config observed in WandB or logs.
+effective staged config observed in the tracker or logs.
+
+## Tracker Evidence
+
+- Identify the actual tracking backend before querying it. `EqR-jax` normally
+  routes WandB-shaped calls to TensorBoard/XManager; see `eqr_jax.md`.
+- For a real external WandB run, resolve the exact entity/project/run and
+  enumerate `run.files()` before downloading. `output.log` is common, not
+  guaranteed; use a run-scoped temporary directory when it exists.
+- Do not assume redirected stdout, child-process output, an offline run, or a
+  crashed process uploaded complete console logs. Compare tracker artifacts with
+  the job's authoritative logs and staged config.
+- Preserve the original trace or log pointer when recording a conclusion.
+  Summaries are navigation aids, not substitutes for evidence.
 
 ## Decision Discipline
 

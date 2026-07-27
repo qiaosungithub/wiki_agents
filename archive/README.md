@@ -5,9 +5,9 @@ Nothing under this directory is part of the default agent read path.
 - `audits/` holds dated audit snapshots: scan counts, validation numbers, and
   status observations that back a rule in a core guide. They age; the guide's
   rule stays authoritative, and status must be re-verified live.
-- `details/` preserves the operational guides as they existed before the
-  2026-07-13 core-memory compression. It includes exact commands, thresholds,
-  paths, incident ids, and the user's then-uncommitted additions.
+- `details/` preserves exact operational guides and one-off diagnostic examples
+  that are too specific for core memory. It includes commands, thresholds,
+  paths, incident ids, and pre-compression material.
 - `legacy/` preserves verbatim snapshots of older repository-local agent memory.
 
 Use these files only to recover provenance or troubleshoot a case that the core
