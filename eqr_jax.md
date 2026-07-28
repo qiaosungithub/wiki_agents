@@ -43,5 +43,12 @@ before porting behavior. Read `xmanager.md` for all launches and job diagnosis.
 - Resume uses the exact XManager experiment identity (`resume_xid`) and its
   workdir. Verify checkpoint and config continuity before treating appended
   charts as one run.
+- Checkpoints go to `$CHECKPOINT_BUCKET` (injected by the launcher), never to
+  `workdir`, which is task-local `/tmp` and is wiped by every Borg restart.
+  `main.py::_apply_borg_autoresume` rediscovers the newest complete checkpoint
+  there at startup. `load_from` accepts `gs://` and must be handled through the
+  path helpers in `utils/ckpt_util.py`, not `os.path`. The launcher/runtime
+  contract for `LOAD_FROM`, `WANDB_RESUME_ID`, and `CHECKPOINT_BUCKET` is owned
+  by `xmanager.md` §Preemption, Restart, And Resume.
 - Do not query the WandB API for EqR-jax unless current code proves that a real
   external WandB run was created.
