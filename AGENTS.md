@@ -72,7 +72,8 @@ working under `/usr/local/google/home/qiaos/work`.
 | Choose cells/buckets or access, copy, or upload payloads | `data_locality.md`; then the data guide/native docs listed in `projects.md`, if any |
 | Queue, inspect, resume, or debug XManager/Borg jobs, including `deepmind-dynamic` | `xmanager.md`; then the guide/native docs listed in `projects.md`, if any |
 | Change or run `EqR` / `EqR-jax` | `eqr_jax.md`; also `xmanager.md` when launching |
-| Operate or debug the Gemini/Jetski agent web app | `agent_web_gemini.md` |
+| Operate or debug the Gemini/Amply/Claude agent web app | `agent_web_gemini.md` |
+| Launch or manage an agent CLI on this workstation (`clod`, `amp`, `gemini`) | `local_agent_cli.md` |
 | Change VLM training, checkpointing, resume, or eval code | `vlm_training.md` |
 | Upload VLM datasets, audit adapters/coordinates, prepare eval mirrors | `vlm_data.md` |
 | Log WandB results into the experiment spreadsheet | `spreadsheet.md` |

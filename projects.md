@@ -23,7 +23,8 @@ and git state before editing it.
 | `nnflow_jax/` | JAX implementation of Generative Modeling Through Drifting | Native docs; archives only for old context |
 | `EqR/` and `EqR-jax/` | PyTorch and JAX continuous-space reasoning for Sudoku and mazes | `eqr_jax.md`; `xmanager.md` for launches |
 | `tpu_cmd/` | Shared XManager wrapper, launcher, and job tracking | `xmanager.md`; then native code |
-| Agent web / Jetski checkout (resolve the live path) | Web interface for Gemini, Codex, and Claude agents | `agent_web_gemini.md`; then native docs |
+| Agent web / Jetski checkout (resolve the live path) | Web interface for Gemini, Amply, and Claude agents | `agent_web_gemini.md`; then native docs |
+| `agent-island/` | Terminal session managers for the agent CLIs (`clod`, `amp`, `gpt`, `gemini`) | `local_agent_cli.md`; then native docs |
 | `readings/vision-related/tutorials/` | Paper deep-reading reports | `paper_reading.md` |
 
 ## Project Boundaries That Are Easy To Miss
