@@ -27,6 +27,51 @@ runtime storage, plus the target project's own guide.
   Verify that registration after submission instead of assuming the launch
   transaction completed.
 
+## Where The `tpu` Tooling Lives (two halves, two git repos)
+
+The `tpu` CLI is split across two locations, and the split is forced by Blaze,
+not by preference. Know which half you are editing before you touch anything.
+
+| Half | Path | Contents |
+|---|---|---|
+| Shell / launcher | `~/work/tpu_cmd/` | `tpu_wrapper.sh`, `xm_launcher.py`, `README.md` |
+| Blaze-built checkers | `/google/src/cloud/qiaos/xm_test/google3/experimental/users/qiaos/tpu_utils/` | `money_check.py`, `quota_check.py`, `infra_check.py`, `group_utils.py`, `preflight/` (topology, capacity, market, router + tests), `pydcheck/`, probes |
+
+The google3 half cannot be moved into `~/work`: it imports
+`google3.experimental.users.qiaos.tpu_utils.*`, its BUILD depends on targets
+like `//learning/agents/orcas/tools/gqm_tool`, and `tpu_check_daemon.sh` runs
+the compiled `blaze-bin/...` binaries every ~60s.
+
+**Symlinking the google3 half out to `~/work` does not work.** All three
+variants were tested and fail: an absolute directory symlink is rejected
+outright (`Absolute symlinks are forbidden`), a relative one escapes the source
+root (`BUILD file not found`), and per-file symlinks fail at action execution
+(`missing input file`). Only the reverse direction works -- real files in
+google3, a symlink in `~/work` pointing at them. `~/work/tpu_cmd/google3_tpu_utils`
+is exactly that, for navigation only.
+
+### Git layout
+
+Both halves are versioned, by two separate repos:
+
+- `~/work/tpu_cmd/` -- an ordinary git repo.
+- The google3 half -- a git repo created with
+  `git init --separate-git-dir=~/work/tpu_utils.git <path>`. The worktree stays
+  in google3 so Blaze and CitC are unaffected; only a ~56-byte `.git` *file*
+  (a `gitdir:` pointer) sits in the google3 directory, and Blaze builds fine
+  with it present. Run `git` commands from inside the google3 directory as
+  usual.
+
+Why `--separate-git-dir` rather than one repo plus a symlink: git records a
+symlink as mode `120000`, i.e. the link itself, so committing
+`google3_tpu_utils` would back up zero of the files behind it. That symlink is
+gitignored for this reason.
+
+CitC is not a backup. Most of the google3 half is still unknown to Piper
+(`g4 files` reported `no such file(s)` for the directory; only
+`test_xmanager_api.py` was ever `g4 add`ed), so the git repo is currently the
+only recovery path for it.
+
 ## Requirements And Runtime
 
 - A job intended to consume guaranteed PROD quota must set
@@ -41,108 +86,191 @@ runtime storage, plus the target project's own guide.
 
 ## Quota, Money & GQM Marketplace
 
-### Underlying Allocation Logic: PROD vs BATCH
-- **PROD (`ServiceTier.PROD` / HighlyAvailable / Borg priority 200)**:
-  - **Not preemption-proof.** PROD is safe from *higher-priority* preemption,
-    but it is still evicted by **equal-priority slice defragmentation**
-    (`SLICE_DEFRAGMENTATION`). Treat "PROD cannot be preempted" as false; size
-    the restart budget below for PROD too.
-  - Strict hard quota limit (**Quota-based**). Uses guaranteed group allocations
-    assigned by Org/Team. Cannot be expanded via money. Exhaustion causes
-    immediate admission failure (Borg `RESOURCES_EXCEEDED` / gRPC
-    `RESOURCE_EXHAUSTED`, or the XM status category `FLEX_CEILING_EXCEEDED` /
-    `DEFICIT_IN_PARENT_POOLS`).
-  - **Rejected, never queued.** Admission is a one-shot check: over quota means
-    instant failure, not a wait for capacity to free up. Any "queueing" is
-    client-side retry (the daemon's 5×5min loop), not a Borg feature. Contrast
-    with BATCH, which re-bids every market cycle.
-  - PROD still has a shadow price in `ResourcePrices` (visible in `tpu money`),
-    reflecting how contested that (cell, accelerator) is; it is **not** used
-    for admission.
-- **BATCH (`ServiceTier.BATCH` / NonProd / Borg priority 100)**:
-  - **Preemptible** — always, including in the free pool. Priority is exactly
-    **100** (`third_party/py/xmanager/xm/resources.py`, `ServiceTier`), which is
-    below the goodput-protection threshold of 200, so BATCH TPU work is the
-    first thing sacrificed in a squeeze.
-  - TPU gangs are scheduled all-or-nothing with **no queue position and no
-    aging**. Waiting longer does not improve your odds; a job that has sat
-    "pending" for a day is not making progress toward being scheduled.
-  - Governed by GQM (Global Quotas Marketplace). Every ~1 minute a market
-    cycle runs: global demand and supply per `ResourceType` are aggregated
-    across all MDBs and a **uniform equilibrium clearing price** is found by
-    binary search. Cell-specific prices are then broadcast (they are the
-    global equilibrium scaled by each cell's RPP).
-  - Admission is **not** a simple `bidding_power ≥ price` check. Each MDB's
-    demand-at-price is a step function, and the auction is combinatorial.
-    `bp ≥ price * chips` is a **necessary-but-not-sufficient sanity signal**.
-  - **Market Clearing Price**:
-    - **0.00 Credits/hr (Free Pool)**: supply ≥ demand this cycle. Everyone
-      clears at zero cost. NOTE: preemption still happens if a higher-priority
-      job needs the machine.
-    - **> 0.00 Credits/hr (Auction)**: demand exceeds supply. Only MDBs whose
-      bid at their requested chip count clears the price get the resource.
+### Underlying allocation logic: it is one pipeline, not two
 
-### `ResourcePrices` sentinels: free vs unobtainable vs not offered
+The old "PROD = pure quota, BATCH = pure market" model is **wrong** for
+`deepmind-dynamic/*`. Both tiers go through GQM. What differs is which
+scheduling pass they enter.
 
-`MilliCreditsPerUnitHour` encodes non-numeric states in-band. Collapsing them
-loses real signal, so decode all four cases separately:
+**The pipeline** (`credits → floor → admission`):
 
-| Raw value | Meaning | Render as |
+    credits ──autobid──► auction (every 30s) ──► clearing price
+                                                      │
+                       floor = lease_floors + min(demand, bid / clearing_price)
+                                       ↑ this IS "quota" (`floor_v2`)
+                                                      │
+                     XBorg admission: within-floor is protected, above-floor is opportunistic
+                                                      │
+                          Borg: ServiceTier preemption + physical cell capacity/topology
+
+- **Quota is an OUTPUT of the market, not an input.** For a GQM pool,
+  `ResourceAllocationDetails.floor_v2` is recomputed every market cycle from the
+  auction result and pushed to XBorg
+  (`update_prices_and_floors_handler.cc` → `DynamicMdbFloors` →
+  `Allotment.global_resource_guarantee` → `floor_v2`). `MdbAssignedFloorsProto`
+  splits it into `market_floors` (bought with credits) and `lease_floors`
+  (administratively granted). Money genuinely buys quota; that is the definition
+  of a dynamic alloc. Static (non-GQM) pools are the opposite: fixed,
+  human-configured floors and no credits at all
+  (`go/xborg-why` §"Requirements size increase" states both cases explicitly).
+- **`floor_v2` is a floor, not a ceiling.** go/gqm FAQ: "Floors are neither an
+  upper or a lower bound... Users can exceed their floor opportunistically."
+  There is **no per-alloc hard chip ceiling** anywhere in the protos — only
+  pool-level and lead-level ceilings, plus an economic cap
+  (`credit_charges_limit_factor`, which caps the BILL, not usage; the excess is
+  forgiven).
+- **Prices are per `(resource_type, cell, priority)`.** `priority` IS the tier
+  (`brain.quota.ResourceSpec`). PROD prices are real and binding — e.g. VIPERFISH
+  PROD in `deepmind-dynamic-pool` cleared at 37–75 credits/chip-hour on
+  2026-07-28. Do **not** treat the PROD price as a shadow price.
+
+**PROD (`ServiceTier.PROD` / HighlyAvailable / Borg priority 200)**
+- Enters the lease and market buckets: `FULLY_COVERED_BY_LEASE` first (free, no
+  bidding), then `*_WITHIN_GLOBAL_MARKET` (needs credits). Lease-covered demand
+  is subtracted from `num_chips` before the market sees it, so it is also exempt
+  from limit orders (`market_algorithm/limit_order.cc:238-248`).
+- Can be **queued**, not just rejected. `GQM_RESOURCE_DEFICIT_INFO` is a queue
+  state that re-evaluates every 30s cycle.
+- Still not preemption-proof: equal-priority `SLICE_DEFRAGMENTATION` can evict it.
+
+**BATCH (`ServiceTier.BATCH` / NonProd / Borg priority 100)**
+- `BUCKET_ID_BATCH_TIER` is the **last** bucket processed
+  (`scu_decision_structs.h:24-28` — enum order == pass order), and
+  `scu_bucketizer.cc:305-310` says explicitly: "To reserve resources for PROD
+  tier SCUs, SCUs with BATCH tier TPU demand will be placed in the BATCH_TIER
+  bucket, which has the lowest priority."
+- **That pass never checks your floor.** The only test is
+  `DemandFitsInRootPoolCapacity(...)` against what is left of the root pool
+  (`scu_scheduler.cc:285-296`). This is why a BATCH job runs fine with
+  `floor_v2 == 0` — and why "BATCH quota" is a meaningless number. Its GQM
+  capacity type is `SPILLOVER`; on the XBorg side it is `NOT_ADMITTED`
+  (= ABOVE_FLOOR). Being above floor, it is the first thing reclaimed
+  (`go/xborg-why-descheduled#resource-guarantee-reclaim`).
+- Consequence: for BATCH, **only live pool headroom matters**. Waiting does not
+  help; nor does asking for more BATCH quota.
+- `floor_v2` shows *no* NonProd key at all (rather than `0`) because
+  `xborg_config_utils.cc:551` skips populating `global_resource_guarantee` when
+  the auction floor is 0 (`// If floor is 0, add an empty allotment.`). An empty
+  allotment is a designed state, not a broken alloc.
+
+**The admission predicate is neither AND nor OR.** It is an ordered multi-pass
+pipeline over one shared `remaining_root_pool_capacity_tensor`. Money and floor
+decide *which bucket you are in* — i.e. your place in line. When your turn comes,
+the only test is "is there stock left".
+
+**`minimum_duration` — the one lever that trades schedulability for immunity
+(forces within-floor-only, so you are never reclaimed) — is explicitly
+unavailable on dynamic/GQM pools** (go/xborg-minimum_duration). On
+`deepmind-dynamic/*` you cannot buy determinism this way.
+
+### Limit orders can block a PROD job (`NOT_SCHEDULED_TRIGGERED_LIMIT_ORDER`)
+
+**`limit_orders.md` is the canonical guide** — how to set one, scope rules, the
+`dynlo` CLI, and the restricted-LOAS blocker. Summary only here.
+
+A **limit order** is a user-set maximum price (credits/hour) per
+`(ResourcePool, Mdb, XManagerExperimentId, ScuId, ResourceType, Priority)`.
+It triggers when `market_price > limit_order_price`, and the workload is
+**paused** (`PAUSED_BY_LIMIT_ORDER`), resuming automatically when the price
+drops. A **running** job is stopped too, not just a pending one.
+
+
+- **Precedence is SCU > XID > MDB** (`team_queues.cc:536-570`; most granular
+  wins). **An MDB-wide limit order set by a teammate silently applies to every
+  job in the group, including yours.** This is a real and easy-to-miss failure
+  mode — G9 hit exactly this.
+- **There is no implicit default.** No row ⇒ no `milli_credit_limit_price` ⇒ the
+  reason can never fire (`limit_order.cc:233`). `tpu_cmd` does not set one.
+- **You can set/remove it yourself** if your MDB is in
+  `limit_orders_enrolled_mdbs` (quota_config.pbtxt); the CLI only checks LOAS,
+  not job ownership. Prebuilt binary, no build needed:
+  `/google/bin/releases/brain-quota/set_limit_order/set_limit_order`
+  - `--xid=<xid> --price=<credits_per_hour>` (infers pool/mdb/type/tier)
+  - `--price=-1` removes it; `--dry_run` previews safely.
+  - Prefer a per-XID override over raising the group-wide floor.
+- Raising it costs nothing by itself — but you are then charged the **clearing
+  price** for actual usage (floor + opportunistic) every 5 min, draining
+  `MdbCreditBalance` faster for the whole team.
+- To diagnose, read Spanner directly (plain LOAS, ~15s; the `GetLimitOrders` RPC is
+  NOT reachable from a workstation):
+  `/google/bin/releases/spanner/public/span/span sql /span/global/brain-quota:quota
+   --span_sql_disable_sdl_and_dml "SELECT ... FROM LimitOrders WHERE Mdb='<mdb>'"`
+  (`span` is a directory; `ResourceType` accepts the enum NAME).
+  `LimitOrderUser` tells you who set it. `ResourcePrices` = current cleared price
+  per cell/tier (no timestamp column); `PriceEstimatesHistory` = per-cycle history
+  (`AggregatedResourcePricesHistory` is empty); `DynamicMdbFloors` = your real
+  current floor; `ScuChunkDecisions` = the authoritative per-SCU verdict.
+  **Do not trust `ScuInfo.is_paused_by_limit_order`** — it is written at a
+  different pipeline stage and reads `false` while the decision row already
+  carries `limit_order_price`.
+- **Moving cells does NOT clear a triggered limit order.** (Corrected
+  2026-07-29; the earlier "just pin a cheap cell" advice here was wrong.) Every
+  production cycle runs the V2 auction (`cron_trigger/trigger_server.cc:222`
+  hardcodes `run_v2_auction=true`), which calls
+  `TransfromMarketSpecsToSingleCell` *before* the auction and rewrites every
+  spec and queued SCU to the synthetic cell `single-global-layer`
+  (`cron_service/utils/quota_auction_utils.cc:438`, `:132`; constant in
+  `data/consts.h:45`). The trigger then matches
+  `spec.cell() == scu_info.cell()` (`market_algorithm/limit_order.cc:265`) with
+  both sides equal to that constant, so **the cell you pinned never enters the
+  comparison**. Post-auction the name is rewritten to `global`, which is the row
+  that lands in Spanner. Corroboration: `LimitOrders` has no Cell column at all,
+  so a per-cell cap is not expressible.
+  - So the number to compare your cap against is
+    `ResourcePrices WHERE Cell='global'`, not the per-cell minimum.
+  - Real fixes for a triggered cap: a different card, a different tier, or
+    raise/remove the cap.
+  - Cells still matter for **cost** — charging reads the per-cell hourly rows
+    (`mdb_charges_utils.cc:55-65`), and the spread is real (v6e PROD on
+    2026-07-29: 22.23 in 117 cells, 48.93 in nine). `tpu route` therefore picks
+    the cheapest cell to save credits, while deciding *blocked* from the global
+    price.
+- Other GQM details worth knowing (all source-verified 2026-07-29):
+  - The comparison is **per chip-hour**, is **not** multiplied by `num_chips`,
+    and does **not** include `scu_bidding_buffer` (that only applies when
+    bidding, `bidding.cc:148-152`). It is a strict `>`; clearing exactly at the
+    cap is affordable.
+  - Lease exemption is all-or-nothing: only `num_chips == 0` skips the check
+    (`limit_order.cc:236-248`). 80%-lease-covered demand is still fully paused.
+  - **BATCH is not exempt** from limit orders; there is no priority filter in
+    the chain. Our MDBs simply have no BATCH rows today.
+  - A `global` price of 0 can mean "no price computed this cycle", not "free"
+    (`resource_prices.cc:244-258` writes 0 when no price was found).
+- `floor_v2` you read anywhere (cdpush textpb, `tpu quota` cache, the UI) is a
+  **snapshot of one 30s cycle**, not an entitlement. A depot config showing 256
+  and the live `DynamicMdbFloors` showing 128 is normal, not a bug.
+
+### Money buys two different things
+
+| Money form | Buys | Mechanism |
 |---|---|---|
-| `0` | genuine free-pool clearing price | `0.00 (free pool)` |
-| `INT64_MAX` | **unobtainable** in that cell this cycle | `unobtainable` |
-| `INT64_MIN` / negative | no bid recorded; GQM sanitizes to 0 | `0.00` |
-| *no row at all* | pool does not offer this card | `not offered` |
+| **bid** (a flow, from income × leverage) | your **floor** (protected quota) | `floor = min(demand, bid/price)` |
+| **balance** (a stock) | your **opportunistic share** above floor | `Allotment.opportunistic_importance_factor = balance/1000` (`xborg_config_utils.cc:263-292`) |
 
-- A price of `0` is a **real auction outcome**, not missing data — verify by
-  checking for the literal integer rather than assuming. Reference decoding
-  lives in `gqm_tool.py` (`CASE WHEN ... 9223372036854775807 THEN -1 ...`).
-- **Free does not mean available.** Price reflects last cycle's supply/demand,
-  not inventory: a card can clear at 0.00 while only a handful of chips are
-  actually obtainable. Always cross-check the BATCH forecast before choosing an
-  accelerator on price alone.
-- Because `INT64_MAX` cells are excluded from the price range, report the count
-  of unobtainable cells alongside it, or a "free" row can look healthier than
-  the pool really is.
+`bidding_power_hourly = daily_credit_income / 24 * income_leverage` is
+independent of floor — floor is downstream of it, not an input.
+Empirically confirmed on `deepmind-dynamic/fr-dna-grand-challenge-team-resource`:
+`MdbCreditBalance` = 6,578,508 credits and the allotment's
+`opportunistic_importance_factor` = 6,587,067 — a 0.13% match.
 
-### Reading quota correctly: `floor_v2`, not pool capacity
+**Prices are per CHIP-hour** (`bidding.cc:151`:
+`price_estimate * scu.num_chips() * (1.0 + buffer)`), so a v5p-16 at 40
+credits/chip-hr costs ~640 credits/hr.
 
-Three different numbers are easy to confuse; only the first is *your* quota.
+### Known tooling gaps
 
-| Source | Scope | Use for |
-|---|---|---|
-| `ResourceAllocationDetails.floor_v2` | this alloc | **Quota** |
-| `get_pool_capacity(pool)` | the entire shared pool | nothing user-facing |
-| `get_forecast_info(alloc)` | this alloc, live | **Obtainable** |
+Fixed 2026-07-28: `tpu money` now shows **both** tiers' clearing prices plus a
+`Limit order` column that flags caps as `ok` / `blocks dear cells` /
+`BLOCKS ALL` against the observed price range, and names who set them.
+`tpu queue --cell=<name>` can pin a job to a specific cell.
 
-- **Quota must be read from `floor_v2`.** `get_pool_capacity` returns the whole
-  resource pool (`deepmind-dynamic-pool` spans hundreds of cells and is shared
-  by most of our groups), so using it overstates quota by orders of magnitude
-  and makes every group in that pool display near-identical numbers. A quick
-  smell test: if two groups show the same quota, the pool is being read.
-- **All `tpu_*` fields in `resource_model.proto` are raw chip counts.** There is
-  no milli-unit encoding; never divide by 1000. `//learning/deepmind/xmanager2/
-  resources/proto/resource_model.proto` documents each field as "# of chips".
-- The forecast column is a *prediction of what is schedulable now*, not a
-  guarantee, and not pool capacity. Label it "Obtainable".
-- When rolling several groups into one total, sum quota and usage but take the
-  **max** of obtainable: groups sharing a pool are all looking at the same free
-  chips, so summing double-counts them.
+Still open:
 
-### Dynamic allocs: `Available = 0` is normal, not exhaustion
+- `tpu quota`'s `~` marks the **smaller** number as Quota — easy to misread.
+- `tpu money`'s bidding-power figure does not reproduce from Spanner; re-verify
+  the formula before trusting it.
 
-For `deepmind-dynamic/*` the floor is **recomputed continuously to track live
-usage** rather than being a fixed grant. Consequences:
-
-- `floor ≈ used` holds by construction, so a naive `Available = quota - used`
-  sits at ~0 permanently. This does **not** mean the alloc is full.
-- The floor visibly drifts between refreshes, and `used` can briefly exceed
-  `quota`. Surface that as a caveat; do not "fix" it by clamping.
-- To judge real headroom use **Obtainable** (forecast) or `tpu preflight`
-  per-cell numbers, never `Available`.
-- Corollary: preflight's "PROD quota headroom is thin / remaining=0" warning is
-  near-permanent for dynamic allocs and carries little signal. The binding
-  constraint is usually topology fragmentation instead.
+---
 
 ### GQM Bidding Power: how it is computed
 `bidding_power_hourly = daily_credit_income / 24 * income_leverage`.
@@ -163,10 +291,15 @@ usage** rather than being a fixed grant. Consequences:
     `MdbCreditBalance`). Do not conflate them: a large balance with tiny income
     still bids well for a while. Static-pool MDBs have no balance row and are
     shown as `n/a (static pool)` rather than `0`.
-  - **Clearing Prices in Your Pools**: **BATCH only**, for major cards (v4,
-    v5p, v6e, v6p), filtered to the pools you actually participate in. PROD
-    prices are deliberately hidden — PROD admission is quota-gated, so its
-    shadow price is noise for scheduling decisions.
+  - **Clearing Prices in Your Pools**: **both PROD and BATCH**, for major cards
+    (v4, v5p, v6e, v6p), filtered to the pools you actually participate in.
+    PROD prices are real and binding on dynamic pools — they were hidden until
+    2026-07-28 on the disproven "shadow price" theory, which removed the only
+    panel that explains a PROD job stuck in `TRIGGERED_LIMIT_ORDER`.
+  - **Limit order column**: the group's MDB-level price cap per (card, tier),
+    compared against the live price range, plus the `LimitOrderUser` who set
+    it. Since resolution order is SCU > XID > MDB, a teammate's cron can cap
+    your jobs without you knowing.
 - **Related Commands**:
   - `tpu quota` — per-alloc guaranteed floor, usage, and obtainable forecast.
   - `tpu quota -l` — map G1..GN to full MDB allocation paths.
@@ -196,6 +329,71 @@ browser):
 - One alloc: `https://xmanager.corp.google.com/resources/pools/<pool>/allocations/<url-encoded alloc>`
 - Whole pool usage: `https://xmanager.corp.google.com/resources/pools/<pool>/usage`
 
+## Debugging A Job That Dies With No Log
+
+### Reproduce locally first — a staged package is a normal Bazel target
+
+`tpu queue` snapshots the checkout into
+`//experimental/<user>/<project>_stages/<run>/` and packages *that*. The snapshot
+is an ordinary Bazel target, so the exact artifact Borg will run can be built and
+executed on the workstation:
+
+```bash
+cd /google/src/cloud/<user>/<workspace>/google3
+D=experimental/<user>/<project>_stages/<run_dir>
+blaze build $D:main --define=PYTYPE=FALSE --norun_validations
+blaze-bin/$D/main --help          # exercises the whole import graph
+```
+
+`--help` is enough: Abseil parses flags only after every module-level import has
+run, so import-time failures surface in seconds. This costs ~3 minutes and
+catches the entire class of "died before `main()`" bugs that are nearly
+undiagnosable remotely. **Do this before every launch that changes imports or
+BUILD deps.**
+
+### `strict_deps = False` makes the build lie
+
+A missing dependency is not a build error under `strict_deps = False`; it is a
+runtime `ModuleNotFoundError` on the TPU worker. The build passing proves
+nothing about importability — only running the binary does.
+
+### Why such a failure is invisible from outside
+
+A process that dies during module import produces:
+
+- `WorkUnit.status.message` == `''` (XManager has nothing to report)
+- no application log anywhere, including any GCS mirroring the app installs —
+  `main()` never ran, so nothing was installed
+- `WorkUnit.borg_job_states` == `[]` once the work unit is GC'd, which removes
+  the only handle (`cell` / `user` / `job_name`) that `borg tasklog` needs
+
+Seeing all three at once is itself the diagnosis: **the failure is before
+`main()`**. Do not keep re-launching to collect logs that cannot exist.
+
+### Getting logs, in order of reliability
+
+1. **Run the staged binary locally** (above). Highest signal, no queue, no cost.
+2. **`WorkUnit.borg_job_states`** — `cell`, `user`, `job_name`,
+   `task_state_counts`, `status_message_summary`.
+   **Requires `get_work_units(populate_detailed_executable_status=True)`**;
+   without that flag the field is silently an empty list, which reads exactly
+   like "the job is gone" and sends you down the wrong path.
+   `experimental/users/qiaos/tpu_utils:why_probe` sets it and prints a
+   ready-made `borg tasklog` command. Note the Borg job itself is GC'd within
+   minutes, so `borg getjob` on a dead job returns `Object not found` — the
+   work-unit status message survives much longer and usually carries the actual
+   Python exception.
+3. **Application-level mirroring to GCS** — `utils/logging_util.py::mirror_logs_to_bucket`
+   tees stdout/stderr to `$CHECKPOINT_BUCKET/logs/rank_N.log`, flushing on any
+   Traceback/Error line so the last words before a crash survive. Outlives the
+   task, the work unit, and the experiment — but only covers failures *after*
+   `main()` starts.
+4. `xmanager tail_logs --experiment_id=<XID> --work_unit_id=1` — works
+   sometimes; the CLI itself crashes with an envelope stream error often enough
+   that it cannot be relied on.
+5. `analog` — blocked by permissions on this workstation (both
+   `/google/bin/releases/analog-cli/analog` and per-user copies).
+
 ## Preemption, Restart, And Resume
 
 ### What a Borg task restart actually restores: nothing
@@ -216,15 +414,69 @@ task exit **is** counted, and Borg then declares the job dead. One preemption
 kills the experiment.
 
 Always pass an explicit `scheduling=`. `tpu_cmd/xm_launcher.py` sets it for both
-tiers, with `--max_task_failures` / `--max_per_task_failures` (default 10) plus
-`task_failure_credit_period=3600` so a long run is not killed by slow attrition
-of unrelated one-off failures.
+tiers, defaulting to `max_task_failures=-1` (unlimited),
+`max_per_task_failures=1`, `task_failure_credit_period=7200`.
+
+The asymmetry is deliberate: a long run should survive any number of unrelated
+preemptions, while a task that keeps dying is a real bug and should be declared
+dead rather than retried forever. The credit period makes it read as "recover
+from at most one failure per task every two hours". Shape borrowed from
+`mesh_diffusion`'s launcher.
+
+Two more settings worth copying from the same source:
+
+- `logs_read_access_roles=['all']` on the executor, so anyone (including you,
+  later) can read the job's logs without an ACL dance.
+- `deepsea_ici_resilient=False` for TPU jobs. An ICI-resilient slice costs
+  ~35% throughput; failing and being rescheduled onto a healthy slice beats
+  finishing 1.5x slower.
+
+### A Borg job is a different IAM principal from you
+
+The job runs as **`<user>@prod.google.com`**; your workstation is
+`<user>@google.com`. They are unrelated principals, so nothing you can read
+interactively is automatically readable from a TPU worker. A GCS bucket granted
+to you via a project group fails on the worker with
+
+    <user>@prod.google.com does not have storage.objects.get access ...
+
+and the same wall blocks application-level log mirroring to that bucket. This is
+by design: a job outliving your login session cannot borrow your credentials.
+
+Ways out, cheapest first:
+
+1. **Use CNS** (`/cns/<cell>-d/home/<user>/...`). The prod identity can read and
+   write it natively, no IAM change and nobody to ask. `epath`, orbax and the
+   path helpers in `utils/ckpt_util.py` all handle `/cns/` transparently, so
+   this is usually a one-line change to a path.
+2. Have a bucket **owner** grant `roles/storage.objectAdmin` to
+   `<user>@prod.google.com`. Note an org-level **IAM deny policy** may block
+   even owners; the giveaway is `due to an IAM deny policy` in the error.
+3. Service-account keys are **not** an option: `iam.serviceAccountKeys.create`
+   is denied org-wide.
+
+Cross-cell CNS reads work, with latency proportional to distance — check with
+`/usr/local/bin/mach_locality --locality_kind=metro <cell>` before assuming two
+cells are near each other. Cells in one metro (e.g. `yutulpz`/`yutulis`/`nk`/
+`nl` are all `tul`) are effectively free to read across.
 
 ### Checkpoints must not live in `workdir`
 
 `workdir` is task-local (`/tmp/...` on a TPU worker) and is wiped by the very
 event the restart budget exists to survive. A restart budget without durable
 checkpoints only buys you the right to redo the run from step 0.
+
+### `/tmp` is a RAM disk you must size yourself
+
+`/tmp` on a Borg task is backed by `tmp_ram_fs` in `JobRequirements`, and the
+default is small. Every task of a multi-task TPU job stages its own private
+copy of whatever it downloads, so an undersized value surfaces mid-run as
+`OSError: [Errno 28] No space left on device`. `tpu_cmd/xm_launcher.py` requests
+16 GiB by default (`--tmp_ram_fs_gib`), matching `//third_party/py/maxtext`.
+
+Also note **`fileutil` does not exist inside a Borg container**. Shelling out to
+it dies with `CalledProcessError`. Use `epath` (the same client orbax uses) for
+CNS I/O from inside a job.
 
 ### The env-var contract between launcher and training code
 
@@ -319,23 +571,37 @@ prompts.
 ### `tpu route` (local router)
 
 Given a desired *power class* (compute-equivalent), suggest the best
-`(group, tpu_type)` combo across your allocations:
+`(group, tpu_type, CELL)` combo across your allocations:
 
 ```
-tpu route --power=v5p-32 [--tier=PROD] [--groups=1,3,5] [--top=3]
+tpu route --power=v5p-32 [--tier=PROD] [--groups=1,3,5] [--top=3] [--explain]
 # power can be 'v5p-32', 'v6e-16', 'v4-32' (all equivalent), or a bare int.
 ```
 
 Power equivalence (heuristic, v5p-chip units):
 `1 v4 = 1 v5p = 0.5 v5e = 0.5 v6e = 0.5 v6p` chips.
 
-Router fans out preflight checks in parallel (≈26s for 8 groups × 5 archs),
+Router fans out preflight checks in parallel (≈30s for 9 groups × 5 archs),
 then ranks survivors by:
 
-1. Verdict status (GREEN > YELLOW; RED filtered out).
-2. `remaining_quota / requested_chips` (headroom ratio).
-3. `max_cell_obtainable / requested_chips`.
-4. Accelerator preference (v6e > v6p > v5p > v4 > v5e).
+1. Not blocked by a limit order (a blocked combo is never recommended, but it
+   is kept and explained rather than silently dropped — `--explain` lists them
+   with the cap, the pool price, and who set the cap).
+2. Verdict status (GREEN > YELLOW; RED filtered out).
+3. Headroom — **and this differs by tier on purpose**: PROD uses
+   `remaining_quota / requested_chips`; BATCH uses obtainable chips, because the
+   BATCH pass never consults `floor_v2` at all, so "BATCH quota" is noise.
+4. `cost_per_hour` = `chips × per-cell price` — prefer cheaper cells.
+5. Accelerator preference (v6e > v6p > v5p > v4 > v5e).
+
+Market data (per-cell prices + limit orders) comes from
+`~/.tpu_quota_cache_dir/market.json`, written by `money_check` on each daemon
+round, so the router stays offline and fast. If it is missing or stale the
+router says so loudly and falls back to price-blind ranking rather than failing.
+
+`tpu queue --power=` forwards the recommended cell as `--cell=<name>` (an
+explicit `--cell` always wins) and refuses to submit when every candidate is
+blocked, unless `--force`.
 
 **Router does not solve L3 fragmentation either.** It picks the group with
 the most headroom, but if all groups' available chips are fragmented, the
@@ -359,6 +625,10 @@ workflows. Highlights:
 - `tpu route --verbose` — stream per-candidate probe results.
 
 ## TPU Topology & Performance Equivalences
+
+> Codenames, `ResourceType` ids, HBM per chip, and the legal shape table now
+> live in `tpu_reference.md`. The allocator-policy notes below stay here.
+
 
 Source of truth for legal topologies is `borg/common/locus_info.cc` (NOT
 `learning/performance/ace/search_space_utils.py`, which is stale for v6e).

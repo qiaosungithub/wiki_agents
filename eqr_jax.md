@@ -32,6 +32,51 @@ before porting behavior. Read `xmanager.md` for all launches and job diagnosis.
   validation suppression is a narrow, current workaround to re-evaluate, not a
   general build rule.
 
+## Google3 Packaging Traps
+
+These all fail at module-import time, before `main()`, which on Borg looks like
+an empty `status.message` and no log at all. Reproduce locally in ~45s instead
+of guessing (see `xmanager.md` §Debugging A Job That Dies With No Log):
+
+- **`import wandb`** resolves via `//third_party/py/scamper:wandb_mock`, whose
+  `imports = ["wandb_mock"]` attribute the hermetic launcher ignores. `main.py`
+  adds the runfiles directory to `sys.path` explicitly.
+- **`//third_party/py/pydantic` is v1-only** (its top-level `__init__.py` is
+  empty); `pydantic.BaseModel` needs `:pydantic_v2`.
+- The wandb mock has **no `sdk` submodule**, so `wandb.sdk.*` in a type
+  annotation must be quoted or it is evaluated at class-creation time.
+- **`strict_deps = False` hides all of the above at build time.** A green build
+  proves nothing; run the binary.
+- Config discovery must not rely on `__file__` alone — under Bazel the CWD is
+  inside `main.runfiles/google3` and the yaml may not sit where `__file__`
+  implies. `configs/load_config.py` searches several roots.
+
+## JAX Startup Order
+
+- **Do not call `jax.distributed.initialize()`.** google3's JAX self-initialises
+  on first backend use, driven by the `--jax_port` / `--jax_controller_address`
+  flags XManager injects (`jax_google.py::_lazy_initialization`). Calling it
+  yourself either duplicates that work or, with the flags absent, raises
+  `ValueError: coordinator_address should be defined`.
+- Nothing before that point may touch JAX. `log_for_0` asks
+  `jax.process_index()` who it is, which boots the backend and then makes
+  initialisation illegal (`RuntimeError: ... must be called before any JAX
+  calls`). `main.py` uses a JAX-free `_boot_log` during startup.
+
+## Evaluating A Published Checkpoint
+
+- `extra.json` records only the fields that were **overridden** at training
+  time. `_resolve_eval_config` must MERGE that over the config defaults, not
+  replace the section, or `hidden_size`/`num_heads`/`L_layers` vanish and
+  pydantic reports `Field required [type=missing]`.
+- Dataset names in a checkpoint may not match `DATASET_PATHS`. The published
+  sudoku checkpoint says `Sudoku-1k`, which is the same corpus as
+  `Sudoku-aug1000`; unmapped names are passed through as literal paths and fail
+  later as "split train does not exist".
+- The published checkpoint has **no EMA shadow** while the config asks for EMA,
+  so evaluation silently falls back to raw params. Paper numbers were likely
+  produced with EMA weights — do not compare without accounting for it.
+
 ## Experiment Tracking
 
 - Config fields may retain historical `wandb` names, but EqR-jax uses a local

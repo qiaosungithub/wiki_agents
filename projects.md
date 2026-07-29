@@ -22,7 +22,7 @@ and git state before editing it.
 | `one-benchmark-suite/` | Benchmark registry, not a training framework | Native docs; archives only for old context |
 | `nnflow_jax/` | JAX implementation of Generative Modeling Through Drifting | Native docs; archives only for old context |
 | `EqR/` and `EqR-jax/` | PyTorch and JAX continuous-space reasoning for Sudoku and mazes | `eqr_jax.md`; `xmanager.md` for launches |
-| `tpu_cmd/` | Shared XManager wrapper, launcher, and job tracking | `xmanager.md`; then native code |
+| `tpu_cmd/` | Shared XManager wrapper, launcher, and job tracking. Only half the tool: the Blaze-built checkers live in google3 under `experimental/users/qiaos/tpu_utils/`, versioned by a separate git repo | `xmanager.md` § Where The `tpu` Tooling Lives; then native code |
 | Agent web / Jetski checkout (resolve the live path) | Web interface for Gemini, Amply, and Claude agents | `agent_web_gemini.md`; then native docs |
 | `agent-island/` | Terminal session managers for the agent CLIs (`clod`, `amp`, `gpt`, `gemini`) | `local_agent_cli.md`; then native docs |
 | `readings/vision-related/tutorials/` | Paper deep-reading reports | `paper_reading.md` |

@@ -71,6 +71,8 @@ working under `/usr/local/google/home/qiaos/work`.
 | Find a checkout or understand project boundaries | `projects.md` |
 | Choose cells/buckets or access, copy, or upload payloads | `data_locality.md`; then the data guide/native docs listed in `projects.md`, if any |
 | Queue, inspect, resume, or debug XManager/Borg jobs, including `deepmind-dynamic` | `xmanager.md`; then the guide/native docs listed in `projects.md`, if any |
+| Look up a TPU codename, HBM capacity, legal slice shape, or topology string | `tpu_reference.md` |
+| Cap what a job pays, or debug a job stuck pending on a dynamic pool | `limit_orders.md`; then `xmanager.md` |
 | Change or run `EqR` / `EqR-jax` | `eqr_jax.md`; also `xmanager.md` when launching |
 | Operate or debug the Gemini/Amply/Claude agent web app | `agent_web_gemini.md` |
 | Launch or manage an agent CLI on this workstation (`clod`, `amp`, `gemini`) | `local_agent_cli.md` |
