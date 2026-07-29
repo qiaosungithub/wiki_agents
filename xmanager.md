@@ -67,10 +67,16 @@ symlink as mode `120000`, i.e. the link itself, so committing
 `google3_tpu_utils` would back up zero of the files behind it. That symlink is
 gitignored for this reason.
 
-CitC is not a backup. Most of the google3 half is still unknown to Piper
-(`g4 files` reported `no such file(s)` for the directory; only
-`test_xmanager_api.py` was ever `g4 add`ed), so the git repo is currently the
-only recovery path for it.
+CitC is not a backup, and the google3 half was originally unknown to Piper
+(`g4 files` reported `no such file(s)` for the whole directory). It is now
+checked in as `cl/956103898` -- 24 files; `pydcheck/` is deliberately excluded
+as an unrelated one-off EqR-jax pydantic probe with a hardcoded staged-run
+path. Until that CL submits, the git repo is the only recovery path.
+
+The `preflight/*_test.py` files are self-asserting scripts (they `sys.exit(1)`
+on failure), not absltest. They must be declared `pytype_strict_contrib_test`;
+as `pytype_strict_binary` they silently never run and `blaze test` answers
+"No test targets were found".
 
 ## Requirements And Runtime
 
@@ -685,6 +691,17 @@ allocator with different rules, update that table.
    XManager API or `tpu_utils` in the current Google3 checkout to inspect the
    work-unit status message. Do not patch shared scripts with hard-coded job ids,
    and do not assume an alternate API bypasses authorization.
+
+### Job bookkeeping
+
+`~/.tpu_jobs.json` is the live registry `tpu check` renders from;
+`~/xm_job_to_bucket/` is its predecessor and is no longer written to (last
+entry 2026-07-26) — only `--resume_xid` still falls back to reading it.
+
+`tpu clear <xid> | all` **archives** rather than deletes, moving entries to
+`~/.tpu_jobs_legacy.json`. Keep that file: an entry is the only mapping from an
+XID back to its checkpoint bucket, staging dir and launch log once the Borg job
+and work unit are gone.
 
 ### TPU Check Error Rules & Auto-Retry Mechanism
 
