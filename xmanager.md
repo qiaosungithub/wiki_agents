@@ -662,7 +662,7 @@ Given a desired *power class* (compute-equivalent), suggest the best
 
 ```
 tpu route --power=v5p-32 [--tier=PROD] [--groups=1,3,5] [--top=3] [--explain]
-# power can be 'v5p-32', 'v6e-16', 'v4-32' (all equivalent), or a bare int.
+# power can be 'v5p-32', 'v6e-16', 'v6p-8', 'v7-8' (all equivalent), or a bare int.
 ```
 
 Power equivalence (heuristic, v5p-chip units):
@@ -749,11 +749,14 @@ BATCH tier typically allows down to the arch's minimum legal chip count.
 `preflight/topology.py::_ALLOC_MIN_SLICE_RULES` encodes these; if you hit an
 allocator with different rules, update that table.
 
-### Performance Equivalence Heuristic
+### Performance Equivalence
 
-- **1 v6e chip ≈ 1 v6p chip ≈ 2 v5p chips ≈ 2 v4 chips** in compute/throughput.
-- Consequently `v6e-16` ≈ `v6p-16` ≈ `v5p-32` ≈ `v4-32`.
-- Used by `tpu route --power=` to enumerate equivalent options.
+Canonical table lives in `tpu_reference.md` § Performance Equivalence — read it
+there, including the caveats that a single compute scalar cannot express
+(memory-bound work does not follow it, and int8 gains do not survive the move
+to v6p/v7). Short form: per chip, `v6p = v7 ≈ 4.34× v5p ≈ 2.17× v6e`, so
+`v6p-8 ≈ v7-8 ≈ v6e-16 ≈ v5p-32`. `tpu route --power=` encodes it in
+`router.py::_V5P_MULTIPLIER`.
 
 
 ## Status And Diagnosis
