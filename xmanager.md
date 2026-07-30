@@ -400,6 +400,40 @@ Seeing all three at once is itself the diagnosis: **the failure is before
 5. `analog` — blocked by permissions on this workstation (both
    `/google/bin/releases/analog-cli/analog` and per-user copies).
 
+### Read the WHY column before doing anything else
+
+`tpu check` classifies the failure for you. `CODE BUG: <signal>` means the
+application died and the fix is in your source, not the infra — do not go
+hunting for preemption or quota. A signal that leaves no traceback (SIGSEGV) or
+a crash mid-run still needs the log; a `CODE BUG: stdlib I/O on /cns` names the
+cause outright.
+
+Two caveats:
+
+- The column is served from `~/.tpu_check_cache.txt`, refreshed by the daemon
+  roughly every 60s. For an immediate answer run the binary directly:
+  `blaze-bin/experimental/users/qiaos/tpu_utils/infra_check`.
+- A **blank** WHY on a PENDING job means "queued, nothing wrong". Only a real
+  blocker (GQM price cap, quota deficit, prior preemption) prints text there.
+
+### A crash after packaging is usually a stdlib-vs-remote-path or mock-API bug
+
+The two failure modes that repeatedly survive a green build and a local smoke
+test, because both only fire on Borg:
+
+- **stdlib file APIs against `/cns/...`.** `os.makedirs`/`open`/`os.path.isdir`
+  raise `PermissionError: [Errno 13] Permission denied: '/cns'` or silently
+  answer False. Anything touching `$CHECKPOINT_BUCKET` must go through an
+  `etils.epath`-backed helper.
+- **Mocked third-party libraries.** google3 substitutes stubs for some external
+  packages (e.g. `wandb` → `//third_party/py/scamper:wandb_mock`). Missing
+  attributes raise **at call time**, so a code path that only runs every N steps
+  fails minutes into a run. Probe with `getattr` and degrade, and never let
+  telemetry raise into the training loop.
+
+Both are reproducible in ~1 min locally by putting the real google3 stub first
+on `PYTHONPATH`; neither is reproducible by reading the build output.
+
 ## Preemption, Restart, And Resume
 
 ### What a Borg task restart actually restores: nothing

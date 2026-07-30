@@ -20,6 +20,14 @@ Traps this table exists to prevent:
 
 - **`GHOSTFISHLITE` (101) is v7, NOT v5e.** A launcher that maps `v5e` to
   `ghostfishlite` builds a request for the wrong hardware.
+- **v7 is supported by `tpu queue`/`tpu preflight` as of 2026-07-30.** Its slice
+  geometry is identical to v6p (3-D torus, 4 chips/host):
+  `platforms/accelerator_metadata/platforms/ghostfishlite.gcl` declares the same
+  static sub-cubes as `ghostfish.gcl` and differs only in the locus name.
+  Registered sizes are **4/8/16/32** (`v7-16` → `2x2x4`); 64+ exists only through
+  dynamic slice creation via the OCS manager, so it is deliberately not claimed.
+  v7 is frequently the cheapest option — it has repeatedly cleared at 0.00
+  (free pool) while v6p had zero availability.
 - **v6p must be `ghostfish`.** Passing the literal string `v6p` raises
   `Unknown ResourceType 'v6p'` at submit time.
 - The numeric ids are what `ResourcePrices` and other Spanner tables key on;

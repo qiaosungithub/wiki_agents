@@ -73,18 +73,56 @@ of guessing (see `xmanager.md` §Debugging A Job That Dies With No Log):
   sudoku checkpoint says `Sudoku-1k`, which is the same corpus as
   `Sudoku-aug1000`; unmapped names are passed through as literal paths and fail
   later as "split train does not exist".
-- The published checkpoint has **no EMA shadow** while the config asks for EMA,
-  so evaluation silently falls back to raw params. Paper numbers were likely
-  produced with EMA weights — do not compare without accounting for it.
+- The published checkpoint **does** carry an EMA shadow, at `blob["ema"]["shadow"]`
+  (12 tensors, mu=0.999). It differs from the raw params by ~5e-3, so EMA is never
+  the explanation for a large accuracy gap. (An earlier note here claimed the
+  opposite; it was wrong.)
+- **Torch keys carry a `_orig_mod.model.` prefix** (`torch.compile` plus the
+  wrapper module). Neither segment exists in the flax tree.
+  `tools/convert_torch_ckpt.py` now strips known wrapper prefixes automatically —
+  do not rely on passing `--strip-prefix` by hand.
+- **Orbax `partial_restore=True` returns unmatched leaves unchanged**, i.e. still
+  holding `model.init`'s random values, with no error and no warning. A fully
+  mismatched key set therefore evaluates at chance (Sudoku showed `all/accuracy`
+  0.0907 = 1/11 with `exact_accuracy` 0.0) and looks like a modelling problem.
+  `utils/ckpt_util.assert_tree_matches` compares key sets and shapes before
+  restoring, and `assert_restored_differs` catches the case where metadata is
+  unreadable. Never add a restore path that bypasses both.
+- Restore with explicit `RestoreArgs(restore_type=np.ndarray)`. Without it orbax
+  infers a placement per array and raises `sharding ... Got None` on a multi-host
+  job. Older orbax hides this by reading the checkpoint's `_sharding` file and
+  only warning, so it cannot be reproduced on a single-device CPU box.
+- The released sudoku checkpoint was **not** trained with the released training
+  recipe: its `extra.json` says `pos_encodings: none` and `puzzle_emb_ndim/len:
+  512/16` (hence `seq_len` 97, not 81), while `config/train/eqr_sudoku.yaml` says
+  `rope` and no puzzle embedding. Reproducing the paper's numbers by training
+  requires the checkpoint's arch, not the published recipe.
+- Compare against the right baseline. Upstream `README.md` reports **two** sets:
+  a 2048-example smoke eval (`cumulative_exact_acc_top1` 99.19 ± 0.12) and the
+  423,168-example full set (99.79). `different_init/any_correct` is
+  mathematically `pass@n` but is the only one reported, since `pass@k` is emitted
+  only for `k < n`. `cumulative_exact_acc_topN` is the mean accuracy of the N
+  most-converged samples, so `...top4` equals `convergence_top_k/exact_accuracy`.
 
 ## Experiment Tracking
 
-- Config fields may retain historical `wandb` names, but EqR-jax uses a local
-  compatibility layer that routes metrics to TensorBoard/XManager. It does not
-  require `WANDB_API_KEY`.
-- `wandb.log()`-style calls become TensorBoard scalars in the XManager workdir.
-  Notes and names are persisted with the staged configuration metadata rather
-  than an external WandB run.
+- Config fields may retain historical `wandb` names. No `WANDB_API_KEY` is needed.
+- **In google3 `import wandb` resolves to `//third_party/py/scamper:wandb_mock`,
+  which implements only `init`, `log`, `finish`, `Table`, `plot` and `Video` —
+  and its `log()` is a bare `logging.debug` that stores nothing.** Every other
+  attribute (`util.generate_id`, `define_metric`, `Histogram`, `Artifact`,
+  `run._step`) raises `AttributeError` **at call time**, i.e. on Borg, after
+  packaging and scheduling have both succeeded. Route every wandb call through
+  the shims in `utils/wandb_util.py`; `safe_log()` additionally swallows failures,
+  because telemetry must not be able to kill a TPU run.
+- Metrics reach a UI through **DeepMind Datatables**, written via
+  `clu.metric_writers` (`//third_party/py/clu/metric_writers:notf`). Curves are at
+  `http://flatboard/xid/<XID>`, the raw table at `http://datatable/xid/<XID>/data`.
+  Pass `write_to_datatable=True` explicitly — the default ACL-gates on
+  `mdb/datatables-users` and silently writes nothing for a non-member. Only
+  `process_index()==0` may construct a writer (the key is `(wid, step)` and all
+  tasks of a work unit share one `wid`), and flush periodically: CLU's destructor
+  cancels the writer thread instead of draining it.
 - Resume uses the exact XManager experiment identity (`resume_xid`) and its
   workdir. Verify checkpoint and config continuity before treating appended
   charts as one run.
