@@ -78,7 +78,7 @@ working under `/usr/local/google/home/qiaos/work`.
 | Launch or manage an agent CLI on this workstation (`clod`, `amp`, `gemini`) | `local_agent_cli.md` |
 | Change VLM training, checkpointing, resume, or eval code | `vlm_training.md` |
 | Upload VLM datasets, audit adapters/coordinates, prepare eval mirrors | `vlm_data.md` |
-| Log WandB results into the experiment spreadsheet | `spreadsheet.md` |
+| Record an experiment conclusion, or find a job's chart link | `spreadsheet.md` |
 | Manage a long-running experiment or inspect WandB/tracker evidence | `research.md` |
 | Write a paper deep-reading report | `paper_reading.md` |
 | Lay out or debug a report's HTML/PDF rendering | `paper_rendering.md` |

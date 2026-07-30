@@ -90,6 +90,53 @@ as `pytype_strict_binary` they silently never run and `blaze test` answers
   distributed initialization. Call `jax.distributed.initialize()` inside
   `main(argv)`, never at module import time.
 
+## Metrics And Curves (the internal W&B)
+
+There is no Weights & Biases inside google3. The equivalent is **DeepMind
+Datatables** for storage and **Flatboard** for plots, both keyed by XID.
+
+### Where to look
+
+`spreadsheet.md` §Chart Links owns the canonical URL table and the rules for
+verifying a run actually wrote metrics. In short: curves at
+`http://flatboard/xid/<XID>`, raw table at `http://datatable/xid/<XID>/data`.
+
+Two things that table does not cover:
+
+- `http://flatboard/autodash/<XID>` gives **one plot per column** (capped at 20),
+  which is the better entry point when exploring an unfamiliar run;
+  `flatboard/xid/` synthesises a single plot and guesses the axes.
+- **An empty page means no data was written, not a broken link.** There is no
+  404 for a missing table, so a blank Flatboard is a writer problem to diagnose
+  in the job, not a URL to retype.
+
+### Reading from the CLI
+
+```bash
+alias dtt='/google/bin/releases/deepmind/datatables/dtt/dtt'
+dtt ls --name=/datatable/xid/<XID>/     # what tables exist
+dtt show /datatable/xid/<XID>/data      # schema and primary keys
+dtt scan -n 20 /datatable/xid/<XID>/data
+```
+
+**`dtt` does not work from this workstation** — restricted LOAS blocks
+DatatableService, and every local binary hits the same wall. This is a
+workstation limitation only; a Borg job writes fine. Use the browser URLs above,
+which authenticate with EUC.
+
+### Getting a job to write anything
+
+A job that never calls a metric writer produces no table and therefore an empty
+Flatboard. Writing is one BUILD dep
+(`//third_party/py/clu/metric_writers:notf`) plus
+`metric_writers.create_default_writer(...)`. The settings that are easy to get
+wrong are owned by `spreadsheet.md` §Chart Links (explicit `write_to_datatable`,
+no XM Measurements) and `eqr_jax.md` §Experiment Tracking (rank-0 only, periodic
+flush).
+
+Tables expire 180 days after **last access** and renew on every read or write;
+pin one with `dtt setexpiry <table> never`.
+
 ## Quota, Money & GQM Marketplace
 
 ### Underlying allocation logic: it is one pipeline, not two

@@ -116,13 +116,14 @@ of guessing (see `xmanager.md` §Debugging A Job That Dies With No Log):
   the shims in `utils/wandb_util.py`; `safe_log()` additionally swallows failures,
   because telemetry must not be able to kill a TPU run.
 - Metrics reach a UI through **DeepMind Datatables**, written via
-  `clu.metric_writers` (`//third_party/py/clu/metric_writers:notf`). Curves are at
-  `http://flatboard/xid/<XID>`, the raw table at `http://datatable/xid/<XID>/data`.
-  Pass `write_to_datatable=True` explicitly — the default ACL-gates on
-  `mdb/datatables-users` and silently writes nothing for a non-member. Only
-  `process_index()==0` may construct a writer (the key is `(wid, step)` and all
-  tasks of a work unit share one `wid`), and flush periodically: CLU's destructor
-  cancels the writer thread instead of draining it.
+  `clu.metric_writers` (`//third_party/py/clu/metric_writers:notf`).
+  `spreadsheet.md` §Chart Links owns the URL forms and the
+  `write_to_datatable=True` ACL trap. Two constraints specific to this code:
+  only `process_index()==0` may construct a writer (the key is `(wid, step)` and
+  all tasks of a work unit share one `wid`), and it must flush periodically —
+  CLU's destructor cancels the writer thread instead of draining it.
+- Every run that reaches a conclusion is logged to the `EqR-reproduction` tab
+  with its chart link; see `spreadsheet.md`.
 - Resume uses the exact XManager experiment identity (`resume_xid`) and its
   workdir. Verify checkpoint and config continuity before treating appended
   charts as one run.

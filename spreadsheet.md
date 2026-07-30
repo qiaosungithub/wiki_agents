@@ -1,9 +1,28 @@
 # Spreadsheet Result Logging
 
-Use this guide when the user asks to put WandB or job results into the shared VLM
-experiment spreadsheet. The default target is the cleaned PaliGemma/JAX LLaVA
-tab in spreadsheet `1FlcygQbGBTqHLJeiKdwxS0nP41SPMJrtX-kCJq8d7SQ`; inspect the
-live workbook before trusting a saved tab name or row number.
+Use this guide when the user asks to put WandB or job results into a shared
+experiment spreadsheet. Inspect the live workbook before trusting a saved tab
+name or row number.
+
+## Which Workbook
+
+| Project | Spreadsheet | Tab |
+|---|---|---|
+| VLM (PaliGemma / JAX LLaVA) | `1FlcygQbGBTqHLJeiKdwxS0nP41SPMJrtX-kCJq8d7SQ` | cleaned PaliGemma/JAX LLaVA tab |
+| `EqR` / `EqR-jax` | `17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0` | `EqR-reproduction` (gid 1739404389) |
+
+Read and write with the `gsheets` CLI
+(`/google/bin/releases/gemini-agents-gsheets/gsheets`); never scrape the URL.
+See the `gsheets` skill.
+
+## What Must Be Logged
+
+Every experiment that produces a **conclusion** goes in the sheet. A run that
+only exposed a code bug, a packaging failure, or an infra preemption does not:
+those belong in the commit message or the project guide, not the results table.
+
+Each logged row must carry the **XM chart link**, not only the XID. See
+§Chart Links below for where it comes from.
 
 ## Core Rule
 
@@ -59,3 +78,31 @@ For bulk reformatting or structural cleanup, duplicate the worksheet first
 unless the user explicitly authorizes changing the original. Historical column
 maps, thresholds, and API snippets are in `archive/details/` if the live sheet
 alone is insufficient.
+
+## Chart Links
+
+A Borg/XManager job has no WandB run, so "the chart" is a different URL per
+backend. Resolve which one the job actually wrote before pasting a link; a URL
+that renders an empty page is worse than no link.
+
+| Link | What it shows |
+|---|---|
+| `http://flatboard/xid/<XID>` | the metric **curves** — this is the chart link to log |
+| `http://datatable/xid/<XID>/data` | the raw scalar table behind those curves |
+| `http://xids/<XID>` | the XManager experiment page (status, work units, config) |
+
+`EqR-jax` routes `wandb.log()` to DeepMind **Datatables** through
+`clu.metric_writers` (`utils/wandb_util.py::log_metrics`), keyed by `$XM_XID` /
+`$XM_WID`, which the Borg template injects. Verify the run really wrote metrics
+before trusting the link:
+
+- The writer logs `Datatables metric writer ready` on rank 0 at startup. A
+  `Could not start the Datatables writer` or `metrics stay log-only` warning
+  means the curves do not exist and only the job log has numbers.
+- `write_to_datatable=True` must be explicit. The default (`None`) ACL-gates on
+  `mdb/datatables-users` and silently writes **nothing**, with no error.
+- `write_to_xm_measurements=False` on purpose: XM Measurements is deprecated and
+  drops anything past 1 point/sec/label. Do not log an `xm measurements` link.
+- An `eval_only` job that finishes in seconds may never reach the flush
+  threshold. Its durable evidence is the metrics CSV/JSON under the checkpoint
+  bucket's `eval/eval_preds/`, so log that path alongside the chart link.

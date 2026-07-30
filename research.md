@@ -29,8 +29,9 @@ effective staged config observed in the tracker or logs.
 
 ## Tracker Evidence
 
-- Identify the actual tracking backend before querying it. `EqR-jax` normally
-  routes WandB-shaped calls to TensorBoard/XManager; see `eqr_jax.md`.
+- Identify the actual tracking backend before querying it. `EqR-jax` routes
+  WandB-shaped calls to DeepMind Datatables; `spreadsheet.md` §Chart Links owns
+  the URL forms and how to verify a run actually wrote metrics.
 - For a real external WandB run, resolve the exact entity/project/run and
   enumerate `run.files()` before downloading. `output.log` is common, not
   guaranteed; use a run-scoped temporary directory when it exists.
@@ -39,6 +40,9 @@ effective staged config observed in the tracker or logs.
   the job's authoritative logs and staged config.
 - Preserve the original trace or log pointer when recording a conclusion.
   Summaries are navigation aids, not substitutes for evidence.
+- A run that reaches a conclusion is also logged to the project's experiment
+  spreadsheet, with its chart link; see `spreadsheet.md`. Runs that only exposed
+  a code bug or an infra failure are not.
 
 ## Decision Discipline
 
