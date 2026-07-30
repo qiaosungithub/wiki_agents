@@ -703,6 +703,12 @@ entry 2026-07-26) — only `--resume_xid` still falls back to reading it.
 XID back to its checkpoint bucket, staging dir and launch log once the Borg job
 and work unit are gone.
 
+`tpu cancel <xid> [xid...]` (alias `tpu stop`) stops the experiment via
+`xmanager stop --skip_confirmation` and pins the registry entry
+(`status=CANCELLED`, `retry_count=5`) so the daemon's PROD auto-retry can never
+resubmit an explicitly killed job. `--dry-run` previews. Cancel is not clear:
+the entry stays on the board until archived.
+
 ### TPU Check Error Rules & Auto-Retry Mechanism
 
 The backend `tpu_check_daemon.sh` parses XManager launch logs and classifies errors as follows:
