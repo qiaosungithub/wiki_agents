@@ -33,6 +33,27 @@ numbers, then put our runs under it. Do not restate the reference inside a run's
 cells — a number that appears twice will eventually disagree with itself.
 The run row says only whether it matches, and by how much.
 
+**A train run and its eval are also different rows, paired.** The train row
+carries the training evidence (final losses, final train accuracies, the
+tail-window mean, steps completed); the eval row directly beneath it, titled
+`  ↳ eval of the row above`, carries the paper-protocol accuracies. They have
+different XIDs, different configs and different failure modes, so collapsing
+them loses the ability to say *which half* went wrong. A train row with no eval
+row yet is a run whose conclusion does not exist — mark it, do not quote its
+in-training numbers as results.
+
+**Name the ablation axis in the first line of `Notes`, as `- <feature>`, and
+name the row it is measured against.** `- attention (mlp_t=false) instead of
+MLP-T, vs the full-corpus rope pair above` is a complete description; "attention
+variant" is not. Without the comparison target a reader cannot tell a two-point
+drop from a two-point win.
+
+**Keep prose short and load-bearing.** Notes/Details exist to make the number
+interpretable — protocol, sample count, what differs from the comparison row,
+and any caveat that changes how much to trust it (a run that stopped short, a
+padding correction applied). Explanations of *why* a bug happened belong in the
+commit message, not the sheet.
+
 ## Core Rule
 
 Do not write when the run and sheet are not directly comparable. Stop and report
@@ -74,13 +95,38 @@ must not silently force it into the existing schema.
   Correct with `(reported * rows_fed - pad_rows) / real_rows`. Log the corrected
   value and say so in Notes. Two checks that settle any dispute: the corrected
   `different_init/avg_pass_rate` must equal `all/exact_accuracy` exactly (both
-  measure single-replica exact accuracy), and `reported * rows_fed` must be an
-  integer count. For XID 275709629 that is `(0.8258056640625*1024 - 24)/1000 =
+  measure single-replica exact accuracy), and `reported * rows_fed * n_init`
+  must be an integer count -- with breadth the unit is REPLICAS, not rows, so
+  the bare `reported * rows_fed` form only holds at `different_init: 1`
+  (sudoku B=128: 0.7743492126464844 * 2048 * 128 = 202,991 exactly, while
+  * 2048 alone gives a fractional 1585.87 and looks like a false alarm).
+  For XID 275709629 the correction is `(0.8258056640625*1024 - 24)/1000 =
   0.821625 = all/exact_accuracy`, bit-exact.
 
   When `rows_fed == total_samples` there is no padding and no correction (e.g.
   the sudoku 2048-sample evals, where `avg_pass_rate == all/exact_accuracy`
   already).
+
+- **`final train/*` is ONE BATCH, not a converged value; `tail-N mean` is the
+  honest one.** EqR-jax logs the metrics of the single step that lands on the
+  `log_per_step` grid (768 puzzles at log_per_step=100), so the final value
+  carries full batch-to-batch variance and two runs can differ by points purely
+  from which batch they landed on. Record a tail-window mean (e.g. the last 50
+  logged points, with the step range) next to it and compare runs on that.
+  `training.log_interval_mean: true` makes the code emit `<key>_avg` — the mean
+  over every step in the interval, the same contract as
+  PaliGemma-baseline's MetricsTracker — which removes the need to compute the
+  window by hand. It is off by default because it costs a host sync per step.
+
+- **In-training `all/exact_accuracy` is not a paper number.** The periodic eval
+  runs at the architecture's own depth/breadth with `max_eval_steps` batches,
+  not the paper protocol (D64 x B128, convergence top-4). It is a training
+  health signal only; the paired eval row is the result.
+
+- **Check the logged step against the intended budget.** A run that reports
+  49,900 of 50,000 may simply have ended between log points, but 47,489 of
+  50,000 is a preemption. Record steps-completed in the train row and say which
+  it was; an eval of a short checkpoint is pessimistic and the row must say so.
 
 - Use stage-1 final metrics for pretraining rows and stage-2 final metrics for
   SFT rows. Represent a pretrain/SFT pair as adjacent rows even if one WandB run
