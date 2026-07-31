@@ -14,6 +14,15 @@ before porting behavior. Read `xmanager.md` for all launches and job diagnosis.
   the task explicitly changes the representation.
 - Do not transfer checkpoint, logging, or runtime assumptions between the
   PyTorch and JAX implementations without checking both code paths.
+- **Never sync a file from another checkout by copying it wholesale.** Re-apply
+  the local change as a hunk on top of the other side's version instead. Whole-
+  file "sync:" commits silently revert whatever the local side had added, and
+  the loss is invisible because the file still imports and the tests still pass.
+  This produced a dead config knob that survived eleven commits: `train.py` lost
+  `_online_eval` while `default.py` and nine yamls kept setting
+  `evaluation.online_eval`, so the config promised a D16/D64 curve and the code
+  measured one point. When a knob looks suspicious, check that some module
+  actually reads it (`grep -c` the reader, not the setter).
 
 ## Launch And Packaging
 
