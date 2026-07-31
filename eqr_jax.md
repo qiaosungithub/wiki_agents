@@ -150,3 +150,54 @@ of guessing (see `xmanager.md` §Debugging A Job That Dies With No Log):
   by `xmanager.md` §Preemption, Restart, And Resume.
 - Do not query the WandB API for EqR-jax unless current code proves that a real
   external WandB run was created.
+
+## Eval Protocol: Report B=1 First
+
+The headline number for any EqR run is **exact accuracy at B=1** (one restart,
+no selection), reported at both depths the paper uses: **D=16** (the arch's own
+`halt_max_steps`, the paper's baseline point) and **D=64** (its depth-scaling
+point). Breadth is an extra, not the headline — it multiplies eval cost by B and
+answers a different question. The spreadsheet's `EqR-reproduction` tab is laid
+out this way: `Acc B=1 D=16`, `Acc B=1 D=64`, `Acc-any-correct (B=1)`, then a
+free-text `additional results` column for anything breadth-derived.
+
+### What the paper actually reports for breadth
+
+The paper's B=128 figure (Maze 93.0) is **top-1 convergence accuracy**: pick the
+restart with the smallest mean residual over the last L=3 iterations. It is
+**not** majority vote, and the paper never reports majority vote at all.
+
+That matters because majority vote scores HIGHER — for the released maze
+checkpoint at D16/B128, majority vote reaches 99.2 against conv-top1's 94.9.
+The reason the paper uses the weaker selector is not an oversight: conv-top1
+tests the paper's own claim that latent convergence predicts solution quality,
+whereas majority vote is a generic self-consistency trick that says nothing
+about EqR. Do not "improve" a reproduction row by swapping in the higher number.
+
+Majority vote here is a vote over the ENTIRE token sequence (`tuple(row)` as the
+key in `eval_fn._update_di`), not per-token. A maze has one correct path and
+many distinct wrong ones, so a plurality is enough for the correct answer to
+win, which is why it is such a strong selector.
+
+### Depth does not always help a breadth metric
+
+`convergence_top_k=4` caps the candidate pool before top-1 is taken, and that
+cap binds: for the released checkpoint, `convergence_top_k/any_correct` is
+**95.70 at both D=16 and D=64**, so conv-top1 cannot benefit from depth. Base
+capability does improve (`all/exact_accuracy` 82.61 -> 89.30, reproducing the
+paper's 82.2 -> 88.9).
+
+Meanwhile deeper reasoning makes the B restarts agree MORE, so replica diversity
+falls (`different_init/any_correct` 99.90 at D16 -> 99.22 at D64) and vote-style
+metrics get slightly worse (majority 99.2 -> 97.8). A breadth metric going down
+as D goes up is therefore expected, not a bug.
+
+### Online eval during training
+
+`evaluation.online_eval` names the (depth, breadth) points the in-training eval
+scores every `training.eval_interval_steps`; it defaults to `[16, 64]` at B=1.
+Metrics arrive prefixed `D<depth>[B<breadth>]/`, and the first point is also
+emitted unprefixed for backward compatibility. Set `online_eval: []` to restore
+the old single-point behaviour. Each point rebuilds the module via `model_copy`
+(a frozen dataclass cannot be re-depthed in place), so a point costs a recompile,
+not a checkpoint reload.
