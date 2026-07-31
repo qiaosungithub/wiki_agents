@@ -48,13 +48,32 @@ that the human message view does not render.
 Clear only the variables whose semantics have been verified. Do not strip the
 entire service environment as a generic fix.
 
-## Jetski Hub Address
+## Jetski Language Server Address
 
-Treat `ANTIGRAVITY_LS_ADDRESS` as dynamic. Prefer a managed Jetski sidecar; when
-using tmux or another long-lived process manager, pass the current address
-explicitly to the service and verify the child environment. Recreating a tmux
-session does not prove that stale server-global environment was replaced, and a
-previous numeric port is never durable configuration.
+`agentapi` dials `$ANTIGRAVITY_LS_ADDRESS` and has no discovery fallback: unset
+it and the only reply is `{"error": "ANTIGRAVITY_LS_ADDRESS is not set"}`. That
+address is a language server the jetski CLI hosts on a **random** port
+(`--http_server_port ... 0 means random`) which dies with the CLI session owning
+it. An inherited address is therefore a liability — a backend started from
+inside a CLI session freezes that session's port into its environment and keeps
+dialing it long after the session is gone.
+
+**Recognise it:** creating a web session appears to succeed and only the FIRST
+message fails, with `session id missing`. That string is `GeminiRunner.runTurn`
+finding no session id; the real failure is upstream in `start()`, which swallows
+the `agentapi` error into one `console.error` and emits an init carrying an
+undefined session id anyway. Confirm by running `agentapi new-conversation` by
+hand under the backend's own environment
+(`tr '\0' '\n' < /proc/<pid>/environ | grep ANTIGRAVITY_LS_ADDRESS`); a dead LS
+answers `connection refused`.
+
+**Resolution:** do not inherit the address. `run.sh` pins `JETSKI_LS_PORT`
+(default 39899), exports `ANTIGRAVITY_LS_ADDRESS` itself, and keeps a persistent
+LS on that port in the `jetski-ls` tmux session — `--persistent_mode` is the flag
+that makes the CLI outlive its client. Clear the inherited `ANTIGRAVITY_*`
+variables when starting it, or the new CLI adopts the dead session's identity.
+The port is durable only because we own the listener; never copy a port observed
+from someone else's session.
 
 When the checkout runs through ESM/`tsx`, keep child-process imports in ESM form
 (for example, `import { execFileSync } from "node:child_process"`) rather than
