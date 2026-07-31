@@ -17,6 +17,21 @@ runtime storage, plus the target project's own guide.
 - Put model, data, and training semantics in versioned config. Wrapper-level
   resource routing and explicit transient selectors such as `load_from` or
   `resume_xid` may remain CLI arguments.
+- **Edit the run config in place; do not select or override it from the command
+  line.** Write what you intend to run into the project's single run config
+  (`configs/remote_run_config.yml` in `EqR-jax`) and launch with no config
+  argument. Prefer this over both `--config=<name>` and per-flag overrides.
+  Two reasons, both learned the hard way:
+  - The launch is reproducible from the snapshot alone. A run whose behaviour
+    lives partly in an invocation string is only reproducible if that string
+    survives, and it survives nowhere except one line of `xm_launch.log`.
+  - A config directory stops accumulating one finished experiment per file.
+    `EqR-jax` reached 39 configs this way, was pruned to 5, and grew back --
+    every launch had left its config behind because the config name was the
+    launch interface.
+  Recovering a past run's config is a solved problem: the CitC snapshot is
+  immutable, so `sexy <xid>` (below) copies the exact yaml back out. Nothing is
+  lost by keeping only templates in the checkout.
 - Confirm the source checkout, branch, dirty state, effective config, allocator,
   and target before launch. Use the project's real Research Hub attribution;
   never insert a placeholder merely to suppress an interactive prompt.
@@ -852,6 +867,29 @@ entry 2026-07-26) — only `--resume_xid` still falls back to reading it.
 `~/.tpu_jobs_legacy.json`. Keep that file: an entry is the only mapping from an
 XID back to its checkpoint bucket, staging dir and launch log once the Borg job
 and work unit are gone.
+
+#### `sexy <xid>` — recover a run's config from its snapshot
+
+A shell helper in `~/.bashrc`. Copies the exact config a job ran into `$PWD`:
+
+```bash
+cd /tmp/scratch && sexy 275992957
+# sexy: train_sudoku_fullaug_D_lr3e4_50k_config.yml <- .../eqr_run_260731_195445
+```
+
+It reads `stagedir` from `~/.tpu_jobs.json`, falling back to
+`~/.tpu_jobs_legacy.json` so archived XIDs still resolve, then greps
+`--config=` out of that job's `xm_launch.log` to learn WHICH file to copy — a
+stagedir snapshot contains the whole `configs/` directory, so the log is the
+only record of which one was used. (Once the in-place-config rule above is
+followed everywhere, that file is always `remote_run_config.yml`.)
+
+This is why deleting a finished experiment's config from the checkout is safe,
+and it is the answer to "which yaml produced XID N".
+
+A companion helper, `cptmp <path>`, wipes `~/work/tmp`, copies the given
+directory into it, and leaves you in `~/work` — for handing a checkout to a
+tool that will modify it, without touching the original.
 
 `tpu cancel <xid> [xid...]` (alias `tpu stop`) stops the experiment via
 `xmanager stop --skip_confirmation` and pins the registry entry

@@ -29,6 +29,13 @@ before porting behavior. Read `xmanager.md` for all launches and job diagnosis.
 - Edit the unrestricted home checkout. `tpu queue` creates a unique CitC source
   snapshot, repoints the staged target, and packages that snapshot. Post-package
   edits to the home checkout do not affect the job.
+- **Write the run into `configs/remote_run_config.yml` and launch without a
+  config argument.** `xmanager.md` §Submission Contract owns this rule; the
+  EqR-jax consequence is that `configs/` holds ONLY templates — `local_debug`,
+  `remote_run`, and at most three task templates. A finished experiment's config
+  is recovered from its immutable snapshot with `sexy <xid>`, not by keeping a
+  file per run. The directory has been pruned twice already because launching by
+  config name made every launch leave a file behind.
 - EqR-jax uses XManager service tiers (`PROD` or `BATCH`), not legacy
   `xm_priority`. Resource selection and allocator constraints are in
   `xmanager.md`.
