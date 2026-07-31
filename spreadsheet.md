@@ -22,7 +22,16 @@ only exposed a code bug, a packaging failure, or an infra preemption does not:
 those belong in the commit message or the project guide, not the results table.
 
 Each logged row must carry the **XM chart link**, not only the XID. See
-§Chart Links below for where it comes from.
+§Chart Links below for where it comes from, and §Provenance for the fields the
+chart link does NOT contain and must therefore be recorded separately.
+
+## Row Shape
+
+A published/reference number and a run of ours are DIFFERENT ROWS. Give each
+dataset an `official baseline` row holding the paper's or upstream README's
+numbers, then put our runs under it. Do not restate the reference inside a run's
+cells — a number that appears twice will eventually disagree with itself.
+The run row says only whether it matches, and by how much.
 
 ## Core Rule
 
@@ -51,6 +60,27 @@ must not silently force it into the existing schema.
 6. Report the changed row, run id/name, missing diagnostics, and any caveat.
 
 ## Semantics That Must Stay Explicit
+
+- **EqR-jax eval metrics are reported over PADDED rows; correct them first.**
+  The maze test split is 1000 puzzles but a `512 x 2` eval feeds 1024 rows, and
+  `puzzle_dataset._collate_batch` pads with `labels = IGNORE_LABEL_ID`. In
+  `eval_fn._exact_matrix`, `exact = ((pred == labels) | ~mask).all(-1)` — a pad
+  row has `~mask` everywhere, so it counts as CORRECT for every replica. Every
+  `different_init/*`, `majority_vote/*` and `convergence_top_k/*` figure is
+  therefore inflated; divide by the fed row count, not the real one.
+  `all/exact_accuracy` from the loss head is NOT affected (it gates on
+  `valid = loss_counts > 0`, which is false for pads).
+
+  Correct with `(reported * rows_fed - pad_rows) / real_rows`. Log the corrected
+  value and say so in Notes. Two checks that settle any dispute: the corrected
+  `different_init/avg_pass_rate` must equal `all/exact_accuracy` exactly (both
+  measure single-replica exact accuracy), and `reported * rows_fed` must be an
+  integer count. For XID 275709629 that is `(0.8258056640625*1024 - 24)/1000 =
+  0.821625 = all/exact_accuracy`, bit-exact.
+
+  When `rows_fed == total_samples` there is no padding and no correction (e.g.
+  the sudoku 2048-sample evals, where `avg_pass_rate == all/exact_accuracy`
+  already).
 
 - Use stage-1 final metrics for pretraining rows and stage-2 final metrics for
   SFT rows. Represent a pretrain/SFT pair as adjacent rows even if one WandB run
@@ -106,3 +136,31 @@ before trusting the link:
 - An `eval_only` job that finishes in seconds may never reach the flush
   threshold. Its durable evidence is the metrics CSV/JSON under the checkpoint
   bucket's `eval/eval_preds/`, so log that path alongside the chart link.
+
+## Provenance: What The Chart Link Does Not Carry
+
+A chart link resolves to **metrics only**. It does not identify the code that
+produced them. `logdir` and `stagedir` are written by `xm_launcher.py` into
+`~/.tpu_jobs.json`, keyed by XID — they never reach Datatables, Flatboard, or
+the XM experiment page. So a row with only a chart link cannot answer "which
+source snapshot was this?", which is exactly the question a reproduction table
+exists to answer.
+
+Record these alongside the chart link:
+
+| Field | Source | Why it is not recoverable from the chart |
+|---|---|---|
+| `stagedir` | `~/.tpu_jobs.json[xid].stagedir` | The immutable CitC snapshot that was packaged. The home checkout has moved on since; this is the only pointer to the exact code. |
+| `logdir` | `~/.tpu_jobs.json[xid].logdir` | Holds `xm_launch.log`, i.e. the launch command, resolved flags, and allocator verdict. |
+| eval outputs | `~/.tpu_jobs.json[xid].bucket_cp_path` + `/eval/eval_preds/` | The per-sweep-point metrics CSV/JSON and `eval_config.json`. Survives when Datatables has nothing (short jobs) and records the FULLY RESOLVED config, including arch merged from the checkpoint. |
+
+Pull all three at once:
+
+```bash
+python3 -c "import json; e=json.load(open('$HOME/.tpu_jobs.json'))['<XID>'];
+print(e['stagedir']); print(e['logdir']); print(e['bucket_cp_path'])"
+```
+
+`tpu clear` archives entries into `~/.tpu_jobs_legacy.json` rather than deleting
+them, so an old XID is still resolvable there — but it is a local file on one
+workstation, which is a second reason to copy these fields into the sheet.

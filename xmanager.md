@@ -518,6 +518,43 @@ Two more settings worth copying from the same source:
   ~35% throughput; failing and being rescheduled onto a healthy slice beats
   finishing 1.5x slower.
 
+### `--resume_xid` resumes; it does not point at a checkpoint
+
+`--resume_xid` appends a work unit to an existing experiment. Because
+`CHECKPOINT_BUCKET` is derived from the XID, the new attempt lands on the same
+prefix, and the application's in-process autoresume finds the newest complete
+checkpoint by itself. **The launcher must not also set `LOAD_FROM`.**
+
+It used to, as `f"{bucket_cp_path}/checkpoints"` — the PARENT of the per-step
+directories. orbax restores one checkpoint directory, so it looked for
+`.../checkpoints/state` and died with `FileNotFoundError: Checkpoint at
+.../checkpoints/state not found.` Guessing a step in the launcher is no better:
+only the job can know which step finished writing. Worse, `LOAD_FROM` is an
+explicit user request that autoresume deliberately yields to, so the old code
+both passed an unusable path and disabled the thing that would have found the
+right one. Fixed in `tpu_cmd/xm_launcher.py`.
+
+Reserve `--load_from` for a genuinely external checkpoint (an eval target or a
+warm start), and point it at a concrete `step_<N>` directory.
+
+### The resume path is only exercised by a run long enough to be preempted
+
+A first-time training tree holds weights; a RESUMED tree also holds optimizer
+state, whose leaves include `None`, scalars and small containers. Code that
+assumes every leaf is a numeric array works for the entire first attempt and
+fails only on restart. `EqR-jax`'s restore guard did exactly this —
+`np.asarray` turned those leaves into object arrays and `np.array_equal` raised
+`ValueError: The truth value of an array with more than one element is
+ambiguous`, killing XID 275793223 at step 45000 after a clean 45% of the run.
+
+Two rules follow:
+
+- A short sanity run does **not** validate resume. 2000-step runs never get
+  preempted, so they exercise only the cold-start path. Budget one deliberate
+  restart before trusting a multi-hour schedule.
+- A diagnostic must never be able to kill the job it is checking. Guards belong
+  behind a total comparison that returns "can't tell" instead of raising.
+
 ### A Borg job is a different IAM principal from you
 
 The job runs as **`<user>@prod.google.com`**; your workstation is

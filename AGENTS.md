@@ -70,6 +70,7 @@ working under `/usr/local/google/home/qiaos/work`.
 |---|---|
 | Find a checkout or understand project boundaries | `projects.md` |
 | Choose cells/buckets or access, copy, or upload payloads | `data_locality.md`; then the data guide/native docs listed in `projects.md`, if any |
+| Read `/cns/` from a CLI, watch loop, or anything interactive | `filesystem_latency.md` |
 | Queue, inspect, resume, or debug XManager/Borg jobs, including `deepmind-dynamic` | `xmanager.md`; then the guide/native docs listed in `projects.md`, if any |
 | Look up a TPU codename, HBM capacity, legal slice shape, or topology string | `tpu_reference.md` |
 | Cap what a job pays, or debug a job stuck pending on a dynamic pool | `limit_orders.md`; then `xmanager.md` |

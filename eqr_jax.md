@@ -124,6 +124,20 @@ of guessing (see `xmanager.md` §Debugging A Job That Dies With No Log):
   CLU's destructor cancels the writer thread instead of draining it.
 - Every run that reaches a conclusion is logged to the `EqR-reproduction` tab
   with its chart link; see `spreadsheet.md`.
+- **Anything that builds a logging handler unhooks the remote log mirror.**
+  `main.py` tees stdout/stderr into `$CHECKPOINT_BUCKET/logs/rank_<n>.log`
+  before anything else runs, but stdlib handlers capture the stream they were
+  constructed with, so `clu.metric_writers.create_default_writer` silently
+  steals it back. Symptom: the job runs fine and the log stops dead after a few
+  lines (XID 275709629 mirrored 173 lines; every job after the CLU writer
+  landed mirrored exactly 4). Call `logging_util.reattach_absl_handlers()`
+  after constructing anything that touches logging. Note the handler to repoint
+  is `get_absl_handler().python_handler`, not `get_absl_handler()` — the outer
+  object has no `setStream`, and the original call raised `AttributeError` into
+  a bare `except: pass` for its entire life.
+- Under Borg that mirrored file is the ONLY log: the local stream dies with the
+  task, and `analog` may be unavailable from a workstation. Losing it turns a
+  one-line diagnosis into a blind guess.
 - Resume uses the exact XManager experiment identity (`resume_xid`) and its
   workdir. Verify checkpoint and config continuity before treating appended
   charts as one run.
