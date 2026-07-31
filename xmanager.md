@@ -106,6 +106,35 @@ Two things that table does not cover:
 - `http://flatboard/autodash/<XID>` gives **one plot per column** (capped at 20),
   which is the better entry point when exploring an unfamiliar run;
   `flatboard/xid/` synthesises a single plot and guesses the axes.
+
+- **Comparing several runs on one chart** (the W&B "compare runs" view) uses a
+  DIFFERENT route: `xids` plural, joined with a PLUS sign.
+
+      http://flatboard/xids/275916581+275915987          # 2+ runs, one chart
+
+  To pin the metric instead of hand-picking `ykey` in the UI:
+
+      http://flatboard/plot#row_prefixes=/datatable/xid/<A>/data%0A%0A/datatable/xid/<B>/data&xkey=step&ykey=all/exact_accuracy
+
+  (`%0A%0A` is the blank line that separates data groups; a second plot uses the
+  numbered suffixes `ykey1` / `row_prefixes1`.)
+
+  Traps, all verified:
+  * **A comma silently fails.** `/xid/A,B` and `/xids/A,B` both render a BLANK
+    chart rather than an error, because `isXid()` parses `"A,B"` as NaN and drops
+    it. The landing page's input box accepts commas only because it rewrites
+    them to `+` internally. Route is `xids/:xids` split on `+`
+    (`learning/deepmind/ui/flatboard/app/app_routing.ts`).
+  * `/autodash/` is **single-XID only** — hardcoded; the UI answers "Explore
+    supports single XID only".
+  * Opening the link CREATES a dashboard (`/dashboards/<id>/revisions/<rev>`).
+    Share that redirected URL, and note its ACL is the dashboard's own, separate
+    from the data's.
+  * Metric NAMES must match across runs to land on one chart (schemas need not
+    otherwise agree; columns align by name).
+  * `http://combine-flatboards/<A>,<B>?name=..` (commas here) merges existing
+    Flatboard *artifacts* — it does not work for jobs that only wrote datatables,
+    which is every EqR-jax run.
 - **An empty page means no data was written, not a broken link.** There is no
   404 for a missing table, so a blank Flatboard is a writer problem to diagnose
   in the job, not a URL to retype.
