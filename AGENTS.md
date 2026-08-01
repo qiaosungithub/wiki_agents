@@ -55,6 +55,16 @@ working under `/usr/local/google/home/qiaos/work`.
 - Submit XManager jobs through `tpu queue`, never by calling `xm launch` or
   `xmanager launch` directly. Only the wrapper may invoke them internally; see
   `xmanager.md`.
+- **A chip count is not a size. Convert before you launch.** Per chip,
+  `v7 = v6p ≈ 2x v6e ≈ 4.34x v5p ≈ 7.23x v4`. So the run that matches a
+  `v6p-16` baseline is **`v6e-32`**, not `v6e-16` — asking for `v6e-16`
+  silently buys HALF the compute, and the run is then compared against its
+  siblings as if the hardware were equal. Restate the request in the
+  baseline's units every time the accelerator changes, and put the
+  equivalence in the run name. `tpu route --power=v6p-16` does the
+  arithmetic; `tpu_reference.md` owns the full table and the caveats a
+  single scalar cannot express (memory-bound work does not follow it, and
+  int8 gains do not survive the move to v6p/v7).
 - Before deleting shared or local data, identify the filesystem, owner, active
   references, and recovery path. Use a manifest for shared or bulk deletion.
 - Treat external writes as transactions: establish identity and target, validate

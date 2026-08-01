@@ -94,6 +94,14 @@ The two derivations agree to three digits.
 So `v6p-8 ≈ v7-8 ≈ v6e-16 ≈ v5p-32`. Used by `tpu route --power=`, which
 encodes this table in `router.py::_V5P_MULTIPLIER`.
 
+Read the same relation the other way when SIZING a run against a baseline:
+matching a `v6p-16` needs **`v6e-32`**, `v5p-64`, or `v4-128` (115.7 chips
+rounded up to the next legal v4 shape — the conversion gives a number, the
+legal-shape table above decides what you can actually ask for). `AGENTS.md`
+carries this as a hard rule because getting it wrong is silent — the job runs,
+at half the compute, and its numbers then get compared against siblings as if
+the hardware had been equal.
+
 Three traps in using a single scalar:
 
 - **Compute ratio ≠ speedup.** HBM bandwidth does not track compute. v6e scores
