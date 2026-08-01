@@ -120,6 +120,65 @@ of guessing (see `xmanager.md` §Debugging A Job That Dies With No Log):
   only for `k < n`. `cumulative_exact_acc_topN` is the mean accuracy of the N
   most-converged samples, so `...top4` equals `convergence_top_k/exact_accuracy`.
 
+## Data And Checkpoint Locality
+
+**Put the data, the checkpoints and the TPUs in the same metro.** This is not a
+tuning detail; getting it wrong gets the job DELETED.
+
+XID 275990419 ran on `yuskedq` (metro ske, continent EU) while reading data and
+writing checkpoints to `yutulpz` (metro tul, NA). orbax announces this itself at
+startup, and it is the first thing to check when a job is slow:
+
+    Compute cluster: yuskedq, metro: ske, continent: eu
+    Storage cluster: yutulpz, metro: tul, continent: na
+
+Measured cost: checkpoint writes at 10 MiB/s, ~10s of BLOCKED TPU per save plus
+33-56s of background flush, every 2500 steps. The two-hour duty cycle fell to
+**0.082**, under the WIM pruner's 0.20 threshold, and the job was deleted at
+step 72500 of 150000. Re-launched with everything co-located, the same recipe
+ran at **47-48 steps/s instead of 10-11** and finished.
+
+Both halves are now automatic, and both are overridable:
+
+- `dataset/data_util.py::_local_data_root` picks the dataset mirror matching
+  `$BORG_CELL` / `$CLOUD_ZONE`; `$EQR_DATA_ROOT` still wins. Mirrors live in
+  `_MIRRORS`; an unlisted cell keeps the old default rather than inventing a
+  path.
+- `tpu_cmd/xm_launcher.py::_local_bucket` picks the checkpoint bucket matching
+  `--cell` from `_CELL_BUCKETS`; an explicit `--bucket` still wins.
+
+**When you add a new compute cell, mirror the data and add both entries.** The
+datasets are small (sudoku-extreme-full is ~700 MB staged) and the copy is one
+`fileutil cp -R -parallel_copy=16`; note `-parallel_copy` needs a NUMBER, and
+passing it bare silently swallows the next argument as its value.
+
+Related but distinct: `utils/ckpt_util.py` has one host read a REPLICATED
+checkpoint and broadcast it, because N hosts reading the same file amplifies the
+read N-fold. Distance and amplification are separate problems and both fixes are
+needed.
+
+## Sampler State Must Not Scale With The Corpus
+
+The dataloader used to persist `group_order` -- `rng.permutation(num_groups)` --
+in every checkpoint. On `sudoku-extreme-full` that is 3,831,994 integers, and
+`json.dumps(indent=2)` writes one per line: a **45 MB, 2.7-million-line
+`extra.json`**, rewritten every 2500 steps. When a job was deleted mid-write the
+file was truncated, and the resume died with
+
+    JSONDecodeError: Expecting value: line 2701195 column 3
+
+i.e. the checkpoint's own bookkeeping was what could not be read back. The 1k
+corpus never showed it: 1000 groups is 8 KB.
+
+The permutation is a pure function of the RNG state and never needed storing.
+What was missing was a handle on the state from BEFORE the draw -- `rng_state`
+has already been advanced by that epoch's sampling and cannot re-draw it -- so
+`epoch_rng_state` is recorded instead and `_iter_train` replays the permutation.
+890 bytes instead of 45 MB.
+
+Anything else added to sampler state must be O(1) in corpus size. If it is not,
+store the seed and replay it.
+
 ## Experiment Tracking
 
 - Config fields may retain historical `wandb` names. No `WANDB_API_KEY` is needed.
