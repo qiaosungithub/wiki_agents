@@ -83,5 +83,5 @@ check but does not replace visual inspection.
   footprint is proportional to the evidence it carries and whether avoidable
   blank or figure-only pages were introduced.
 
-Exact extraction and rendering snippets from prior work are retained under
-`archive/details/paper_reading.md` for troubleshooting only.
+Exact extraction and rendering snippets from earlier work are retained under
+`../archive/legacy/` for troubleshooting only.

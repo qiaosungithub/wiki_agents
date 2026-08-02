@@ -92,7 +92,7 @@ than guessing.
 | Record a result, or find a job's chart link | `research/result_logging.md` |
 | Write or render a paper deep-reading report | `reports/README.md` |
 | Change or run `EqR` / `EqR-jax` | `projects/eqr_jax.md` |
-| Change VLM training, data, or benchmark reporting | `projects/vlm_training.md`, `vlm_data.md`, `vlm_metrics.md` |
+| Change VLM training, data, or benchmark reporting | `projects/vlm_training.md`, `projects/vlm_data.md`, `projects/vlm_metrics.md` |
 | Operate the agent web app, or an agent CLI on this workstation | `projects/agent_web.md`, `projects/local_agent_cli.md` |
 
 ## Evidence Order
