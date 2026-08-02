@@ -19,6 +19,21 @@ before porting behavior. `jobs.md` owns launches and job diagnosis.
   from `train.py` that way while nine yamls kept setting `evaluation.online_eval`
   — the config promised a D16/D64 curve and the code measured one point, for
   eleven commits.
+- **`puzzle_emb_ndim: 128, puzzle_emb_len: 16` is ONE register plus fifteen dead
+  slots.** `_input_embeddings` reshapes the `ndim`-wide table row into
+  `puzzle_emb_len * hidden_size` and zero-pads the shortfall, so only the first
+  slot carries table content; the rest are constant zeros that never receive
+  gradient. All sixteen still shift every real token's rope index, and the
+  q-head still reads slot 0. Faithful to upstream, but describe such a run as
+  one register, not sixteen.
+- **A zero-initialised trainable register is not equivalent to a small random
+  one.** The table does receive gradient from step 0 and does grow (verifiable
+  in `params/inner/puzzle_emb` across checkpoints), so "it never moves" is the
+  wrong worry. The failure is early symmetry: with registers on, the q-head
+  reads a register slot rather than a board cell, and a zero slot feeds it
+  nothing during the steps that decide whether ACT ever learns to halt. Treat
+  `puzzle_emb_init_std` as a load-bearing hyperparameter and ablate it
+  alongside any register experiment.
 
 ## Launch And Packaging
 
@@ -241,6 +256,31 @@ specifics that keep biting.
   unit is REPLICAS, not rows, so the bare `reported * rows_fed` form holds only
   at `different_init: 1`. When `rows_fed == total_samples` there is no padding
   and no correction.
+
+- **Five different keys are called `lm_loss`. Name the one you mean.** A run's
+  log carries `all/lm_loss` (periodic eval on the TEST split), `train/lm_loss`
+  (train split), `lm_loss_avg` (the interval-mean companion), and a
+  `D<k>/{ema,online}/all/lm_loss` per online-eval depth. They differ in split,
+  denominator, and cadence, and the eval ones are ~30 points against ~1500. A
+  claim about "the loss" that does not say which key is unfalsifiable, and
+  quoting the train curve at someone reading the eval chart inverts the
+  conclusion — the two have disagreed in sign on a real run.
+
+- **Loss keys are SUMS over rows; the divisor is `global_batch_size`, not
+  `count`.** The loss head returns every metric summed, and
+  `train.py::process_metrics` picks the divisor per key: anything ending in
+  `loss` divides by `global_batch_size`, most other keys divide by `count`,
+  which is only the rows that HALTED that step (single digits out of hundreds).
+  Dividing a loss by `count` inflates it by ~100x and still looks plausible.
+  `README.md` §metrics holds the full divisor table — read it before hand-
+  reducing any raw key. `<key>_avg` is additionally a PER-PROCESS sum, so a
+  hand computation must also divide by the process count.
+
+- **`train/lm_loss` is not comparable across runs that halt at different
+  depths.** It is measured at whatever ACT depth each model chose, so a run
+  pinned at `halt_max_steps` is buying its lower loss with more compute than a
+  run that halts early. Check `train/steps` before putting two of these numbers
+  in one table; if they differ, the comparison needs a fixed-depth eval instead.
 
 - **`final train/*` is ONE BATCH.** The logged final value is whichever step
   landed on the `log_per_step` grid, so it carries full batch-to-batch variance.
