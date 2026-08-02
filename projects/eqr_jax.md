@@ -2,7 +2,7 @@
 
 Read this for the `EqR` and `EqR-jax` checkouts. They are distinct PyTorch and
 JAX implementations; inspect the target checkout's native docs and git state
-before porting behavior. Read `xmanager.md` for all launches and job diagnosis.
+before porting behavior. `jobs.md` owns launches and job diagnosis.
 
 ## Data And Model Invariants
 
@@ -14,15 +14,11 @@ before porting behavior. Read `xmanager.md` for all launches and job diagnosis.
   the task explicitly changes the representation.
 - Do not transfer checkpoint, logging, or runtime assumptions between the
   PyTorch and JAX implementations without checking both code paths.
-- **Never sync a file from another checkout by copying it wholesale.** Re-apply
-  the local change as a hunk on top of the other side's version instead. Whole-
-  file "sync:" commits silently revert whatever the local side had added, and
-  the loss is invisible because the file still imports and the tests still pass.
-  This produced a dead config knob that survived eleven commits: `train.py` lost
-  `_online_eval` while `default.py` and nine yamls kept setting
-  `evaluation.online_eval`, so the config promised a D16/D64 curve and the code
-  measured one point. When a knob looks suspicious, check that some module
-  actually reads it (`grep -c` the reader, not the setter).
+- **Never sync a file between the two checkouts wholesale** (`engineering.md`
+  §Porting Between Related Checkouts). This repo already lost `_online_eval`
+  from `train.py` that way while nine yamls kept setting `evaluation.online_eval`
+  — the config promised a D16/D64 curve and the code measured one point, for
+  eleven commits.
 
 ## Launch And Packaging
 
@@ -30,15 +26,14 @@ before porting behavior. Read `xmanager.md` for all launches and job diagnosis.
   snapshot, repoints the staged target, and packages that snapshot. Post-package
   edits to the home checkout do not affect the job.
 - **Write the run into `configs/remote_run_config.yml` and launch without a
-  config argument.** `xmanager.md` §Submission Contract owns this rule; the
+  config argument.** `jobs.md` §Submission Contract owns this rule; the
   EqR-jax consequence is that `configs/` holds ONLY templates — `local_debug`,
   `remote_run`, and at most three task templates. A finished experiment's config
   is recovered from its immutable snapshot with `sexy <xid>`, not by keeping a
   file per run. The directory has been pruned twice already because launching by
   config name made every launch leave a file behind.
 - EqR-jax uses XManager service tiers (`PROD` or `BATCH`), not legacy
-  `xm_priority`. Resource selection and allocator constraints are in
-  `xmanager.md`.
+  `xm_priority`. Resource selection and allocator constraints are in `jobs.md`.
 - Treat the active BUILD target and launcher as authoritative. The current
   Bazel compatibility contract keeps the entry point in `srcs`, packages other
   Python/config files as `data`, excludes `testonly` dependencies from the
@@ -52,7 +47,7 @@ before porting behavior. Read `xmanager.md` for all launches and job diagnosis.
 
 These all fail at module-import time, before `main()`, which on Borg looks like
 an empty `status.message` and no log at all. Reproduce locally in ~45s instead
-of guessing (see `xmanager.md` §Debugging A Job That Dies With No Log):
+of guessing (see `jobs.md` §Debugging A Job That Dies With No Log):
 
 - **`import wandb`** resolves via `//third_party/py/scamper:wandb_mock`, whose
   `imports = ["wandb_mock"]` attribute the hermetic launcher ignores. `main.py`
@@ -122,88 +117,61 @@ of guessing (see `xmanager.md` §Debugging A Job That Dies With No Log):
 
 ## Data And Checkpoint Locality
 
-**Put the data, the checkpoints and the TPUs in the same metro.** This is not a
-tuning detail; getting it wrong gets the job DELETED.
-
-XID 275990419 ran on `yuskedq` (metro ske, continent EU) while reading data and
-writing checkpoints to `yutulpz` (metro tul, NA). orbax announces this itself at
-startup, and it is the first thing to check when a job is slow:
-
-    Compute cluster: yuskedq, metro: ske, continent: eu
-    Storage cluster: yutulpz, metro: tul, continent: na
-
-Measured cost: checkpoint writes at 10 MiB/s, ~10s of BLOCKED TPU per save plus
-33-56s of background flush, every 2500 steps. The two-hour duty cycle fell to
-**0.082**, under the WIM pruner's 0.20 threshold, and the job was deleted at
-step 72500 of 150000. Re-launched with everything co-located, the same recipe
-ran at **47-48 steps/s instead of 10-11** and finished.
-
-Both halves are now automatic, and both are overridable:
+`storage.md` owns the rule (co-locate compute with storage or the pruner deletes
+the job) and the measured cost. Both halves are automatic here, and both are
+overridable:
 
 - `dataset/data_util.py::_local_data_root` picks the dataset mirror matching
   `$BORG_CELL` / `$CLOUD_ZONE`; `$EQR_DATA_ROOT` still wins. Mirrors live in
-  `_MIRRORS`; an unlisted cell keeps the old default rather than inventing a
+  `_MIRRORS`, and an unlisted cell keeps the old default rather than inventing a
   path.
 - `tpu_cmd/xm_launcher.py::_local_bucket` picks the checkpoint bucket matching
   `--cell` from `_CELL_BUCKETS`; an explicit `--bucket` still wins.
 
-**When you add a new compute cell, mirror the data and add both entries.** The
-datasets are small (sudoku-extreme-full is ~700 MB staged) and the copy is one
-`fileutil cp -R -parallel_copy=16`; note `-parallel_copy` needs a NUMBER, and
-passing it bare silently swallows the next argument as its value.
+**When you add a new compute cell, mirror the data and add both entries.**
 
 Related but distinct: `utils/ckpt_util.py` has one host read a REPLICATED
 checkpoint and broadcast it, because N hosts reading the same file amplifies the
-read N-fold. Distance and amplification are separate problems and both fixes are
-needed.
+read N-fold. Distance and amplification are separate problems needing separate
+fixes.
 
 ## Sampler State Must Not Scale With The Corpus
 
-The dataloader used to persist `group_order` -- `rng.permutation(num_groups)` --
-in every checkpoint. On `sudoku-extreme-full` that is 3,831,994 integers, and
-`json.dumps(indent=2)` writes one per line: a **45 MB, 2.7-million-line
-`extra.json`**, rewritten every 2500 steps. When a job was deleted mid-write the
-file was truncated, and the resume died with
-
-    JSONDecodeError: Expecting value: line 2701195 column 3
-
-i.e. the checkpoint's own bookkeeping was what could not be read back. The 1k
-corpus never showed it: 1000 groups is 8 KB.
+The dataloader used to persist `group_order` — `rng.permutation(num_groups)` —
+in every checkpoint. On the full sudoku corpus that is ~3.8M integers written
+one per line: a 45 MB `extra.json` rewritten every save. A job deleted mid-write
+truncated it, and the resume then died parsing the checkpoint's own bookkeeping.
+The 1k corpus never showed it.
 
 The permutation is a pure function of the RNG state and never needed storing.
-What was missing was a handle on the state from BEFORE the draw -- `rng_state`
-has already been advanced by that epoch's sampling and cannot re-draw it -- so
-`epoch_rng_state` is recorded instead and `_iter_train` replays the permutation.
-890 bytes instead of 45 MB.
+What was missing was a handle on the state from BEFORE the draw — `rng_state`
+has already been advanced by that epoch's sampling — so `epoch_rng_state` is
+recorded instead and `_iter_train` replays the permutation. 890 bytes.
 
-Anything else added to sampler state must be O(1) in corpus size. If it is not,
-store the seed and replay it.
+**Anything added to sampler state must be O(1) in corpus size. If it is not,
+store the seed and replay it.**
 
 ## The Boundary-Checkpoint Stall
 
-A checkpoint written on an **iteration boundary** cannot be resumed from by the
-code as it stood before 2026-08-01, and the failure is silent.
+A checkpoint written on an **iteration boundary** could not be resumed from, and
+the failure was silent.
 
 `epoch_idx` in `puzzle_dataset._iter_train` counts epochs consumed *within* the
-current iteration, so the last save of an iteration stores
-`epoch_idx == epochs_per_iter`. Resuming evaluates `while 5000 < 5000` -> False,
-the loader yields **zero batches**, training "finishes" without a step, the
-process exits 0, and Borg restarts it. Every attempt looks like a clean success.
+current iteration, so the last save of an iteration stored
+`epoch_idx == epochs_per_iter`. Resuming evaluated `while 5000 < 5000` -> False,
+the loader yielded **zero batches**, training "finished" without a step, the
+process exited 0, and Borg restarted it. Every attempt looked like a clean
+success, and with the default cadence it poisoned every other checkpoint, so
+recovering from a preemption was a coin flip.
 
-With the default cadence this poisons **every other checkpoint**: on XID
-275793223, steps 87500 and 92500 carried `epoch_idx = 2500` (usable) while 90000
-and 95000 carried 5000 (dead). Recovering from a preemption was a coin flip.
-
-Fixed in `0b31a2a` -- an exhausted cursor now means "the previous iteration
+Fixed in `0b31a2a`: an exhausted cursor now means "the previous iteration
 finished", so the resume starts the next one at 0 and drops the spent
-permutation. Two things worth carrying forward:
+permutation. Two things to carry forward:
 
-- **Verify a resume by step progress, not by exit status.** This bug produced
-  successful-looking runs indefinitely. `xmanager.md` §A restart loop is not
-  evidence of a crash covers how to tell the two apart.
-- **Inspect `train_dataset.train_state.epoch_idx` in `extra.json`** when a
-  resume makes no progress. It is one `fileutil cat` and it settles the question
-  immediately.
+- **Verify a resume by step progress, not by exit status** (`jobs.md` §A restart
+  loop is not evidence of a crash).
+- **Inspect `train_dataset.train_state.epoch_idx` in `extra.json`** when a resume
+  makes no progress. One `fileutil cat` settles it.
 
 ## Experiment Tracking
 
@@ -218,13 +186,13 @@ permutation. Two things worth carrying forward:
   because telemetry must not be able to kill a TPU run.
 - Metrics reach a UI through **DeepMind Datatables**, written via
   `clu.metric_writers` (`//third_party/py/clu/metric_writers:notf`).
-  `spreadsheet.md` §Chart Links owns the URL forms and the
+  `research/result_logging.md` §Chart Links owns the URL forms and the
   `write_to_datatable=True` ACL trap. Two constraints specific to this code:
   only `process_index()==0` may construct a writer (the key is `(wid, step)` and
   all tasks of a work unit share one `wid`), and it must flush periodically —
   CLU's destructor cancels the writer thread instead of draining it.
 - Every run that reaches a conclusion is logged to the `EqR-reproduction` tab
-  with its chart link; see `spreadsheet.md`.
+  with its chart link; see `research/result_logging.md`.
 - **Anything that builds a logging handler unhooks the remote log mirror.**
   `main.py` tees stdout/stderr into `$CHECKPOINT_BUCKET/logs/rank_<n>.log`
   before anything else runs, but stdlib handlers capture the stream they were
@@ -248,9 +216,43 @@ permutation. Two things worth carrying forward:
   there at startup. `load_from` accepts `gs://` and must be handled through the
   path helpers in `utils/ckpt_util.py`, not `os.path`. The launcher/runtime
   contract for `LOAD_FROM`, `WANDB_RESUME_ID`, and `CHECKPOINT_BUCKET` is owned
-  by `xmanager.md` §Preemption, Restart, And Resume.
+  by `jobs.md` §Preemption, Restart, And Resume.
 - Do not query the WandB API for EqR-jax unless current code proves that a real
   external WandB run was created.
+
+## Reporting Its Metrics
+
+`research/result_logging.md` owns the general rule; these are the EqR-jax
+specifics that keep biting.
+
+- **Eval metrics are reported over PADDED rows; correct them before logging.**
+  The maze test split is 1000 puzzles but a `512 x 2` eval feeds 1024 rows, and
+  `puzzle_dataset._collate_batch` pads with `labels = IGNORE_LABEL_ID`. In
+  `eval_fn._exact_matrix`, `exact = ((pred == labels) | ~mask).all(-1)` — a pad
+  row is `~mask` everywhere and so counts as CORRECT for every replica. Every
+  `different_init/*`, `majority_vote/*` and `convergence_top_k/*` figure is
+  inflated. `all/exact_accuracy` from the loss head is NOT affected (it gates on
+  `valid = loss_counts > 0`, false for pads).
+
+  Correct with `(reported * rows_fed - pad_rows) / real_rows` and say so in the
+  notes. Two checks settle any dispute: corrected
+  `different_init/avg_pass_rate` must equal `all/exact_accuracy` exactly, and
+  `reported * rows_fed * n_init` must be an integer count — with breadth the
+  unit is REPLICAS, not rows, so the bare `reported * rows_fed` form holds only
+  at `different_init: 1`. When `rows_fed == total_samples` there is no padding
+  and no correction.
+
+- **`final train/*` is ONE BATCH.** The logged final value is whichever step
+  landed on the `log_per_step` grid, so it carries full batch-to-batch variance.
+  Record a tail-window mean beside it and compare runs on that.
+  `training.log_interval_mean: true` makes the code emit `<key>_avg` over every
+  step in the interval, removing the hand computation; it is off by default
+  because it costs a host sync per step.
+
+- **In-training `all/exact_accuracy` is not a paper number.** The periodic eval
+  runs at the architecture's own depth/breadth over `max_eval_steps` batches,
+  not the paper protocol. It is a health signal; the paired eval row is the
+  result.
 
 ## Eval Protocol: Report B=1 First
 

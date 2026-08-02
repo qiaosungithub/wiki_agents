@@ -31,7 +31,7 @@ Traps this table exists to prevent:
 - **v6p must be `ghostfish`.** Passing the literal string `v6p` raises
   `Unknown ResourceType 'v6p'` at submit time.
 - The numeric ids are what `ResourcePrices` and other Spanner tables key on;
-  use them when querying GQM directly (see `xmanager.md`).
+  use them when querying GQM directly (see `infra/quota_market.md`).
 
 ## HBM Per Chip
 
@@ -94,13 +94,12 @@ The two derivations agree to three digits.
 So `v6p-8 ≈ v7-8 ≈ v6e-16 ≈ v5p-32`. Used by `tpu route --power=`, which
 encodes this table in `router.py::_V5P_MULTIPLIER`.
 
-Read the same relation the other way when SIZING a run against a baseline:
-matching a `v6p-16` needs **`v6e-32`**, `v5p-64`, or `v4-128` (115.7 chips
-rounded up to the next legal v4 shape — the conversion gives a number, the
-legal-shape table above decides what you can actually ask for). `AGENTS.md`
-carries this as a hard rule because getting it wrong is silent — the job runs,
-at half the compute, and its numbers then get compared against siblings as if
-the hardware had been equal.
+Read the relation the other way when SIZING a run against a baseline: matching
+a `v6p-16` needs **`v6e-32`**, `v5p-64`, or `v4-128` (115.7 chips rounded up to
+the next legal v4 shape — the conversion gives a number, the legal-shape table
+decides what you can actually ask for). Getting this wrong is silent: the job
+runs at half the compute and its numbers are then compared against siblings as
+if the hardware had been equal. `AGENTS.md` carries it as a hard rule.
 
 Three traps in using a single scalar:
 
@@ -112,9 +111,9 @@ Three traps in using a single scalar:
 - **int8 does not carry over.** v4/v5e/v5p/v6e accelerate int8 (2×) and int4
   (4×). v6p/v7 accelerate fp8 (2×) and give int8 **no speedup at all** (1×). An
   int8-tuned model moved from v5p to v6p/v7 must switch to fp8 to gain anything.
-- **v6p ≠ 2× v5p.** An earlier version of this table claimed that, understating
-  v6p by more than half and causing `tpu route` to recommend twice the hardware
-  a request needed. v6p/v7 are 4.34×.
+- **v6p is 4.34× v5p, not 2×.** An earlier table here said 2× and made the
+  router recommend twice the hardware a request needed. Re-derive the ratio
+  rather than repeating a remembered one.
 
 ## Batch Size Constraint
 
@@ -122,3 +121,11 @@ Global batch size must be a non-zero multiple of the chip count, or the job
 dies with `ValueError: Batch size <B> must be a non-zero multiple of the number
 of chips`. Check this against the *slice* you requested, not the one you meant
 to request.
+
+## Allocator Policy Is Not Physics
+
+Legal shapes above are what the hardware and Borg accept. An *allocation* can be
+stricter: dynamic pools enforce a minimum slice at the guaranteed tier, and a
+smaller request is rejected instantly by pool policy even though the topology is
+perfectly valid. The batch tier usually allows down to the architecture minimum.
+`infra/tpu_cli.md` owns where those rules are encoded.

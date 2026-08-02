@@ -1,121 +1,124 @@
 # Workspace Memory
 
-This folder contains the small amount of shared context an agent needs before
-working under `/usr/local/google/home/qiaos/work`.
+Shared context for working under `/usr/local/google/home/qiaos/work`. Everything
+here is a durable rule or a pointer; current code, live state, and the user's
+request always outrank it.
 
 ## Start Here
 
 1. Read this file.
-2. Read `projects.md` to identify the checkout and its native documentation.
-3. Read every guide named by the matching router row, and no unrelated guides.
-4. Inspect the current code, git state, and live system before acting. These
-   guides explain intent and invariants; they are not a substitute for current
-   source or runtime state.
+2. Read `engineering.md` — the working discipline that applies to every task.
+3. Read `projects/README.md` to identify the checkout and its native docs.
+4. Read the guides named by the matching router row, and no unrelated guides.
+5. Inspect the current code, git state, and live system before acting.
 
-## Workspace Model
+## Layout
 
-- This is a shared research workspace with many independent repositories. A
-  task's scope is the checkout the user named, not the whole workspace.
-- Classify the checkout in `projects.md` before applying infrastructure rules.
-  Type 1 and Type 2 projects have different data-locality policies.
-- Agent memory should capture durable decisions and non-obvious invariants.
-  Exact commands, incident timelines, job ids, and old configurations belong in
-  source docs, live state, experiment records, or `archive/`.
+Files in this directory apply to **every** task. Subdirectories are read on
+demand and each has a `README.md` index.
+
+| Path | Scope |
+|---|---|
+| `engineering.md` | How to verify, diagnose, port, and report. Read for any task. |
+| `jobs.md` | Queue, inspect, resume, or debug a cluster job. |
+| `storage.md` | Where data lives, how to read it fast, how to clean up safely. |
+| `tpu_reference.md` | Accelerator names, memory, legal shapes, performance ratios. |
+| `infra/` | Allocator and CLI internals. Only when `jobs.md` cannot explain what you see. |
+| `research/` | Running an experiment program and recording its results. |
+| `reports/` | Writing and rendering paper deep-reading reports. |
+| `projects/` | Per-checkout semantics and invariants. |
+| `archive/` | Historical evidence. Never routed to by default. |
 
 ## Global Rules
 
-- Converse with the user in Chinese. Write repository artifacts in English
-  unless a task guide explicitly requires another content language, as
-  `paper_reading.md` does.
-- Keep user-facing responses concise and natural. Lead with the outcome, use
-  plain Chinese, and avoid jargon, repetition, long preambles, or unnecessary
-  structure. Explain technical terms only when they help the user decide or act.
-- The operator's default policy is "push whenever you like" — do not ask
-  before `git push` for routine work. Push proactively at natural
-  checkpoints (a feature works end-to-end, a bug is fixed, a session is
-  about to end). Push IMMEDIATELY without asking if the edit tooling has
-  shown any sign of file corruption (partial writes, `Rename failed`
-  errors, unexpected duplicated blocks, syntax errors after a supposedly
-  successful edit) so the working state is preserved on the remote before
-  the next edit potentially compounds the damage.
+**Working with the user**
+
+- Converse in Chinese. Write repository artifacts in English unless a task guide
+  requires otherwise, as `reports/paper_reading.md` does.
+- Lead with the outcome. Keep responses concise and plain; explain a technical
+  term only when it helps the user decide or act.
 - Preserve user changes. Never revert, overwrite, or clean a dirty worktree as
   collateral work.
-- Before changing code, verify the task premise against the current state:
-  reproduce when feasible, inspect the relevant code, tests, and recent history,
-  and compare current behavior with the acceptance criteria. "No change needed"
-  is a valid outcome, but failed reproduction alone is not proof; account for
-  partial or incorrect prior fixes.
-- Before claiming completion, re-read the original request and acceptance
-  criteria, run the most relevant available checks, read their complete output,
-  and compare the result with the request, not with the patch. State anything
-  that remains unverified.
-- For Type 1 projects, never read or move data and checkpoint payloads across
-  regions or zones by default. Prove compute and storage locality first; see
-  `data_locality.md`.
-- Submit XManager jobs through `tpu queue`, never by calling `xm launch` or
-  `xmanager launch` directly. Only the wrapper may invoke them internally; see
-  `xmanager.md`.
+
+**Committing**
+
+- Default policy is "push whenever you like" — do not ask before pushing routine
+  work. Push at natural checkpoints: a feature works end to end, a bug is fixed,
+  a session is ending.
+- Push **immediately, without asking**, at any sign of edit-tool file corruption
+  (partial writes, rename failures, duplicated blocks, syntax errors after a
+  supposedly successful edit), so the working state is preserved before the next
+  edit compounds the damage.
+
+**Infrastructure**
+
+- Submit cluster jobs through `tpu queue`. Never call `xm launch` or
+  `xmanager launch` directly; only the wrapper may do so internally. See
+  `jobs.md`.
 - **A chip count is not a size. Convert before you launch.** Per chip,
-  `v7 = v6p ≈ 2x v6e ≈ 4.34x v5p ≈ 7.23x v4`. So the run that matches a
-  `v6p-16` baseline is **`v6e-32`**, not `v6e-16` — asking for `v6e-16`
-  silently buys HALF the compute, and the run is then compared against its
-  siblings as if the hardware were equal. Restate the request in the
-  baseline's units every time the accelerator changes, and put the
-  equivalence in the run name. `tpu route --power=v6p-16` does the
-  arithmetic; `tpu_reference.md` owns the full table and the caveats a
-  single scalar cannot express (memory-bound work does not follow it, and
-  int8 gains do not survive the move to v6p/v7).
+  `v7 = v6p ≈ 2x v6e ≈ 4.34x v5p ≈ 7.23x v4`. The run matching a `v6p-16`
+  baseline is **`v6e-32`**, not `v6e-16` — asking for `v6e-16` silently buys
+  HALF the compute, and the result is then compared against its siblings as if
+  the hardware were equal. Restate every request in the baseline's units when
+  the accelerator changes, and put the equivalence in the run name.
+  `tpu route --power=v6p-16` does the arithmetic; `tpu_reference.md` owns the
+  table and the caveats a single scalar cannot express.
+- Keep compute and storage co-located, and never move Type 1 payloads across
+  regions or zones by default. See `storage.md`.
 - Before deleting shared or local data, identify the filesystem, owner, active
   references, and recovery path. Use a manifest for shared or bulk deletion.
-- Treat external writes as transactions: establish identity and target, validate
-  assumptions, write the smallest scope, then read back the result.
-- Follow repository-local `AGENTS.md` or `CLAUDE.md` files for project-specific
-  code semantics. The shared infra, locality, storage, and external-write rules
-  here supersede stale operational sections in old project notes. Surface any
-  remaining conflict rather than guessing.
+
+**Project-local instructions**
+
+Follow a repository's own `AGENTS.md` / `CLAUDE.md` for its code semantics. The
+shared infrastructure, storage, and external-write rules here supersede stale
+operational sections in old project notes. Surface a remaining conflict rather
+than guessing.
 
 ## Topic Router
 
 | Task | Read |
 |---|---|
-| Find a checkout or understand project boundaries | `projects.md` |
-| Choose cells/buckets or access, copy, or upload payloads | `data_locality.md`; then the data guide/native docs listed in `projects.md`, if any |
-| Read `/cns/` from a CLI, watch loop, or anything interactive | `filesystem_latency.md` |
-| Queue, inspect, resume, or debug XManager/Borg jobs, including `deepmind-dynamic` | `xmanager.md`; then the guide/native docs listed in `projects.md`, if any |
-| Look up a TPU codename, HBM capacity, legal slice shape, or topology string | `tpu_reference.md` |
-| Cap what a job pays, or debug a job stuck pending on a dynamic pool | `limit_orders.md`; then `xmanager.md` |
-| Change or run `EqR` / `EqR-jax` | `eqr_jax.md`; also `xmanager.md` when launching |
-| Operate or debug the Gemini/Amply/Claude agent web app | `agent_web_gemini.md` |
-| Launch or manage an agent CLI on this workstation (`clod`, `amp`, `gemini`) | `local_agent_cli.md` |
-| Change VLM training, checkpointing, resume, or eval code | `vlm_training.md` |
-| Upload VLM datasets, audit adapters/coordinates, prepare eval mirrors | `vlm_data.md` |
-| Record an experiment conclusion, or find a job's chart link | `spreadsheet.md` |
-| Manage a long-running experiment or inspect WandB/tracker evidence | `research.md` |
-| Write a paper deep-reading report | `paper_reading.md` |
-| Lay out or debug a report's HTML/PDF rendering | `paper_rendering.md` |
-| Reclaim local disk space | `storage.md` |
+| Anything — before you start | `engineering.md` |
+| Find a checkout or understand project boundaries | `projects/README.md` |
+| Queue, inspect, resume, or debug a job | `jobs.md`; then the project guide |
+| Choose where data or checkpoints live; copy or upload a payload | `storage.md`; then the project guide |
+| Read a distributed path from a CLI, watch loop, or anything interactive | `storage.md` §Distributed Reads |
+| Reclaim local disk space | `storage.md` §Local Disk Cleanup |
+| Look up a TPU codename, HBM capacity, legal shape, or equivalence | `tpu_reference.md` |
+| A job will not schedule, or you are capping what it pays | `infra/quota_market.md` |
+| Change the `tpu` CLI, its checkers, or its daemon | `infra/tpu_cli.md` |
+| Manage a long-running experiment or inspect tracker evidence | `research/experiment_loop.md` |
+| Record a result, or find a job's chart link | `research/result_logging.md` |
+| Write or render a paper deep-reading report | `reports/README.md` |
+| Change or run `EqR` / `EqR-jax` | `projects/eqr_jax.md` |
+| Change VLM training, data, or benchmark reporting | `projects/vlm_training.md`, `vlm_data.md`, `vlm_metrics.md` |
+| Operate the agent web app, or an agent CLI on this workstation | `projects/agent_web.md`, `projects/local_agent_cli.md` |
 
 ## Evidence Order
 
-When facts disagree, prefer this order:
-
-1. The user's current request.
-2. Current repository code and repository-native docs.
-3. Live infra state, logs, WandB, and the spreadsheet.
-4. The core guides in this folder.
-5. `archive/`, which is historical evidence only.
+When facts disagree: the user's current request, then current repository code
+and its native docs, then live infra state and logs, then the guides here, then
+`archive/` — which is historical evidence only.
 
 ## Maintaining Memory
 
-- Keep core guides short and decision-oriented.
-- Record a rule only when a future agent cannot cheaply infer it from code or
-  when violating it has a meaningful cost.
-- Give each durable rule one canonical owner. Other guides should point to it,
-  not restate it with different scope or strength.
-- Replace stale facts instead of appending incident diaries. Never record live
-  state (mirror completeness, job status) in a guide; record how to verify it.
-- Put dated audit evidence (scan counts, validation numbers, status snapshots)
-  under `archive/audits/` and keep only the derived rule plus a pointer in the
-  guide. Delete audit snapshots once they are too old to be evidence.
-- Preserve detailed or superseded text under `archive/` when it remains useful
-  for forensics. Never route a new agent there by default.
+**Record a rule only when a future agent cannot cheaply infer it from the code,
+or when violating it has a real cost.** Everything else is noise that dilutes
+what matters.
+
+- **Write the rule, not the incident.** An event earns a place here only as the
+  general lesson it teaches. Keep the minimum evidence that makes the rule
+  credible — usually one sentence — and put the forensics in `archive/`.
+- **Prefer the abstract statement.** If a note only makes sense for one paper,
+  one job id, or one config, it belongs in the project guide or the archive, not
+  in a shared guide.
+- **One canonical owner per rule.** Other guides point at it; they do not
+  restate it with different scope or strength.
+- **Replace stale facts; never append a diary.** No "fixed on <date>", no live
+  state (mirror completeness, job status, current prices). Record how to verify
+  it instead.
+- **No source line numbers, job ids, or measured tables in a core guide.** They
+  age badly and invite false precision. Keep the shape of the conclusion; move
+  the numbers to `archive/audits/` if they are worth keeping at all.
+- Delete audit snapshots once they are too old to be evidence.
