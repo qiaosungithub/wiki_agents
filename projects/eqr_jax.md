@@ -240,31 +240,42 @@ permutation. Two things to carry forward:
 `research/result_logging.md` owns the general rule; these are the EqR-jax
 specifics that keep biting.
 
+- **A logged key is not a delivered column, and nothing says so.** The sink is
+  DeepMind Datatables through `utils/wandb_util.py`, whose `_flatten_scalars`
+  silently DROPS anything not float-able — a histogram, a figure, an array, a
+  bool, a string, a NaN. The google3 `wandb` mock stores nothing either. So a
+  metric can be computed on every step, for the whole life of a feature, and
+  reach no reader, with no error at either end. **Verify a new metric by
+  printing the payload the run actually logs, not by testing the function that
+  builds it.** `README.md` §metrics is the checked-in description of that
+  surface; keep it true.
+
 - **Eval metrics are reported over PADDED rows; correct them before logging.**
   The maze test split is 1000 puzzles but a `512 x 2` eval feeds 1024 rows, and
   `puzzle_dataset._collate_batch` pads with `labels = IGNORE_LABEL_ID`. In
   `eval_fn._exact_matrix`, `exact = ((pred == labels) | ~mask).all(-1)` — a pad
   row is `~mask` everywhere and so counts as CORRECT for every replica. Every
   `different_init/*`, `majority_vote/*` and `convergence_top_k/*` figure is
-  inflated. `all/exact_accuracy` from the loss head is NOT affected (it gates on
-  `valid = loss_counts > 0`, false for pads).
+  inflated. The loss head's own `.../all/exact_accuracy` is NOT affected (it
+  gates on `valid = loss_counts > 0`, false for pads).
 
   Correct with `(reported * rows_fed - pad_rows) / real_rows` and say so in the
-  notes. Two checks settle any dispute: corrected
-  `different_init/avg_pass_rate` must equal `all/exact_accuracy` exactly, and
-  `reported * rows_fed * n_init` must be an integer count — with breadth the
-  unit is REPLICAS, not rows, so the bare `reported * rows_fed` form holds only
-  at `different_init: 1`. When `rows_fed == total_samples` there is no padding
-  and no correction.
+  notes. Two checks settle any dispute: corrected `different_init/avg_pass_rate`
+  must equal `all/exact_accuracy` **of the same weight set** exactly — compare
+  `ema/` against `ema/`, never across the two — and `reported * rows_fed *
+  n_init` must be an integer count. With breadth the unit is REPLICAS, not rows,
+  so the bare `reported * rows_fed` form holds only at `different_init: 1`. When
+  `rows_fed == total_samples` there is no padding and no correction.
 
-- **Five different keys are called `lm_loss`. Name the one you mean.** A run's
-  log carries `all/lm_loss` (periodic eval on the TEST split), `train/lm_loss`
-  (train split), `lm_loss_avg` (the interval-mean companion), and a
-  `D<k>/{ema,online}/all/lm_loss` per online-eval depth. They differ in split,
-  denominator, and cadence, and the eval ones are ~30 points against ~1500. A
-  claim about "the loss" that does not say which key is unfalsifiable, and
-  quoting the train curve at someone reading the eval chart inverts the
-  conclusion — the two have disagreed in sign on a real run.
+- **Several different keys are called `lm_loss`. Name the one you mean.** A
+  run's log carries `train/lm_loss` (train split) and a
+  `D<k>/{ema,online}/all/lm_loss` per online-eval depth and weight set; a
+  standalone eval logs `{ema,online}/all/lm_loss` and writes `all/lm_loss` into
+  its results json. They differ in split, weights, denominator, and cadence, and
+  the eval ones are ~30 points against ~1500. A claim about "the loss" that does
+  not say which key is unfalsifiable, and quoting the train curve at someone
+  reading the eval chart inverts the conclusion — the two have disagreed in sign
+  on a real run.
 
 - **Loss keys are SUMS over rows; the divisor is `global_batch_size`, not
   `count`.** The loss head returns every metric summed, and
@@ -273,8 +284,7 @@ specifics that keep biting.
   which is only the rows that HALTED that step (single digits out of hundreds).
   Dividing a loss by `count` inflates it by ~100x and still looks plausible.
   `README.md` §metrics holds the full divisor table — read it before hand-
-  reducing any raw key. `<key>_avg` is additionally a PER-PROCESS sum, so a
-  hand computation must also divide by the process count.
+  reducing any raw key.
 
 - **`train/lm_loss` is not comparable across runs that halt at different
   depths.** It is measured at whatever ACT depth each model chose, so a run
@@ -282,17 +292,17 @@ specifics that keep biting.
   run that halts early. Check `train/steps` before putting two of these numbers
   in one table; if they differ, the comparison needs a fixed-depth eval instead.
 
-- **`final train/*` is ONE BATCH.** The logged final value is whichever step
-  landed on the `log_per_step` grid, so it carries full batch-to-batch variance.
-  Record a tail-window mean beside it and compare runs on that.
-  `training.log_interval_mean: true` makes the code emit `<key>_avg` over every
-  step in the interval, removing the hand computation; it is off by default
-  because it costs a host sync per step.
+- **`final train/*` is ONE BATCH, and the code will not smooth it for you.**
+  The logged final value is whichever step landed on the `log_per_step` grid, so
+  it carries full batch-to-batch variance. Compute a tail-window mean over the
+  logged curve and compare runs on that. There is deliberately no knob: the one
+  that existed averaged the pre-denominator sums, so its "smoothed loss" was
+  ~`global_batch_size` times the real one.
 
-- **In-training `all/exact_accuracy` is not a paper number.** The periodic eval
-  runs at the architecture's own depth/breadth over `max_eval_steps` batches,
-  not the paper protocol. It is a health signal; the paired eval row is the
-  result.
+- **The in-training `D<k>/{ema,online}/all/exact_accuracy` is not a paper
+  number.** The periodic eval runs at the architecture's own depth/breadth over
+  `max_eval_steps` batches, not the paper protocol. It is a health signal; the
+  paired eval row is the result.
 
 ## Eval Protocol: Report B=1 First
 
@@ -339,8 +349,13 @@ as D goes up is therefore expected, not a bug.
 
 `evaluation.online_eval` names the (depth, breadth) points the in-training eval
 scores every `training.eval_interval_steps`; it defaults to `[16, 64]` at B=1.
-Metrics arrive prefixed `D<depth>[B<breadth>]/`, and the first point is also
-emitted unprefixed for backward compatibility. Set `online_eval: []` to restore
-the old single-point behaviour. Each point rebuilds the module via `model_copy`
-(a frozen dataclass cannot be re-depthed in place), so a point costs a recompile,
-not a checkpoint reload.
+Set `online_eval: []` to restore the old single-point behaviour. Each point
+rebuilds the module via `model_copy` (a frozen dataclass cannot be re-depthed in
+place), so a point costs a recompile, not a checkpoint reload.
+
+**Every logged eval column names its point and its weights**, as
+`D<depth>[B<breadth>]/{ema,online}/...`, and appears exactly once — there is no
+bare `all/...` copy to point a chart at. Charts and flatboard URLs use
+`D16/ema/all/exact_accuracy`. The distinction that matters when reading code: a
+standalone `evaluate()` still RETURNS `{"all": {...}}` and its results json is
+still keyed `all/...` — only the logged column name carries the prefix.
