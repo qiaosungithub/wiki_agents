@@ -179,6 +179,32 @@ has already been advanced by that epoch's sampling and cannot re-draw it -- so
 Anything else added to sampler state must be O(1) in corpus size. If it is not,
 store the seed and replay it.
 
+## The Boundary-Checkpoint Stall
+
+A checkpoint written on an **iteration boundary** cannot be resumed from by the
+code as it stood before 2026-08-01, and the failure is silent.
+
+`epoch_idx` in `puzzle_dataset._iter_train` counts epochs consumed *within* the
+current iteration, so the last save of an iteration stores
+`epoch_idx == epochs_per_iter`. Resuming evaluates `while 5000 < 5000` -> False,
+the loader yields **zero batches**, training "finishes" without a step, the
+process exits 0, and Borg restarts it. Every attempt looks like a clean success.
+
+With the default cadence this poisons **every other checkpoint**: on XID
+275793223, steps 87500 and 92500 carried `epoch_idx = 2500` (usable) while 90000
+and 95000 carried 5000 (dead). Recovering from a preemption was a coin flip.
+
+Fixed in `0b31a2a` -- an exhausted cursor now means "the previous iteration
+finished", so the resume starts the next one at 0 and drops the spent
+permutation. Two things worth carrying forward:
+
+- **Verify a resume by step progress, not by exit status.** This bug produced
+  successful-looking runs indefinitely. `xmanager.md` §A restart loop is not
+  evidence of a crash covers how to tell the two apart.
+- **Inspect `train_dataset.train_state.epoch_idx` in `extra.json`** when a
+  resume makes no progress. It is one `fileutil cat` and it settles the question
+  immediately.
+
 ## Experiment Tracking
 
 - Config fields may retain historical `wandb` names. No `WANDB_API_KEY` is needed.

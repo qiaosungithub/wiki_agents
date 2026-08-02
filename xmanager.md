@@ -581,6 +581,51 @@ right one. Fixed in `tpu_cmd/xm_launcher.py`.
 Reserve `--load_from` for a genuinely external checkpoint (an eval target or a
 warm start), and point it at a concrete `step_<N>` directory.
 
+### A restart loop is not evidence of a crash, or of slowness
+
+A job can restart forever while every attempt **succeeds**. If the training
+loop produces zero steps and returns normally, the process exits 0, Borg sees a
+clean finish, and starts it again. Nothing appears in the logs but successful
+runs. `EqR-jax` did this for hours at step 95000 (see `eqr_jax.md` §The
+boundary-checkpoint stall).
+
+Before blaming infrastructure, separate "killed" from "exited":
+
+- **Borgmaster is the arbiter.** An unchanging attempt UID with `failures: 0`
+  across several restarts means the process left on its own. A task Borg killed
+  increments the failure count and gets a new attempt UID.
+- **Correlate the restart period with the thing you suspect.** In that incident
+  50 restarts read the checkpoint in 0.4 s while the cycle held steady at
+  334 s. A cause that does not move when the suspect moves is not the cause.
+- **A clean shutdown leaves a footprint.** Our jobs write an `=== attempt ends`
+  footer from `close_attempt_log()`; a SIGKILLed task cannot. Its presence in
+  every cycle is proof of a voluntary exit.
+
+Two slow things being true at once is normal. During that same window CNS reads
+really had collapsed ~70x, which is why the wrong explanation was believable.
+
+### CNS cells share physical spindles, so "move to another cell" may do nothing
+
+`/cns/<cell>-d/` and `<cell>` are *different Colossus cells* that can sit on the
+same physical D cell and therefore the same disks. On 2026-08-01 a best-effort
+Blobstore LAD job in `yutulpz` oversubscribed the shared spindle pool ~10x
+(1.1k → 10.6k), adding ~21-25 ms of queueing to every read served by that pool,
+for 12+ hours. Roughly 20 unrelated cells were affected. Our reads went from
+~55 MiB/s to ~0.5 MiB/s.
+
+What this means in practice:
+
+- A **byte quota tells you nothing about this.** We were at 24.5% of quota and
+  still starved; the contended resource is spindles, and we hold no spindle
+  commitment.
+- **Sibling cells in the same metro can share the pool.** Moving from
+  `yutulpz-d` to `yutulis`/`yutulth` need not help. Check with
+  `/usr/local/bin/mach_locality -k metro <cell>` and prefer a different metro if
+  the goal is genuinely independent storage.
+- The starving workload may be **invisible to you**: it lives in a cell you have
+  no relationship with and cannot query.
+- Detailed evidence is in `archive/audits/` if this recurs.
+
 ### The resume path is only exercised by a run long enough to be preempted
 
 A first-time training tree holds weights; a RESUMED tree also holds optimizer

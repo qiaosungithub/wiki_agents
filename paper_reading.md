@@ -1,8 +1,7 @@
 # Paper Deep Reading
 
 Read this when producing a paper deep-reading report. Reports live in
-`readings/vision-related/tutorials/`, are registered in that directory's
-`index.html`, and use its established HTML template. Write the body in Simplified
+`work/reports/`. Write the body in Simplified
 Chinese while keeping technical names and identifiers in English. HTML/PDF
 layout and figure rendering rules are in `paper_rendering.md`.
 
