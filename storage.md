@@ -41,6 +41,69 @@ Practical rules:
 - Low utilization is the symptom the pruner acts on, and its deletion message
   links the policy it applied. Read it rather than guessing.
 
+## Copying From A Bucket Someone Else Pays For
+
+When the source bucket belongs to an external GCP project, a cross-region read
+is a bill, not a slowdown, and the person who pays is not the person who
+launched the job. Same-region reads are free, so the entire safety property is
+"prove both ends are in one region before the first byte moves".
+
+**Assert both ends explicitly, as literal constants, fail-closed, before the
+first open.** Two separate asserts, not one:
+
+1. the **compute cell** equals the cell that was pinned at submit time, and
+2. the **bucket's region** equals the region that cell lives in.
+
+Asserting a metro *set* is not sufficient, and neither is asserting only one
+end. The metro-to-region relation is indirect and invisible in a path string, so
+a reschedule, a copy-pasted prefix, or an edited default can move one end while
+the other still looks right. Two literal asserts fail loudly on exactly that.
+
+The guard belongs **in the program**, not in the submit command or a reviewer's
+memory: a launch flag can be dropped by the packaging path, and an operator
+cannot re-check it on a restart. An unknown or unreadable cell must exit
+non-zero before any read, the same as a wrong one.
+
+Verify the region mapping from source rather than from memory or from an
+assistant's answer: `production/borg/cloud_iam/slicer_regions/slicer_metros.pi`
+maps metro to GCP region, and `mach_locality -k metro <cell>` resolves a cell to
+its metro. Note that not every metro has a GCP region at all, so a cell can be
+"near" nothing — the launcher's default checkpoint root is one of these, which
+makes accepting the default a silent cross-region transfer.
+
+**Assert the bucket's region by querying it, not by reading its name.** A stat
+of the bucket root returns its location, and that is a metadata operation — it
+moves no object bytes, so it is safe to issue *before* the region is proven and
+is the only way to prove it from inside the job. A name is a weaker claim that
+happens to be true; keep it as the fallback for when the metadata is
+unreachable, and make the program say which of the two it used.
+
+**Exercise the guard's failing branch, not just its passing one.** A guard
+whose reject path has never run is trusted on faith: the happy path proves the
+comparison finds equality, not that inequality stops anything. Give each assert
+a test hook that substitutes a wrong value, and make the hook incapable of
+relaxing the guard — it discards the real answer, so it can only ever abort.
+
+Two related traps on the same path:
+
+- **The default bigstore client sends no usable credential** and the server
+  records the caller as anonymous, so a correctly-ACLed bucket still returns 403.
+  The fix is the flag that reads as "anonymous" but means "send no credential in
+  the request, so the ambient LOAS identity is used". Set it in-process. Without
+  it, an access test reports a false negative and the real identity is never
+  presented.
+- **A missing CNS quota record is not a write block.** Writes can succeed in a
+  cell where the quota tool reports no such user, but that likely means no
+  spindle commitment and therefore no performance floor. Measure throughput
+  during the first large copy instead of assuming it holds — and give the job
+  its own floor, armed only after startup, so a collapse stops it instead of
+  grinding for hours.
+- **A job's own logs may be unreadable from a workstation.** Both the task-log
+  and the log-search CLI can fail on a restricted credential, so a copy whose
+  only evidence is a log line is a copy you cannot verify. Write the evidence
+  to the destination itself — a manifest and a completion marker outlive the
+  task, the work unit, and the credential.
+
 ## Before Touching A Payload
 
 1. Resolve the exact category, payload, source, destination, and compute

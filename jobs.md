@@ -157,7 +157,13 @@ verify a resume by **step progress**, never by exit status.
 - **The temporary directory is a RAM disk you must size yourself.** The default
   is small, and every task of a multi-task job stages its own private copy of
   whatever it downloads, so an undersized value surfaces mid-run as "no space
-  left on device".
+  left on device". A job that moves large files should stream through a bounded
+  buffer rather than sizing the disk up to hold a whole one.
+- **The RAM disk and the memory limit are two different knobs.** Sizing `/tmp`
+  does nothing for a process that allocates; they are separate requirements and
+  the launcher must pass each explicitly. Watch for a resource that has to be
+  named in its own field: appending it to the accelerator string reads as a
+  second *accelerator*, which is accepted and then ignored.
 - **Shell file utilities do not exist inside the container.** Use the in-process
   path library for remote I/O from inside a job.
 - **Remote URIs break the standard library.** A directory check on a bucket URI
