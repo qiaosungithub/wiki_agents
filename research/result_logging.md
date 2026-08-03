@@ -33,14 +33,24 @@ numbers, then put our runs under it. Do not restate the reference inside a run's
 cells — a number that appears twice will eventually disagree with itself.
 The run row says only whether it matches, and by how much.
 
-**A train run and its eval are also different rows, paired.** The train row
-carries the training evidence (final losses, final train accuracies, the
-tail-window mean, steps completed); the eval row directly beneath it, titled
-`  ↳ eval of the row above`, carries the paper-protocol accuracies. They have
-different XIDs, different configs and different failure modes, so collapsing
-them loses the ability to say *which half* went wrong. A train row with no eval
-row yet is a run whose conclusion does not exist — mark it, do not quote its
-in-training numbers as results.
+**A train run and a SEPARATE evaluation of it are different rows, paired.** The
+train row carries the training evidence (final losses, final train accuracies,
+the tail-window mean, steps completed); the eval row directly beneath it, titled
+`  ↳ eval of the row above`, carries the accuracies that eval produced. They
+have different XIDs, different configs and different failure modes, so
+collapsing them loses the ability to say *which half* went wrong.
+
+**Whether a train row needs an eval row depends on what its own eval measured,
+not on where the number came from.** A periodic in-training evaluation is a
+result when it ran the protocol being claimed over a comparable population —
+some projects configure it that way deliberately, so the training job reports
+its own headline number — and then the train row is complete on its own; say in
+`Notes` which protocol and how many samples. When the in-training evaluation
+runs a cheaper or narrower protocol than the claim, the train row's conclusion
+does not exist until a matching evaluation exists: mark it, and do not promote
+the in-training number. The project guide owns which case a given repository is
+in — check it rather than assuming, since the same key can mean either after a
+config change.
 
 **Name the ablation axis in the first line of `Notes`, as `- <feature>`, and
 name the row it is measured against.** `- attention (mlp_t=false) instead of
@@ -95,10 +105,16 @@ and mean different things. Before writing any value, settle:
   batch-to-batch variance; two runs can differ by points purely from where they
   landed. Record a tail-window mean with its step range and compare runs on
   that.
-- **Whether it was produced by the protocol you are claiming.** An in-training
-  periodic evaluation runs at whatever depth, breadth, and sample count is cheap
-  — it is a health signal, not a headline result. The paired evaluation row is
-  the result.
+- **Whether it was produced by the protocol you are claiming.** Settle this from
+  the protocol and the population, never from which job emitted the number. An
+  in-training periodic evaluation IS reportable when it runs the protocol being
+  claimed over a comparable population — that is a configuration choice, and
+  where a project has made it, the training run's own curve is the result. Where
+  it has not, the periodic evaluation runs at whatever depth, breadth, and
+  sample count is cheap, and promoting it silently swaps the protocol underneath
+  the claim. Read the config for the sample count and the protocol knobs; a
+  number is not more trustworthy for having come from a dedicated job, nor less
+  for having come from a training loop.
 - **Whether the run finished.** A run that stops just short of budget may simply
   have ended between log points; a run that stops well short was interrupted.
   Record steps completed and say which it was, because an evaluation of a short

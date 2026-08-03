@@ -250,22 +250,24 @@ specifics that keep biting.
   builds it.** `README.md` §metrics is the checked-in description of that
   surface; keep it true.
 
-- **Eval metrics are reported over PADDED rows; correct them before logging.**
-  The maze test split is 1000 puzzles but a `512 x 2` eval feeds 1024 rows, and
-  `puzzle_dataset._collate_batch` pads with `labels = IGNORE_LABEL_ID`. In
-  `eval_fn._exact_matrix`, `exact = ((pred == labels) | ~mask).all(-1)` — a pad
-  row is `~mask` everywhere and so counts as CORRECT for every replica. Every
-  `different_init/*`, `majority_vote/*` and `convergence_top_k/*` figure is
-  inflated. The loss head's own `.../all/exact_accuracy` is NOT affected (it
-  gates on `valid = loss_counts > 0`, false for pads).
+- **An eval's denominator is its REAL rows, not the rows it was fed.** Feeding
+  more rows than the split holds is legal — a `512 x 2` maze eval feeds 1024 for
+  1000 puzzles — and `puzzle_dataset._collate_batch` pads the ragged tail with
+  `labels = IGNORE_LABEL_ID`. Those rows are EXCLUDED from every metric rather
+  than scored: the loss head gates on `valid = loss_counts > 0`, and the
+  breadth/convergence tallies filter through `eval_fn._drop_unscorable`, so
+  `different_init/total_samples` reports the real count. Padding costs compute,
+  not correctness. Do not apply a hand correction on top — that now
+  UNDER-reports.
 
-  Correct with `(reported * rows_fed - pad_rows) / real_rows` and say so in the
-  notes. Two checks settle any dispute: corrected `different_init/avg_pass_rate`
-  must equal `all/exact_accuracy` **of the same weight set** exactly — compare
-  `ema/` against `ema/`, never across the two — and `reported * rows_fed *
-  n_init` must be an integer count. With breadth the unit is REPLICAS, not rows,
-  so the bare `reported * rows_fed` form holds only at `different_init: 1`. When
-  `rows_fed == total_samples` there is no padding and no correction.
+  This is a fix worth knowing about because the failure it replaced was silent
+  and large: a pad row satisfies `((pred == labels) | ~mask).all(-1)` vacuously,
+  so it used to count as a perfect solve for every replica, and one maze eval
+  reported an accuracy that was entirely manufactured by 24 pad rows. Read
+  `total_samples` to confirm which regime a number came from, and check that
+  `different_init/avg_pass_rate` equals `all/exact_accuracy` **of the same
+  weight set** — `ema/` against `ema/`, never across the two. They measure the
+  same thing by different routes, so they agree exactly or something is wrong.
 
 - **Several different keys are called `lm_loss`. Name the one you mean.** A
   run's log carries `train/lm_loss` (train split) and a
@@ -299,10 +301,32 @@ specifics that keep biting.
   that existed averaged the pre-denominator sums, so its "smoothed loss" was
   ~`global_batch_size` times the real one.
 
-- **The in-training `D<k>/{ema,online}/all/exact_accuracy` is not a paper
-  number.** The periodic eval runs at the architecture's own depth/breadth over
-  `max_eval_steps` batches, not the paper protocol. It is a health signal; the
-  paired eval row is the result.
+- **The in-training `D16/{ema,online}/all/exact_accuracy` and its D64 twin ARE
+  the numbers to read.** The periodic eval runs the headline protocol — B=1 at
+  D=16 and D=64, on both weight sets — every `training.eval_interval_steps`, and
+  every training config sizes
+  `evaluation.global_batch_size x max_eval_steps` to the population a standalone
+  eval scores. So a run's result is a column of its own training curve. Two
+  qualifications belong with the number:
+
+  *Cadence.* It is a sampled curve, not a continuous one —
+  `training.eval_interval_steps`, currently 5000 in every training config, with
+  `checkpoint_interval_steps` a divisor of it, so each evaluated step has a
+  checkpoint behind it. Keep that alignment when changing either: report the
+  peak for a family that rises then collapses, and a peak with no checkpoint
+  cannot be re-evaluated or published.
+
+  *Sample count.* It is a FIXED-SIZE SUBSET wherever the split is larger — 2048
+  rows of sudoku's 422,786, comparable to upstream's 2048-sample figure and not
+  to its full-split one. Maze's 1000-puzzle split is covered whole.
+
+  Breadth is what the periodic eval does not do. `evaluation.final_eval: true`
+  runs the full `evaluation.sweep` cartesian product against the final
+  checkpoint **in the same job**, so a paper-protocol row never depends on
+  remembering to launch a second one; a standalone `eval_only` run is for
+  scoring a checkpoint after the fact. Verify the sizing in the config rather
+  than assuming it: a config whose product differs is measuring a different
+  population, whichever direction the number moved.
 
 ## Eval Protocol: Report B=1 First
 
@@ -345,13 +369,32 @@ falls (`different_init/any_correct` 99.90 at D16 -> 99.22 at D64) and vote-style
 metrics get slightly worse (majority 99.2 -> 97.8). A breadth metric going down
 as D goes up is therefore expected, not a bug.
 
-### Online eval during training
+### Online eval during training — where the reported number comes from
 
 `evaluation.online_eval` names the (depth, breadth) points the in-training eval
 scores every `training.eval_interval_steps`; it defaults to `[16, 64]` at B=1.
+That default IS the headline protocol above, on both weight sets, so a training
+run reports its own accuracy and a second job is not required to obtain one.
 Set `online_eval: []` to restore the old single-point behaviour. Each point
 rebuilds the module via `model_copy` (a frozen dataclass cannot be re-depthed in
 place), so a point costs a recompile, not a checkpoint reload.
+
+**Comparability rests on the sample count**, which `online_eval` does not
+control: it is `evaluation.global_batch_size x max_eval_steps`, and the test
+loader walks the split in order from the start, so two evals with the same
+product score literally the same rows at any batch size. Keep a training
+config's product equal to the standalone protocol's — 2048 for sudoku, the whole
+split for maze — or its curve stops being comparable to an `eval_only` row.
+Leaving `max_eval_steps` unset walks the entire split every interval, which on
+sudoku is a few hundred times the work.
+
+**For the full protocol in the same job, set `evaluation.final_eval: true`**
+with a non-empty `evaluation.sweep`. It sweeps the final checkpoint after the
+last training step, reading the weights off disk through the same engine a
+standalone eval uses, so the breadth and convergence-top-k columns arrive
+without a second launch to remember and match back by hand. Off by default
+because the sweep is expensive; an empty sweep with it on is rejected at config
+load rather than ending a long run with a log line.
 
 **Every logged eval column names its point and its weights**, as
 `D<depth>[B<breadth>]/{ema,online}/...`, and appears exactly once — there is no
