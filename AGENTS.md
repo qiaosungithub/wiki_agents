@@ -68,6 +68,19 @@ demand and each has a `README.md` index.
 - Before deleting shared or local data, identify the filesystem, owner, active
   references, and recovery path. Use a manifest for shared or bulk deletion.
 
+**Logging results to the experiment spreadsheet**
+
+- Every run that reaches a conclusion is logged to the shared experiment
+  spreadsheet. **Re-read the tab's header and its neighboring rows every time**
+  — columns and layout change between sessions, and a stale column map writes a
+  number into the wrong benchmark without erroring.
+- **Place the row before filling it.** Find the baseline block this run varies,
+  insert next to its comparison target, and describe a variant as `- <change>`
+  relative to that baseline. Appending at the end destroys the comparison.
+- Helper scripts for reading metrics or writing rows are worth keeping, but must
+  re-derive the column map from the live sheet on every run. See
+  `research/result_logging.md`.
+
 **Project-local instructions**
 
 Follow a repository's own `AGENTS.md` / `CLAUDE.md` for its code semantics. The
@@ -89,7 +102,7 @@ than guessing.
 | A job will not schedule, or you are capping what it pays | `infra/quota_market.md` |
 | Change the `tpu` CLI, its checkers, or its daemon | `infra/tpu_cli.md` |
 | Manage a long-running experiment or inspect tracker evidence | `research/experiment_loop.md` |
-| Record a result, or find a job's chart link | `research/result_logging.md` |
+| Log a result to the experiment spreadsheet, or find a job's chart link | `research/result_logging.md` |
 | Write or render a paper deep-reading report | `reports/README.md` |
 | Change or run `EqR` / `EqR-jax` | `projects/eqr_jax.md` |
 | Change VLM training, data, or benchmark reporting | `projects/vlm_training.md`, `projects/vlm_data.md`, `projects/vlm_metrics.md` |

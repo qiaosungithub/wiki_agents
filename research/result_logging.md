@@ -1,19 +1,54 @@
 # Spreadsheet Result Logging
 
-Use this guide when the user asks to put WandB or job results into a shared
-experiment spreadsheet. Inspect the live workbook before trusting a saved tab
-name or row number.
+Logging a result into the shared experiment spreadsheet is a routine, frequent
+task. It is also the easiest place to silently corrupt the record, because a
+wrong column or a wrong row looks exactly like a right one. Read this before
+every write.
+
+Read and write with the `gsheets` CLI
+(`/google/bin/releases/gemini-agents-gsheets/gsheets`); never scrape the URL.
+See the `gsheets` skill.
 
 ## Which Workbook
 
 | Project | Spreadsheet | Tab |
 |---|---|---|
-| VLM (PaliGemma / JAX LLaVA) | `1FlcygQbGBTqHLJeiKdwxS0nP41SPMJrtX-kCJq8d7SQ` | cleaned PaliGemma/JAX LLaVA tab |
-| `EqR` / `EqR-jax` | `17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0` | `EqR-reproduction` (gid 1739404389) |
+| VLM (PaliGemma / JAX LLaVA) | `1FlcygQbGBTqHLJeiKdwxS0nP41SPMJrtX-kCJq8d7SQ` | the cleaned PaliGemma/JAX LLaVA tab |
+| `EqR` / `EqR-jax` | `17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0` | `EqR-reproduction` |
 
-Read and write with the `gsheets` CLI
-(`/google/bin/releases/gemini-agents-gsheets/gsheets`); never scrape the URL.
-See the `gsheets` skill.
+**A `gid` does not identify a tab.** These two workbooks each contain a tab with
+the *same* gid, because one was copied from the other, and they hold completely
+different experiments. Always resolve a link by listing the workbook's sheets
+and matching the **title**, never by trusting a gid you have seen before.
+Likewise, both workbooks carry dated backup tabs of the other project — landing
+in one of those writes your result into a frozen snapshot nobody reads.
+
+## Before You Write: Re-Read The Header, Every Time
+
+**Never write from a remembered column map.** These are living documents: a
+human adds a benchmark column, renames a metric, inserts a section, or
+reorganizes a tab between one session and the next. A stale map does not error
+out — it writes your number into the wrong benchmark's column, which is worse
+than not logging at all.
+
+Each time, in this order:
+
+1. List the sheets and resolve the tab by title.
+2. Read the header rows and build the column map **now**. Expect the header not
+   to be row 1: these tabs open with a banner row (the base setting, the code
+   under test) above the real header, and often a reference row (trivial or
+   random-choice scores) directly below it. Header layout differs per tab — the
+   two workbooks above do not share column meanings.
+3. Read the neighborhood you intend to write into, so you see the local
+   conventions before adding to them.
+4. Write the smallest range, then read it back.
+
+**The same rule applies to your own tooling.** Keeping a helper script for
+reading metrics or formatting rows is worthwhile and encouraged — but the code
+and the spreadsheet drift independently, and each can change without the other.
+A helper must re-derive the column map from the live header on every run, never
+hardcode one; and you must sanity-check its output against the sheet before
+trusting a write. Treat a helper as a convenience, not as a source of truth.
 
 ## What Must Be Logged
 
@@ -25,32 +60,58 @@ Each logged row must carry the **XM chart link**, not only the XID. See
 §Chart Links below for where it comes from, and §Provenance for the fields the
 chart link does NOT contain and must therefore be recorded separately.
 
+## Where The Row Goes
+
+**Decide the row before you decide the values.** Appending at the end is almost
+always wrong: it destroys the comparison that makes the number mean anything.
+The tab is not a log, it is a set of ablation groups, and a reader navigates it
+by adjacency.
+
+The layout in use:
+
+- **A group opens with a full baseline row** that spells out its whole
+  configuration — the setting, the dataset/mix, and the details that stay fixed
+  for everything under it. A short free-text line above a group (`prefix MAE
+  experiments`) names the family; a blank row separates families.
+- **Every variant of that baseline goes directly beneath it, in the same
+  block**, and states only what CHANGED, written as `- <change>`. Real examples
+  from the reference tab: `- finetune on VQA, lr 2e-5 wd0.02 cos decay`,
+  `- only 128 tokens`, `- fix randomness`. The leading `- ` is what marks the
+  row as a delta rather than a new configuration.
+- **A delta row leaves the inherited columns empty.** The baseline row above
+  carries the dataset/mix and shared details; repeating them invites the two
+  copies to disagree later. Fill only the delta description and the metrics that
+  this variant actually produced.
+- **A delta is relative to the block's baseline, not to the row immediately
+  above.** When a change stacks on another variant, say so in the text; a bare
+  `- ` line is read as "baseline plus this one change".
+- **Keep an ablation axis contiguous.** All the learning-rate variants sit
+  together, all the token-count variants sit together. Inserting the new row
+  next to its comparison target is the whole point — a variant filed at the
+  bottom of the sheet cannot be compared with anything.
+- A variant that changes enough to invalidate the comparison is **not** a delta
+  row. Start a new baseline block with its full configuration.
+
+So the placement decision is: identify which baseline this run varies, find that
+block, and insert into it — reusing a clearly matching blank row if one is
+already there. Only genuinely new work starts a new block.
+
 ## Row Shape
 
 A published/reference number and a run of ours are DIFFERENT ROWS. Give each
 dataset an `official baseline` row holding the paper's or upstream README's
 numbers, then put our runs under it. Do not restate the reference inside a run's
-cells — a number that appears twice will eventually disagree with itself.
-The run row says only whether it matches, and by how much.
+cells — a number that appears twice will eventually disagree with itself. The
+run row says only whether it matches, and by how much.
 
-**A train run and a SEPARATE evaluation of it are different rows, paired.** The
-train row carries the training evidence (final losses, final train accuracies,
-the tail-window mean, steps completed); the eval row directly beneath it, titled
-`  ↳ eval of the row above`, carries the accuracies that eval produced. They
-have different XIDs, different configs and different failure modes, so
-collapsing them loses the ability to say *which half* went wrong.
-
-**Whether a train row needs an eval row depends on what its own eval measured,
-not on where the number came from.** A periodic in-training evaluation is a
-result when it ran the protocol being claimed over a comparable population —
-some projects configure it that way deliberately, so the training job reports
-its own headline number — and then the train row is complete on its own; say in
-`Notes` which protocol and how many samples. When the in-training evaluation
-runs a cheaper or narrower protocol than the claim, the train row's conclusion
-does not exist until a matching evaluation exists: mark it, and do not promote
-the in-training number. The project guide owns which case a given repository is
-in — check it rather than assuming, since the same key can mean either after a
-config change.
+**A train run and its eval are also different rows, paired.** The train row
+carries the training evidence (final losses, final train accuracies, the
+tail-window mean, steps completed); the eval row directly beneath it, titled
+`  ↳ eval of the row above`, carries the paper-protocol accuracies. They have
+different job ids, different configs and different failure modes, so collapsing
+them loses the ability to say *which half* went wrong. A train row with no eval
+row yet is a run whose conclusion does not exist — mark it, do not quote its
+in-training numbers as results.
 
 **Name the ablation axis in the first line of `Notes`, as `- <feature>`, and
 name the row it is measured against.** `- attention (mlp_t=false) instead of
@@ -79,16 +140,16 @@ must not silently force it into the existing schema.
 
 1. Resolve the input to an exact WandB run and, when relevant, an exact job
    attempt.
-2. Read the nearby sheet rows before choosing a target. Reuse a clearly matching
-   blank row or insert beside the closest comparable experiment, not at the end
-   by default.
-3. Pull identity, config, final metrics, and step/loss continuity from WandB and
-   logs. Do not scan benchmark datasets merely to fill a diagnostic.
-4. Normalize only metrics whose semantics are known, then run the comparability
+2. Resolve the tab by title and rebuild the column map from the live header.
+3. Choose the row by §Where The Row Goes — find the baseline block this run
+   varies and insert into it. Never append at the end by default.
+4. Pull identity, config, final metrics, and step/loss continuity from the
+   tracker and logs. Do not scan benchmark datasets merely to fill a diagnostic.
+5. Normalize only metrics whose semantics are known, then run the comparability
    hard stop above.
-5. Write the smallest range, preserve the WandB link, apply only intentional
+6. Write the smallest range, preserve the run link, apply only intentional
    formatting, and read back values, formulas, and colors.
-6. Report the changed row, run id/name, missing diagnostics, and any caveat.
+7. Report the changed row, run id/name, missing diagnostics, and any caveat.
 
 ## A Metric Is Not Comparable Until Its Protocol Is
 
