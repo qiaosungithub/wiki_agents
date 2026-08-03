@@ -1,0 +1,91 @@
+diff --git a/configs/remote_run_config.yml b/configs/remote_run_config.yml
+index 64729cb..9320b82 100644
+--- a/configs/remote_run_config.yml
++++ b/configs/remote_run_config.yml
+@@ -1,59 +1,43 @@
+ # ============================================================================
+-# MAZE v3 -- rope2d
++# THIS RUN: paper-protocol eval of the INFINITE-data maze checkpoint.
+ # ============================================================================
+-# 2-D RoPE, no registers. Isolates the positional encoding: 1-D rope penalises a vertical maze step 2.8x vs horizontal and aliases 48.3% of displacements; rope2d measures 0.000 spread and 0% aliasing. The comparison row is the NOREG control (peak D16 64.0 / D64 76.0, XID 276314162).
++# eval_only, B=1, D16 and D64, EMA and live weights, on the FIXED 1000-puzzle
++# test split -- the same split every other arm is scored on, so the numbers are
++# directly comparable. The training data being generated changes nothing here.
+ #
+-# COMMON TO THIS BATCH, and different from every earlier maze run:
+-#   * 150k steps, static 1k corpus, checkpoint every 5000 = eval every 5000, so
+-#     the PEAK has a checkpoint behind it. Every maze run in this family rises
+-#     and then collapses -- the NOREG control peaked at D16 64.0 / D64 76.0 at
+-#     step 60000 and finished at 8.7 / 3.8 (eval XID 276489813). Report the peak,
+-#     as the paper does ("the best checkpoint observed during training"; the
+-#     released maze weights are step_135000 of a 150000-step run).
+-#   * Full EqR: RI on, NI on (noise 0.01), damping lambda_ 0.95.
+-# Everything else is the published recipe (L_layers 1, L_cycles 4, H_cycles 3,
+-# hidden 128, heads 8, batch 768, lr 1e-4, wd 1.0, warmup 2000, EMA 0.999).
+-
+-eval_only: false
+-arch:
+-    name: eqr@EqRModel
+-    short_name: EqR
+-    L_layers: 1
+-    L_cycles: 4
+-    hidden_size: 128
+-    pos_encodings: rope2d
+-    mlp_t: false
+-    puzzle_emb_ndim: 0
+-
++# Protocol validated: this shape scored the released maze checkpoint at
++# 83.9 (D16) / 88.4 (D64) against the paper's 82.2 / 88.9 (XID 275723839).
++#
++# noise 0.01 = the value the checkpoint trained at. The published eval default
++# of 0.5 scores exactly 0.0 on the released checkpoint; do not restore it.
++#
++# 512 x 2 = 1024 rows fed, 1000 real + 24 pad. all/exact_accuracy gates on the
++# loss head's valid mask so it is unaffected; at B=1 no breadth metric is
++# emitted, so no padding correction applies to anything reported.
+ 
++eval_only: true
+ 
+-    q_readout: token0
+ dataset:
+     name: Maze-30x30-unique
+     data_path: data/maze-30x30-unique-1k
+-training:
+-    global_batch_size: 768
+-    epochs: 150000
+-    train_epochs_per_iter: 5000
+-    eval_interval_steps: 5000
+-    checkpoint_interval_steps: 5000
+-    log_per_step: 100
+-    lr: 1.0e-4
+-    lr_min_ratio: 1.0
+-    lr_warmup_steps: 2000
+-    beta1: 0.9
+-    beta2: 0.95
+-    weight_decay: 1.0
+-    optimizer: adam_atan2
+-    ema: true
+-    ema_rate: 0.999
++
+ evaluation:
+-    online_eval: [16, 64]
+-    global_batch_size: 768
++    suffix: maze_inf_b1
++    global_batch_size: 512
+     max_eval_steps: 2
+     different_init: 1
++    different_init_reset_std: 1.0
+     convergence_top_k: 0
++    convergence_window: 3
++    per_loop_accuracy: true
++    use_ema: [true, false]
+     force_rerun: true
++    sweep:
++        arch/halt_max_steps: [16, 64]
++        arch/noise_scale: 0.01
++        arch/H_init_std: 1.0
++        arch/L_init_std: 1.0
++
+ wandb:
+     project: EqR
+     mode: online

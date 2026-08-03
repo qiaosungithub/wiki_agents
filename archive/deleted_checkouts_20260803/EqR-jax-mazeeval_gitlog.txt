@@ -1,0 +1,15 @@
+a0f244639969b5ff20fa04d052656d2b6bc3e87e 2026-08-03 eval: sync the standard final-eval protocol from EqR-jax main
+837b1967047168750e3347c8ef1d6d7ef2f44cf7 2026-08-03 sync: Maze-dynamic test-split path + restart-safe attempt id
+d7f0ccd98058ef80dc6b047b564074ca3c42bce7 2026-08-02 configs: maze v3 A relaunch -- 2D rope, no registers
+f0fa87193053a6ce74cfc712883f6916e6cc1fee 2026-08-02 configs: drop the steps-histogram knob from the two configs added in parallel
+7ec308bd73e7f697f969ea7936b73d73bed39b8a 2026-08-02 README: lead §metrics with the measured surface and the four rules
+f42287a8c21a4d99a639b98cee06f61841e8d1a1 2026-08-02 metric_util: one docstring for the three features this module lost
+5fba2e4a4caf188048e8e3a0a9c6699e61befab7 2026-08-02 arch: a patchified board gets the MLP read-out by default
+6dd18cc7760d76255938e9aa6b43044e125b8710 2026-08-02 metrics: delete the steps histogram and the eval-side z stats
+b32e5efe0c4947aaa7ced56c9bab95115ab844ce 2026-08-02 metrics: one copy of every eval number, under its own name
+1253da920cbc340becbc89c3aa0ed2b4efa3e397 2026-08-02 eval: report the residual at six depths, not at every one
+98c9269a580fb24352e6a197b21318d5caa29c6a 2026-08-02 metrics: drop the constant columns
+0efba7f986fcd380bb3843c197a1c26946d5353c 2026-08-02 metrics: drop the columns that are identities of other columns
+3dd6f2c5ae22b68696e2ae90f1ef621c2e92e9ee 2026-08-02 metrics: delete the interval-mean machinery; it never worked
+70bf2cea438f8ddb2f88d95f961e96d0debdd74e 2026-08-02 configs: maze v3 C -- rope2d + trainable registers + q-head on register mean (all three fixes)
+8a2babc1493b0c4294e2e2d15e3adf2bd9fbbb4a 2026-08-02 configs: maze v3 B -- q-head on board mean, 1D rope, no registers

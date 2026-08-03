@@ -92,17 +92,54 @@ Two related traps on the same path:
   the request, so the ambient LOAS identity is used". Set it in-process. Without
   it, an access test reports a false negative and the real identity is never
   presented.
-- **A missing CNS quota record is not a write block.** Writes can succeed in a
-  cell where the quota tool reports no such user, but that likely means no
-  spindle commitment and therefore no performance floor. Measure throughput
-  during the first large copy instead of assuming it holds — and give the job
-  its own floor, armed only after startup, so a collapse stops it instead of
-  grinding for hours.
+- **A missing CNS quota record is not a write block, and it is not headroom
+  either.** Writes can succeed in a cell where the quota tool reports no such
+  user — but that reply means *no usage has been recorded yet*, not *no
+  ceiling*. Unknown users fall through to a shared default bucket, so a
+  never-written-to cell already has the standard per-user limit in force; the
+  record merely becomes visible on the first write. Treat an absent record as
+  the default ceiling, never as unlimited. A missing record does still suggest
+  no spindle commitment and therefore no performance floor, so measure
+  throughput during the first large copy and give the job its own floor, armed
+  only after startup, so a collapse stops it instead of grinding for hours.
 - **A job's own logs may be unreadable from a workstation.** Both the task-log
   and the log-search CLI can fail on a restricted credential, so a copy whose
   only evidence is a log line is a copy you cannot verify. Write the evidence
   to the destination itself — a manifest and a completion marker outlive the
   task, the work unit, and the credential.
+
+## Size A Copy In Disk Bytes, Not Payload Bytes
+
+**The storage quota counts bytes after replication, so the encoding decides
+whether a copy fits.** Default replication costs about 3x: a 199 GiB dataset
+becomes ~600 GiB of disk against a 500 GiB per-user ceiling, and the copy dies
+about four-fifths of the way in. Reed-Solomon costs about 1.45x, fits
+comfortably, and tolerates *more* simultaneous chunk losses than 3-way
+replication — cheaper and more durable, not a trade. Compute payload x
+amplification against the ceiling as a fail-closed assert before the first
+byte, and put the arithmetic in the abort message.
+
+Four things make this bite harder than it looks:
+
+- **Going over is not a clean stop.** The quota is checked on every stripe, so
+  an over-quota write dies mid-file, leaving one truncated object that a
+  size-only check may accept. Stage to a temporary name, verify size and
+  checksum, and only then rename.
+- **Going over poisons the cell for everything else you run.** The handle is
+  sticky — retrying it never succeeds — and the block clears only minutes
+  after usage actually drops. Human accounts get no soft-excess grace.
+  Crucially, **reads keep working**, which is what makes a full cell
+  recoverable: you can still copy the data out.
+- **A copy call does not inherit the destination directory's encoding.** Name
+  the encoding per file, then read it back — inheritance is invisible state
+  that a re-run in a fresh directory silently loses.
+- **Verify the encoding landed, rather than that you asked for it.** A cell
+  may silently downgrade an encoding it cannot place, and the fallback is the
+  expensive one. Pick from the user-facing recommended list; an encoding that
+  appears only in the system's internal *stable* set is a downgrade target,
+  not a menu option. Erasure coding also pads small files enormously — a
+  ~9 KB file can occupy several MB — so it suits large shards, not a
+  directory of sidecars.
 
 ## Before Touching A Payload
 
