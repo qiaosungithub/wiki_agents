@@ -56,9 +56,11 @@ Every experiment that produces a **conclusion** goes in the sheet. A run that
 only exposed a code bug, a packaging failure, or an infra preemption does not:
 those belong in the commit message or the project guide, not the results table.
 
-Each logged row must carry the **XM chart link**, not only the XID. See
-§Chart Links below for where it comes from, and §Provenance for the fields the
-chart link does NOT contain and must therefore be recorded separately.
+Each logged row must carry the **chart link** (not only the job id) **and the
+`logdir` / `stagedir` pointers**. The pointers matter more than any prose in the
+row: they are what lets a future reader recover the exact code, command, and
+resolved config, which is why the text columns can stay short. See §Chart Links
+for where the link comes from and §Provenance for what it cannot tell you.
 
 ## Where The Row Goes
 
@@ -73,7 +75,7 @@ The layout in use:
   configuration — the setting, the dataset/mix, and the details that stay fixed
   for everything under it. A short free-text line above a group (`prefix MAE
   experiments`) names the family; a blank row separates families.
-- **Every variant of that baseline goes directly beneath it, in the same
+- **Every variant of that baseline goes beneath it, in the same
   block**, and states only what CHANGED, written as `- <change>`. Real examples
   from the reference tab: `- finetune on VQA, lr 2e-5 wd0.02 cos decay`,
   `- only 128 tokens`, `- fix randomness`. The leading `- ` is what marks the
@@ -119,11 +121,66 @@ MLP-T, vs the full-corpus rope pair above` is a complete description; "attention
 variant" is not. Without the comparison target a reader cannot tell a two-point
 drop from a two-point win.
 
-**Keep prose short and load-bearing.** Notes/Details exist to make the number
-interpretable — protocol, sample count, what differs from the comparison row,
-and any caveat that changes how much to trust it (a run that stopped short, a
-padding correction applied). Explanations of *why* a bug happened belong in the
-commit message, not the sheet.
+**Keep prose short and load-bearing** — see §Write Short Cells, below.
+
+## Write Short Cells
+
+**Do not write essays in a spreadsheet.** A cell is not a place to explain, to
+narrate, or to justify — it exists to let the next reader find and interpret the
+number. Everything else is noise that pushes the metrics off screen and makes
+the tab unreadable. This is the most common way these tabs decay.
+
+The test for any sentence: *does a future reader need this to use the number?*
+If they need it only to understand how the run got that way, it belongs in the
+commit message, the project guide, or the log — not the sheet.
+
+- **The pointer columns are what make brevity safe.** `logdir` and `stagedir`
+  reconstruct everything: the exact code snapshot, the launch command, the
+  resolved flags, the full config. Because they are recorded, the text columns
+  do not have to be. **Filling them is higher priority than any prose** — a row
+  with a terse setting plus a correct `stagedir` is complete; a row with three
+  sentences and no pointer is not. §Provenance below covers where they come
+  from and why the chart link cannot replace them.
+- **Settings should be short.** In the reference tab a full baseline setting
+  runs roughly 15–75 characters — `MAE-L + Base init, recon weight 1.0, muon
+  lr2e-4` — and that is a whole configuration. Aim for that scale, not a
+  paragraph.
+- **A delta row must not restate the baseline's setting.** It says only what
+  changed — `- only 128 tokens`, `- fix randomness` — and leaves the inherited
+  columns empty. Re-describing the fixed axes in every variant is exactly the
+  duplication that later disagrees with itself, and it buries the one thing the
+  row is about.
+- **Notes and Details carry only what changes interpretation**: the protocol,
+  the sample count, what differs from the comparison row, and a caveat that
+  changes how much to trust the number (the run stopped short; a padding
+  correction was applied). One clause each is usually enough.
+- **Never explain a bug in a cell.** Why something broke is commit-message
+  material. The sheet records what the number means, not the story behind it.
+
+## Formatting Is Part Of The Result
+
+The tab is read visually, at a glance, by someone scanning for a comparison.
+Layout and color carry meaning, so they are part of the deliverable, not
+decoration to skip.
+
+- **Match the local conventions of the block you are writing into.** Read the
+  neighboring rows' formatting before adding to them; a row that looks different
+  reads as if it means something different.
+- **Color is a signal with a defined meaning — do not invent one.** Where a tab
+  assigns semantics to a color (a below-trivial score, an invalid protocol, a
+  misconfiguration), apply it only under that exact condition, and never
+  repurpose the same color for an unrelated note. A color applied loosely
+  destroys the signal for every row that used it correctly. Project-specific
+  color semantics live with the project — see `../projects/vlm_metrics.md`.
+- **Inserting a row inherits the neighbor's formatting**, including backgrounds
+  that encoded a condition your run does not meet. Clear inherited formatting,
+  then apply only what you intend.
+- **Keep the metric columns visible.** Long text in an early column, an
+  unwrapped cell, or a stray merge pushes the numbers out of view and defeats
+  the side-by-side comparison the layout exists to provide.
+- **Read back what you wrote — values, formulas, and colors** — and, when the
+  change is structural, look at the rendered tab rather than only the cell
+  values. The `gsheets` CLI can export a page as an image for exactly this.
 
 ## Core Rule
 
@@ -147,9 +204,11 @@ must not silently force it into the existing schema.
    tracker and logs. Do not scan benchmark datasets merely to fill a diagnostic.
 5. Normalize only metrics whose semantics are known, then run the comparability
    hard stop above.
-6. Write the smallest range, preserve the run link, apply only intentional
-   formatting, and read back values, formulas, and colors.
-7. Report the changed row, run id/name, missing diagnostics, and any caveat.
+6. Write the smallest range. Keep the text terse, fill `logdir` / `stagedir`,
+   clear inherited formatting, and apply only the formatting you intend.
+7. Read back values, formulas, and colors; render the tab when the change was
+   structural.
+8. Report the changed row, run id/name, missing diagnostics, and any caveat.
 
 ## A Metric Is Not Comparable Until Its Protocol Is
 

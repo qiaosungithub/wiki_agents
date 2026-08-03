@@ -70,13 +70,21 @@ demand and each has a `README.md` index.
 
 **Logging results to the experiment spreadsheet**
 
-- Every run that reaches a conclusion is logged to the shared experiment
+- Every run that reaches a conclusion is and should be logged to the shared experiment
   spreadsheet. **Re-read the tab's header and its neighboring rows every time**
   — columns and layout change between sessions, and a stale column map writes a
   number into the wrong benchmark without erroring.
 - **Place the row before filling it.** Find the baseline block this run varies,
   insert next to its comparison target, and describe a variant as `- <change>`
   relative to that baseline. Appending at the end destroys the comparison.
+- **Do not write essays in a spreadsheet.** Keep Settings and Notes short; a
+  delta row states only what changed and never restates the baseline. What makes
+  brevity safe is recording `logdir` / `stagedir` — those recover the exact code
+  and config, so the prose does not have to. Explanations of why a bug happened
+  belong in the commit message.
+- Formatting and color are part of the result. Match the block's conventions,
+  clear formatting inherited from an inserted row, never repurpose a color that
+  already has a defined meaning, and keep the metric columns visible.
 - Helper scripts for reading metrics or writing rows are worth keeping, but must
   re-derive the column map from the live sheet on every run. See
   `research/result_logging.md`.
