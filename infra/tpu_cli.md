@@ -1,7 +1,7 @@
 # The `tpu` Tooling Itself
 
 Read this only when changing, rebuilding, or debugging the `tpu` CLI and its
-daemon. Using it to launch and inspect jobs is `jobs.md`. Native code and
+daemon. Using it to launch and inspect jobs is `../jobs.md`. Native code and
 `~/work/tpu_cmd/README.md` outrank this file for flags and workflows.
 
 ## Two Halves, Two Repositories, And Why
@@ -84,7 +84,7 @@ with no stated reason), and unknown.
 **Auto-retry is narrow on purpose**: only a guaranteed-tier job rejected by the
 allocator is retried, a few times, minutes apart. That is the client resubmitting
 a *new experiment*, which is a completely different mechanism from the in-job
-restart budget in `jobs.md`. **Preempted jobs are not covered by it.**
+restart budget in `../jobs.md`. **Preempted jobs are not covered by it.**
 
 **A preempted job is dead, not pending.** With no restart budget the torn-down
 gang counts as a task failure and the job is never re-queued. The status tool
@@ -126,4 +126,4 @@ every read or write. Pin one explicitly if it must outlive that.
 The table CLI does not work from this workstation — a restricted credential
 blocks the service, and every local binary hits the same wall. This is a
 workstation limitation only; a job writes fine. Use the browser URLs in
-`research/result_logging.md`.
+`../research/result_logging.md`.

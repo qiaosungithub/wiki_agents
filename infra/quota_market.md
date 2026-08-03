@@ -1,6 +1,6 @@
 # Quota, Price Caps, And Why A Job Will Not Schedule
 
-Read this when a job will not schedule and `jobs.md` does not explain it, or
+Read this when a job will not schedule and `../jobs.md` does not explain it, or
 before setting any price cap. This is allocator internals; most work never needs
 it. Source-verified against the scheduling pipeline in mid-2026 — re-verify
 before relying on a mechanism, and prefer live state over this text.
@@ -150,7 +150,7 @@ entitlement. A configuration file and live state disagreeing is normal.
 Prices, floors, caps, and per-unit decisions live in the quota database and are
 readable directly with plain credentials, which is the reliable path from a
 workstation. Resource types are keyed by numeric id in some tables and by enum
-name in others — `tpu_reference.md` has the mapping. Per-cycle price history
+name in others — `../tpu_reference.md` has the mapping. Per-cycle price history
 exists; one aggregated history table is empty and misleads.
 
 The browser resource UI is authoritative for allocations, one allocation's

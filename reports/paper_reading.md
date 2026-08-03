@@ -3,7 +3,7 @@
 Read this when producing a paper deep-reading report. Reports live in
 `work/reports/`. Write the body in Simplified Chinese, keeping technical names
 and identifiers in English. Layout and figure rendering are in `rendering.md`;
-the general "define your terms" discipline is in `engineering.md`.
+the general "define your terms" discipline is in `../engineering.md`.
 
 ## Required Story
 

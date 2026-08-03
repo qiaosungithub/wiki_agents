@@ -31,11 +31,11 @@ files in the parent directory hold rules that apply to every project.
 | `project_one_ssl/` | Project One v5 three-stream MAE/DAE baseline | Native `CLAUDE.md`, `docs/REPO_GUIDE.html`, and `docs/AGENT_CONTEXT.md` |
 | `one-benchmark-suite/` | Benchmark registry, not a training framework | Native docs; archives only for old context |
 | `nnflow_jax/` | JAX implementation of Generative Modeling Through Drifting | Native docs; archives only for old context |
-| `EqR/` and `EqR-jax/` | PyTorch and JAX continuous-space reasoning for Sudoku and mazes | `eqr_jax.md`; `jobs.md` for launches |
-| `tpu_cmd/` | Shared XManager wrapper, launcher, and job tracking. Only half the tool: the Blaze-built checkers live in google3 under `experimental/users/qiaos/tpu_utils/`, versioned by a separate git repo | `infra/tpu_cli.md`; then native code |
+| `EqR/` and `EqR-jax/` | PyTorch and JAX continuous-space reasoning for Sudoku and mazes | `eqr_jax.md`; `../jobs.md` for launches |
+| `tpu_cmd/` | Shared XManager wrapper, launcher, and job tracking. Only half the tool: the Blaze-built checkers live in google3 under `experimental/users/qiaos/tpu_utils/`, versioned by a separate git repo | `../infra/tpu_cli.md`; then native code |
 | Agent web / Jetski checkout (resolve the live path) | Web interface for Gemini, Amply, and Claude agents | `agent_web.md`; then native docs |
 | `agent-island/` | Terminal session managers for the agent CLIs (`clod`, `amp`, `gpt`, `gemini`) | `local_agent_cli.md`; then native docs |
-| `work/reports/` | Paper deep-reading reports | `reports/paper_reading.md` |
+| `work/reports/` | Paper deep-reading reports | `../reports/paper_reading.md` |
 
 ## Project Boundaries That Are Easy To Miss
 
@@ -48,7 +48,7 @@ files in the parent directory hold rules that apply to every project.
   transformer starts from scratch, the frozen Gemma text stream is always
   present, Stream 1 and Stream 3 do not share mask tokens, and reconstruction
   loss covers all patches. Do not alter those choices as incidental cleanup.
-  Verify any launch section against `jobs.md` and the current wrapper.
+  Verify any launch section against `../jobs.md` and the current wrapper.
 - `EqR` and `EqR-jax` are distinct PyTorch and JAX implementations. Do not port
   runtime, data, or checkpoint behavior between them as incidental cleanup.
 - Snapshot and backup checkouts are not automatically the active source. Confirm
@@ -58,7 +58,7 @@ files in the parent directory hold rules that apply to every project.
 
 Repository-local instructions are authoritative for implementation details.
 Generated run directories such as `.arc3-runs/` can also contain narrow local
-`AGENTS.md` files; read the nearest one only when working inside that run.
+`../AGENTS.md` files; read the nearest one only when working inside that run.
 
 The old exact memory snapshots are under `../archive/legacy/`. They are useful
 for recovering provenance, not for deciding how the current system works.

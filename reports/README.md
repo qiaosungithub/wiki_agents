@@ -7,4 +7,4 @@
 
 Reports are written in Simplified Chinese with technical names and identifiers
 kept in English. This is the one exception to the English-artifacts rule in
-`AGENTS.md`.
+`../AGENTS.md`.

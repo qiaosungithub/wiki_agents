@@ -2,7 +2,7 @@
 
 Read this when writing a VLM result into the shared spreadsheet, or when a
 benchmark number looks wrong. The general "settle the protocol first" rule is in
-`research/result_logging.md`; this file holds the specific conventions that tab
+`../research/result_logging.md`; this file holds the specific conventions that tab
 uses. Verify column letters against the live sheet — a layout note ages.
 
 ## Protocol Choices That Are Not Interchangeable

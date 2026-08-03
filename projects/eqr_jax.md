@@ -1,8 +1,19 @@
 # EqR And EqR-jax
 
-Read this for the `EqR` and `EqR-jax` checkouts. They are distinct PyTorch and
-JAX implementations; inspect the target checkout's native docs and git state
-before porting behavior. `jobs.md` owns launches and job diagnosis.
+The `EqR` (PyTorch) and `EqR-jax` (JAX) checkouts are distinct implementations;
+inspect the target's native docs and git state before porting anything between
+them. `../jobs.md` owns launches and job diagnosis.
+
+Longest guide here, and mostly reference — jump to what you need:
+
+| Section | When |
+|---|---|
+| Data And Model Invariants · Launch And Packaging | changing configs or launching |
+| Google3 Packaging Traps · JAX Startup Order | a job dies before `main()` |
+| Evaluating A Published Checkpoint | restoring or comparing against released weights |
+| Data And Checkpoint Locality · Sampler State · Boundary-Checkpoint Stall | a run is slow, deleted, or resumes wrong |
+| Experiment Tracking · Reporting Its Metrics | reading or logging its numbers |
+| Eval Protocol | deciding which accuracy is the headline |
 
 ## Data And Model Invariants
 
@@ -14,7 +25,7 @@ before porting behavior. `jobs.md` owns launches and job diagnosis.
   the task explicitly changes the representation.
 - Do not transfer checkpoint, logging, or runtime assumptions between the
   PyTorch and JAX implementations without checking both code paths.
-- **Never sync a file between the two checkouts wholesale** (`engineering.md`
+- **Never sync a file between the two checkouts wholesale** (`../engineering.md`
   §Porting Between Related Checkouts). This repo already lost `_online_eval`
   from `train.py` that way while nine yamls kept setting `evaluation.online_eval`
   — the config promised a D16/D64 curve and the code measured one point, for
@@ -41,14 +52,14 @@ before porting behavior. `jobs.md` owns launches and job diagnosis.
   snapshot, repoints the staged target, and packages that snapshot. Post-package
   edits to the home checkout do not affect the job.
 - **Write the run into `configs/remote_run_config.yml` and launch without a
-  config argument.** `jobs.md` §Submission Contract owns this rule; the
+  config argument.** `../jobs.md` §Submission Contract owns this rule; the
   EqR-jax consequence is that `configs/` holds ONLY templates — `local_debug`,
   `remote_run`, and at most three task templates. A finished experiment's config
   is recovered from its immutable snapshot with `sexy <xid>`, not by keeping a
   file per run. The directory has been pruned twice already because launching by
   config name made every launch leave a file behind.
 - EqR-jax uses XManager service tiers (`PROD` or `BATCH`), not legacy
-  `xm_priority`. Resource selection and allocator constraints are in `jobs.md`.
+  `xm_priority`. Resource selection and allocator constraints are in `../jobs.md`.
 - Treat the active BUILD target and launcher as authoritative. The current
   Bazel compatibility contract keeps the entry point in `srcs`, packages other
   Python/config files as `data`, excludes `testonly` dependencies from the
@@ -62,7 +73,7 @@ before porting behavior. `jobs.md` owns launches and job diagnosis.
 
 These all fail at module-import time, before `main()`, which on Borg looks like
 an empty `status.message` and no log at all. Reproduce locally in ~45s instead
-of guessing (see `jobs.md` §Debugging A Job That Dies With No Log):
+of guessing (see `../jobs.md` §Debugging A Job That Dies With No Log):
 
 - **`import wandb`** resolves via `//third_party/py/scamper:wandb_mock`, whose
   `imports = ["wandb_mock"]` attribute the hermetic launcher ignores. `main.py`
@@ -132,7 +143,7 @@ of guessing (see `jobs.md` §Debugging A Job That Dies With No Log):
 
 ## Data And Checkpoint Locality
 
-`storage.md` owns the rule (co-locate compute with storage or the pruner deletes
+`../storage.md` owns the rule (co-locate compute with storage or the pruner deletes
 the job) and the measured cost. Both halves are automatic here, and both are
 overridable:
 
@@ -183,61 +194,46 @@ Fixed in `0b31a2a`: an exhausted cursor now means "the previous iteration
 finished", so the resume starts the next one at 0 and drops the spent
 permutation. Two things to carry forward:
 
-- **Verify a resume by step progress, not by exit status** (`jobs.md` §A restart
+- **Verify a resume by step progress, not by exit status** (`../jobs.md` §A restart
   loop is not evidence of a crash).
 - **Inspect `train_dataset.train_state.epoch_idx` in `extra.json`** when a resume
   makes no progress. One `fileutil cat` settles it.
 
 ## Experiment Tracking
 
-- Config fields may retain historical `wandb` names. No `WANDB_API_KEY` is needed.
-- **In google3 `import wandb` resolves to `//third_party/py/scamper:wandb_mock`,
-  which implements only `init`, `log`, `finish`, `Table`, `plot` and `Video` —
-  and its `log()` is a bare `logging.debug` that stores nothing.** Every other
-  attribute (`util.generate_id`, `define_metric`, `Histogram`, `Artifact`,
-  `run._step`) raises `AttributeError` **at call time**, i.e. on Borg, after
-  packaging and scheduling have both succeeded. Route every wandb call through
-  the shims in `utils/wandb_util.py`; `safe_log()` additionally swallows failures,
-  because telemetry must not be able to kill a TPU run.
-- Metrics reach a UI through **DeepMind Datatables**, written via
-  `clu.metric_writers` (`//third_party/py/clu/metric_writers:notf`).
-  `research/result_logging.md` §Chart Links owns the URL forms and the
-  `write_to_datatable=True` ACL trap. Two constraints specific to this code:
-  only `process_index()==0` may construct a writer (the key is `(wid, step)` and
-  all tasks of a work unit share one `wid`), and it must flush periodically —
-  CLU's destructor cancels the writer thread instead of draining it.
-- Every run that reaches a conclusion is logged to the `EqR-reproduction` tab
-  with its chart link; see `research/result_logging.md`.
+Config fields keep historical `wandb` names; no API key is needed, and there is
+no real external tracker unless current code proves one was created.
+
+- **`import wandb` resolves to a mock** implementing only `init`, `log`,
+  `finish`, `Table`, `plot`, `Video`, whose `log()` stores nothing. Every other
+  attribute raises **at call time** — on Borg, after packaging and scheduling
+  succeeded. Route calls through `utils/wandb_util.py`; `safe_log()` swallows
+  failures, because telemetry must not kill a run.
+- Metrics reach a UI through Datatables via `clu.metric_writers`. URL forms and
+  the explicit-opt-in trap are in `../research/result_logging.md` §Chart Links.
+  Two constraints specific to this code: only `process_index()==0` may construct
+  a writer (all tasks of a work unit share one key), and it must flush
+  periodically — CLU's destructor cancels the writer thread instead of draining
+  it.
 - **Anything that builds a logging handler unhooks the remote log mirror.**
-  `main.py` tees stdout/stderr into `$CHECKPOINT_BUCKET/logs/rank_<n>.log`
-  before anything else runs, but stdlib handlers capture the stream they were
-  constructed with, so `clu.metric_writers.create_default_writer` silently
-  steals it back. Symptom: the job runs fine and the log stops dead after a few
-  lines (XID 275709629 mirrored 173 lines; every job after the CLU writer
-  landed mirrored exactly 4). Call `logging_util.reattach_absl_handlers()`
-  after constructing anything that touches logging. Note the handler to repoint
-  is `get_absl_handler().python_handler`, not `get_absl_handler()` — the outer
-  object has no `setStream`, and the original call raised `AttributeError` into
-  a bare `except: pass` for its entire life.
-- Under Borg that mirrored file is the ONLY log: the local stream dies with the
-  task, and `analog` may be unavailable from a workstation. Losing it turns a
-  one-line diagnosis into a blind guess.
-- Resume uses the exact XManager experiment identity (`resume_xid`) and its
-  workdir. Verify checkpoint and config continuity before treating appended
-  charts as one run.
-- Checkpoints go to `$CHECKPOINT_BUCKET` (injected by the launcher), never to
-  `workdir`, which is task-local `/tmp` and is wiped by every Borg restart.
+  `main.py` tees stdout/stderr to `$CHECKPOINT_BUCKET/logs/rank_<n>.log` first,
+  but stdlib handlers capture the stream they were constructed with, so creating
+  a metric writer silently steals it back — the job runs fine and the log stops
+  dead after a few lines. Call `logging_util.reattach_absl_handlers()` after
+  constructing anything that touches logging; the handler to repoint is
+  `get_absl_handler().python_handler`, not the outer object, which has no
+  `setStream`. Under Borg that mirrored file is the ONLY log.
+- Resume uses the experiment identity (`resume_xid`) and its workdir; verify
+  checkpoint and config continuity before treating appended charts as one run.
+  Checkpoints go to `$CHECKPOINT_BUCKET`, never `workdir`;
   `main.py::_apply_borg_autoresume` rediscovers the newest complete checkpoint
-  there at startup. `load_from` accepts `gs://` and must be handled through the
-  path helpers in `utils/ckpt_util.py`, not `os.path`. The launcher/runtime
-  contract for `LOAD_FROM`, `WANDB_RESUME_ID`, and `CHECKPOINT_BUCKET` is owned
-  by `jobs.md` §Preemption, Restart, And Resume.
-- Do not query the WandB API for EqR-jax unless current code proves that a real
-  external WandB run was created.
+  at startup. The env-var contract is owned by `../jobs.md`.
+- Runs reaching a conclusion go to the `EqR-reproduction` tab; see
+  `../research/result_logging.md`.
 
 ## Reporting Its Metrics
 
-`research/result_logging.md` owns the general rule; these are the EqR-jax
+`../research/result_logging.md` owns the general rule; these are the EqR-jax
 specifics that keep biting.
 
 - **A logged key is not a delivered column, and nothing says so.** The sink is
