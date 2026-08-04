@@ -149,8 +149,15 @@ Hop 1 MUST be initiated from a task in metro `cmh`. Letting a job in the
 destination metro pull directly from the bucket is exactly the cross-region read
 that bills.
 
-**Hop-2 destination: `/cns/yuphxrp-d/home/qiaos/` (metro `phx`, us-west8),
-because that is the only place v7 exists.** Full v6p/v7 market scan:
+**Hop-2 destination: `/cns/yuphxrp-d/home/qiaos/` (metro `phx`, us-west8).**
+
+> **Superseded on the v7 claim.** "`phx` is the only place v7 exists" was an
+> artefact of reading the market table's *sample* cells instead of the full
+> cache: v7 is in 17 cells across 12 metros, and `phx` is one of the four with
+> **no** team storage quota. If this hop is redone, pick a metro that has both
+> -- see `v7_storage_placement.md`. The cost reasoning below still holds.
+
+Full v6p/v7 market scan:
 
 | type | tier | cell | metro | region | obtainable | price |
 |---|---|---|---|---|---|---|
@@ -164,6 +171,11 @@ replica cannot serve both -- PROD v6p is only in Europe, and a third replica in
 `chs` would be needed for the free BATCH v6p-256. And **v7 headroom is currently
 0**, so the data can be staged there before the chips are actually obtainable.
 `/cns/yuphxrp-d` verified reachable.
+
+The scan above lists one cell per accelerator because it came from the market
+summary table. **That table samples; it does not enumerate.** Read
+`~/.tpu_quota_cache_dir/market.json` for the full cell list before concluding
+anything about where an accelerator does or does not exist.
 
 **The 500 GiB personal ceiling no longer binds: `/cns/go-d/home/qiaos` is now
 charged to `deepmind-resources-colossus`.** Membership was proven by the

@@ -51,8 +51,19 @@ threshold.**
   before believing its "credentials expired" hint** — that message is a guess and
   is usually wrong.
 - **Rebuild all checker binaries in one build invocation.** Building a single
-  target evicts the others from the output directory, and the daemon then
-  reports failures that look like data or auth bugs.
+  target can publish an output namespace holding only that target, and the
+  daemon then reports failures that look like data or auth bugs.
+- **Never `readlink -f` the build output symlink.** It is a chain of two hops
+  with opposite lifetimes: the first is stable and worth pinning against a
+  concurrent build, the second is republished per build and only the targets of
+  *that* build land behind it. Collapsing both freezes the daemon inside one
+  build's namespace, where no later rebuild can ever reach it — the binaries sit
+  in `blaze-bin`, correctly built, while the daemon insists they do not exist.
+  Pin one hop; re-resolve the rest at each use, and fall back to the live path.
+- **A checker the daemon cannot find is repaired by the daemon**, rate-limited,
+  rebuilding all of them together. A hint printed into a detached tmux pane is
+  not a fix, and the staleness auto-recovery restarts the session — which was
+  never the problem.
 
 ## Job Bookkeeping
 

@@ -41,6 +41,18 @@ Practical rules:
 - Low utilization is the symptom the pruner acts on, and its deletion message
   links the policy it applied. Read it rather than guessing.
 
+**When an accelerator has no storage next to it, move the compute before
+requesting quota.** A new accelerator generation is turned up cell by cell, and
+storage registration lags it, so the first cell you are given may have no team
+quota at all. Before concluding that, ask the question at **metro** granularity:
+a cell is one cluster, a metro holds several, and a same-metro neighbour with
+PiBs free is as good as local. The narrow question -- *does this exact cell have
+quota* -- reports failure for placements that are actually fine. Enumerate every
+cell the accelerator lives in, join it against the accounting group's registered
+cells by metro, and only escalate if the whole intersection is empty. Filing for
+a new registration takes days; discovering the sibling metro that already works
+takes minutes.
+
 ## Copying From A Bucket Someone Else Pays For
 
 When the source bucket belongs to an external GCP project, a cross-region read

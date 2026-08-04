@@ -229,6 +229,16 @@ and preferring cells that historically work for you is the practical answer.
 **Convert power classes before you launch.** A chip count is not a size; see
 `tpu_reference.md`. `tpu route --power=` does the arithmetic.
 
+**The market summary samples cells; it does not enumerate them.** Its price
+table prints a few representative cells per accelerator, so reading it as a
+complete list understates where an accelerator exists -- badly enough to have
+sent one plan chasing a quota request in the single metro it named, when the
+chips were in a dozen. To answer *where can this run at all*, read the router's
+cache directly (`~/.tpu_quota_cache_dir/market.json`), which lists every cell
+with a price, keyed by an internal card code -- confirm the code by checking
+that a cell you already run on appears under it. Then intersect that list with
+storage placement (`storage.md`) before choosing.
+
 ## Status And Diagnosis
 
 1. Start from `tpu check` and resolve the exact experiment and work unit.

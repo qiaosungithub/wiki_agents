@@ -37,6 +37,7 @@ Files here apply to every task. Subdirectories are read on demand; each has a
 | Find a checkout, or its boundaries | `projects/README.md` |
 | Queue, inspect, resume, debug a job | `jobs.md`, then the project guide |
 | Place data or checkpoints; copy or upload | `storage.md`, then the project guide |
+| Pick a cell/metro for a v7 run | `research/v7_storage_placement.md` |
 | Read a distributed path interactively | `storage.md` §Distributed Reads |
 | Reclaim local disk | `storage.md` §Local Disk Cleanup |
 | TPU codename, HBM, legal shape, equivalence | `tpu_reference.md` |
