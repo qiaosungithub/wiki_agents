@@ -141,15 +141,50 @@ read the error — that is the membership check. Confirm it landed with
 a group's quota with `fileutil quota <group> <cell>` is not evidence of
 membership.
 
-Two things to keep in mind once it works:
+**Membership is only the first of two gates. The second is whether the group
+has a ceiling in that specific cell, and failing it is worse than not trying.**
+A group you belong to but which has no flex registration in the destination cell
+accounts to an entity with no quota, and the write dies with *"Group \<g\> has
+no quota (partition=hdd)"* plus a **poisoned file handle** — strictly worse than
+leaving the accounting alone. Two independent cells reproduced this.
+
+The filesystem cannot tell you this in advance: `fileutil quota <group> <cell>`
+reports a plausible-looking `500.00G` limit for an unregistered group, because
+that is the default bucket it falls through to, not a real ceiling. **Only the
+flex registry is authoritative:**
+
+```
+flex.par list_ceiling -p <pool> -s colossus -g <group> -l <cell>-d
+```
+
+No registration means no quota, whatever the filesystem says.
+
+Quota lives in a three-level hierarchy — a parent pool, a team pool, then the
+accounting group — and a cell can be missing at any level. When a whole metro
+looks unusable, check whether the *team* pool is registered there before
+concluding anything about your own group; a newly turned-up cell often has the
+parent pool with PiBs free and simply no team beneath it.
+
+Ceilings come as named size circles, and **the default circle carries zero
+spindle commitment** — the condition behind a documented 12-hour throughput
+collapse. Never accept the default on a cell you intend to read from in a loop.
+Raising a circle is self-service only up to a policy limit; past that the tool
+names the request process in its own error. **`--validate_only` runs the full
+authorisation and policy check without mutating anything**, so probe with it
+first — it is how to discover a permission boundary without filing anything.
+
+Three things to keep in mind once it works:
 
 - **Group quota is per cell and is not uniform.** A group can be near its
   ceiling in one cell and essentially empty in another, and can have no record
-  at all in a third. Check the destination cell specifically with
-  `fileutil quota <group> <cell>` before assuming headroom.
+  at all in a third. Check the destination cell specifically before assuming
+  headroom.
 - **It is a shared pool with fair-usage expectations.** Staging a working slice
   is unremarkable; parking a full multi-TiB dataset indefinitely is not. Delete
   what the experiment no longer reads.
+- **A raised ceiling reaches Colossus asynchronously.** The flex view updates at
+  once; `fileutil quota` can still show the old number. Verify by writing, not
+  by reading the quota back.
 
 ## Size A Copy In Disk Bytes, Not Payload Bytes
 
