@@ -179,6 +179,30 @@ resolves to the same location — that stability is what makes in-process
 auto-resume well defined. Do not inject a checkpoint path as a config flag if
 the config schema is locked; every job will die at startup.
 
+## Launcher-Side Failures That Look Like Scheduler Failures
+
+The submit path runs on the workstation, and several of its failure modes
+produce an XID with no work unit, or no XID at all. Read them as local problems,
+not as allocator or quota rejections.
+
+- **Never pipe content into the submit command.** The launcher asks a handful of
+  attribution questions; each is satisfied by an EOF, so redirecting from
+  `/dev/null` answers all of them. Piping something like `yes` instead
+  segfaults the underlying CLI outright — no XID, no diagnostic.
+- **A full `/tmp` breaks the submit with `SIGBUS`.** `/tmp` is a RAM-backed
+  tmpfs, so a core dump from a local repro can fill it and the next writer dies
+  on a page it cannot get. Disable cores for local repro runs, and check free
+  space before submitting. Remember every byte in `/tmp` is a byte of RAM taken
+  from the same machine that is doing the 5-minute cold imports.
+- **Bazel refuses to glob a package containing an absolute symlink**
+  ("Absolute symlinks are forbidden"), so a checkout that symlinks the shared
+  launcher must be copied into the source tree with symlinks dereferenced. The
+  rejection is cached in the package glob cache, so fixing the tree is not
+  enough — the build server has to be restarted before the error clears.
+
+Distinguishing these from remote failures is cheap: a job that never created a
+work unit, or a launch that produced no XID, never reached the scheduler at all.
+
 ## Preflight Before You Pay For Packaging
 
 Packaging costs minutes; an allocator rejects in seconds. The client-side

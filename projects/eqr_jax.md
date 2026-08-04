@@ -20,9 +20,16 @@ Longest guide here, and mostly reference — jump to what you need:
 - `EqR-jax` maps configured dataset aliases in `data_util.py`; verify the live
   mapping for names such as `Maze-dynamic` and `Sudoku-aug1000` instead of
   rewriting paths in launch commands.
-- The maze library's `grid_n=15` sample is `31 x 31`, while EqR consumes
-  `30 x 30`. Preserve the existing top-left crop and path-length scaling unless
-  the task explicitly changes the representation.
+- **The maze grid is `30 x 30` holding a `29 x 29` perfect maze, padded — not
+  cropped.** `_generate_perfect_maze` needs an odd size, so the generator takes
+  `maze_n = n if n % 2 else n - 1` and writes `open_mask[:29, :29]`, leaving row
+  29 and column 29 permanently wall. Verify against the corpus rather than
+  assuming a crop: those two lines are constant across every sample. An older
+  note here described a `maze_dataset` / `gen_dfs` path whose `grid_n=15`
+  `as_pixels()` gave `31 x 31` cropped to `30 x 30`; that path is dead code on
+  the current library version. Both paths are recursive backtracker, so the
+  generator family is unchanged — but the padded geometry, and the solution
+  length window that goes with it, are what the live code produces.
 - Do not transfer checkpoint, logging, or runtime assumptions between the
   PyTorch and JAX implementations without checking both code paths.
 - **Never sync a file between the two checkouts wholesale** (`../engineering.md`

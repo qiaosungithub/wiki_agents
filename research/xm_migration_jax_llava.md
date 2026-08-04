@@ -165,12 +165,22 @@ replica cannot serve both -- PROD v6p is only in Europe, and a third replica in
 0**, so the data can be staged there before the chips are actually obtainable.
 `/cns/yuphxrp-d` verified reachable.
 
-**CNS quota records are absent in `go-d` and `nz-d`** (`fileutil quota qiaos
-<cell>` reports no such user) while writes still succeed -- verified by writing a
-28-byte file to `/cns/go-d/home/qiaos/probe/`. Only `yutulpz-d` has a record
-(39.77 GiB used, effectively unlimited limit). Missing record != write blocked,
-but it likely means no spindle commitment, so watch throughput during the first
-real copy rather than assuming it scales.
+**The 500 GiB personal ceiling no longer binds: `/cns/go-d/home/qiaos` is now
+charged to `deepmind-resources-colossus`.** Membership was proven by the
+filesystem itself -- `chstat` accepts that group while rejecting `youtube-eng`
+and `search-eng` with an explicit *"qiaos is not a member of"*, so the accept is
+a real permission check, not a silent no-op. The whole home directory was set
+recursively and new subdirectories and files inherit it, verified by `stat`; the
+copy and training code needs no change. Group headroom in the cells that matter:
+`go-d` 20.74 / 26.15 PiB used, `nz-d` 8.00 / 14.06 PiB, `yutulpz-d` 724 GiB /
+100 TiB; `yucbfpv-d` has no record. A 199 GiB payload at 3x replication is
+~0.01% of the `go-d` pool, so default `r=3.2` is now acceptable and Reed-Solomon
+is an optimisation rather than a prerequisite.
+
+**Per-user quota records were absent in `go-d` and `nz-d`** while writes still
+succeeded. That is moot for capacity now, but it still signals no spindle
+commitment, so watch throughput during the first real copy rather than assuming
+it scales.
 
 **Branches:** `sqa.late_fusion_xm` in `jax_llava`, `data_upload_xm` in
 `paligemma-data-upload`.

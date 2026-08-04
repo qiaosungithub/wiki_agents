@@ -108,13 +108,58 @@ Two related traps on the same path:
   to the destination itself — a manifest and a completion marker outlive the
   task, the work unit, and the credential.
 
+## The 500 GiB Ceiling Is The Wrong One — Charge The Group
+
+**A personal CNS ceiling is 500 GiB per cell; the team's accounting group holds
+PiB.** Any dataset worth staging exceeds the personal ceiling once replication
+is counted, so the first question about a large copy is not "will it fit" but
+"whose quota is it charged to". Charging the group removes the constraint
+entirely and makes the encoding gymnastics in the next section optional rather
+than load-bearing.
+
+Set the accounting owner once, on the directory, and every file written beneath
+it inherits it — including files written later by a job, so no training or copy
+code changes:
+
+```
+fileutil chstat -R "quota_accounting{capacity_quota_user: '<mdb-group>'}" \
+    /cns/<cell>-d/home/<user>
+```
+
+`chgrp -R <group>` achieves the same accounting via group ownership, but it also
+grants the whole group read access. Prefer `chstat` when you only mean to move
+the bill.
+
+**Membership is cheaper to test than to look up.** The directory-lookup CLIs sit
+behind a restricted-LOAS wall that a workstation credential does not clear, but
+the filesystem answers directly and distinguishes three cases: a nonexistent
+group fails with *not a valid ACL group*, a real group you do not belong to
+fails with ***\<user\> is not a member of \<group\>***, and a group you can
+charge to simply succeeds. So attempt the `chstat` on a scratch directory and
+read the error — that is the membership check. Confirm it landed with
+`fileutil stat`, which echoes the `quota_accounting` block; being able to *read*
+a group's quota with `fileutil quota <group> <cell>` is not evidence of
+membership.
+
+Two things to keep in mind once it works:
+
+- **Group quota is per cell and is not uniform.** A group can be near its
+  ceiling in one cell and essentially empty in another, and can have no record
+  at all in a third. Check the destination cell specifically with
+  `fileutil quota <group> <cell>` before assuming headroom.
+- **It is a shared pool with fair-usage expectations.** Staging a working slice
+  is unremarkable; parking a full multi-TiB dataset indefinitely is not. Delete
+  what the experiment no longer reads.
+
 ## Size A Copy In Disk Bytes, Not Payload Bytes
 
 **The storage quota counts bytes after replication, so the encoding decides
 whether a copy fits.** Default replication costs about 3x: a 199 GiB dataset
 becomes ~600 GiB of disk against a 500 GiB per-user ceiling, and the copy dies
-about four-fifths of the way in. Reed-Solomon costs about 1.45x, fits
-comfortably, and tolerates *more* simultaneous chunk losses than 3-way
+about four-fifths of the way in. Against a group ceiling the same arithmetic is
+noise — fix the accounting owner first, then treat this section as an
+efficiency question rather than a feasibility one. Reed-Solomon costs about
+1.45x, fits comfortably, and tolerates *more* simultaneous chunk losses than 3-way
 replication — cheaper and more durable, not a trade. Compute payload x
 amplification against the ceiling as a fail-closed assert before the first
 byte, and put the arithmetic in the abort message.
@@ -140,6 +185,50 @@ Four things make this bite harder than it looks:
   not a menu option. Erasure coding also pads small files enormously — a
   ~9 KB file can occupy several MB — so it suits large shards, not a
   directory of sidecars.
+
+## Deciding Whether Two Locations Are "Far Apart"
+
+Locality has two different stakes and they need different rules. Getting the
+distinction wrong is how a job either pays a surprise bill or silently runs at a
+fraction of its throughput.
+
+**Cost** applies only when one end is a GCS bucket in an externally-billed
+project. It is a step function, not a gradient: same region is free, anything
+else is billed. There is no "close enough" — see the section above.
+
+**Latency** applies to internal-to-internal traffic (CNS to CNS, compute to
+CNS), where nothing is billed and the question is only how slow. Here distance
+really is a gradient, and some cells that look unrelated are in fact neighbours.
+
+Resolve placement with `mach_locality -k <kind> <cell>`, which exposes a
+hierarchy, not a single scalar:
+
+| kind | example values | meaning |
+|---|---|---|
+| `cluster` | `yucmhcg`, `go` | the individual cell |
+| `campus` | `clb`, `nby`, `pry` | a building/site; several per metro |
+| `metro` | `cmh`, `tul`, `phx` | metropolitan area — the unit that maps to a GCP region |
+| `continent` | `na`, `eu` | coarsest |
+
+**Use `metro` as the primary decision boundary.** Cells sharing a metro are
+close enough that cross-cell reads are effectively free, even across different
+campuses — `go-d` (campus `nby`) and `yucmhcg-d` (campus `clb`) are both metro
+`cmh` and behave as neighbours. Only `metro` has a defined mapping to a GCP
+region, which is why the cost rule keys on it too.
+
+**Do not try to measure cross-metro latency from a workstation.** The
+workstation's own RTT to any cell dominates and hides the effect: probing three
+cells in two metros from here returned 1457 / 1559 / 1536 ms, i.e. no signal at
+all. The same trap appeared in an earlier incident investigation, where local
+probes had to be discarded because the workstation was cross-metro from every
+candidate. Measure from a job inside one of the metros, or reason from the
+hierarchy instead.
+
+**A real cross-metro copy is fast enough not to fear.** A same-metro CNS-to-CNS
+copy of 199 GiB ran at 1338 MiB/s (152 s), roughly 8.6x a bigstore-to-CNS copy
+of the same payload. Internal bandwidth is plentiful; the thing that kills a job
+is not copy time but a training loop reading its data or writing its checkpoints
+across a metro boundary for hours.
 
 ## Before Touching A Payload
 
