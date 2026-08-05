@@ -239,6 +239,19 @@ with a price, keyed by an internal card code -- confirm the code by checking
 that a cell you already run on appears under it. Then intersect that list with
 storage placement (`storage.md`) before choosing.
 
+**A fully-consumed quota floor does not mean nothing will schedule.** The
+per-group quota view can read `used == quota, available 0` while tens of
+thousands of chips are obtainable right now: the floor is a guarantee, not a
+limit, and everything above it is opportunistic. Preflight's JSON output
+(`--json`) carries a per-cell obtainable count, which is the number that decides
+whether a job starts. Read that before concluding a generation is unavailable.
+
+**Obtainability is volatile and does not correlate with storage.** In one
+survey the cell with the largest co-located quota had *zero* obtainable chips
+while two middling cells each ran a job to completion. Re-check immediately
+before launching, and pick a cell that is currently good on both axes rather
+than the best on either.
+
 ## Status And Diagnosis
 
 1. Start from `tpu check` and resolve the exact experiment and work unit.

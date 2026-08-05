@@ -60,6 +60,40 @@ request the quota**.
 `el` is the strongest single answer: v7 and 95.4 PiB in the *same* cell, still
 in Europe. `cbf` and `ckv` are the North American equivalents.
 
-Storage availability is only half of it. **A metro is usable only if v7 is
-also schedulable there** -- quota, price, and obtainable headroom are per cell
-and per tier. Verify with the router / market before committing to a metro.
+## Verified End To End (2026-08-05)
+
+The other half -- *are the chips actually obtainable, and does a real job run
+there* -- was then tested by submitting the same smoke to each metro.
+
+**Per-cell obtainable chips come from preflight, not from the quota table.**
+`tpu preflight --tpu_type=v7-32 --group=<g> --json` returns a `cells_ok` list of
+every cell with its obtainable count. The group-level `tpu quota` view showed
+v7 quota fully consumed (477/477) while preflight reported ~50k chips
+obtainable across 10 cells -- the alloc's guaranteed floor and what is
+schedulable right now are different numbers, and only the second one decides
+whether a job starts.
+
+| metro | v7 cell | obtainable | storage | smoke result |
+|---|---|---|---|---|
+| `cbf` | `yucbfiv` | 3864 | `is-d` | **completed, 12/12 steps** |
+| `sin` | `sk` | 3792 | `si-d` | **completed, 12/12 steps** |
+| `lpp` | `yulpptr` | 1488 | `li-d` | ran to step 6 |
+| `mrn` | `yumrnel` | 1104 | `qo-d` | ran to step 6 |
+| `tul` | `yutulpz` | 2388 | `nm-d` | scheduled, 8 tasks |
+| `ckv` | `mb` | **0** | `mb-d` | not schedulable now |
+| `grq` | `el` | **0** | `el-d` | not schedulable now |
+| `dfw` | `yudfwra` | **0** | `rs-d` | not schedulable now |
+
+Checkpoints were confirmed on CNS with `capacity_quota_user:
+deepmind-resources-colossus` -- the 500 GiB personal ceiling is out of the
+picture on these paths.
+
+**Obtainability is volatile and inverts the storage ranking.** `el` (95.4 PiB,
+the best storage answer) had **zero** obtainable chips during this test, while
+`cbf` and `sin` -- middling on storage -- both ran a job to completion. Neither
+list is stable: re-run preflight before committing, and prefer a metro that is
+currently good on *both* rather than the best on either.
+
+The launcher's `_CELL_BUCKETS` now maps every v7 cell to a same-metro bucket,
+so `--cell=<v7 cell>` alone picks the right storage; it prints the choice at
+launch, which is worth reading as confirmation.
