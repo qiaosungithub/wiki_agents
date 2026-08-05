@@ -289,3 +289,48 @@ which forwards one named flag verbatim; a typo in a *wrapper* flag still errors.
 so copy jobs submit with `--skip-preflight`. That is not a warning being
 ignored: preflight only models TPU allocations.
 
+### Result: cbf and tul hold the full dataset (2026-08-05)
+
+| | `is-d` (cbf) | `nm-d` (tul) |
+|---|---|---|
+| objects | **2194 / 2194 verified**, `objects_bad: []` | **2194 / 2194 verified**, `objects_bad: []` |
+| payload | 1.52 TiB | 1.62 TiB |
+| encoding | `rs=9.4` on every sampled shard | `rs=9.4` |
+| charged to | `deepmind-resources-colossus` | same |
+| throughput | 81 MiB/s (5.4 h) | 129 MiB/s (3.7 h) |
+| `_SUCCESS` | written, carries the guard's proof | written |
+
+**The personal quota was never touched**: `fileutil quota qiaos is-d` answers
+*no such user in cell*, which is the strongest possible confirmation that every
+byte landed on the group. Each `_SUCCESS` records `bucket_region_proved_by:
+live bigstore metadata`, so same-region is evidenced per run rather than
+assumed.
+
+`lpp` is fed by a CNS-to-CNS hop from `is-d` (XID 277230370). That copy is
+**deliberately cross-metro** and safe on cost alone: both ends are internal
+Colossus, so nothing is billed however far apart they are. The predecessor
+asserted `src.metro == dst.metro == <one literal>`, which is right for a copy
+meant to stay local and wrong here -- it would reject the intended transfer. The
+guard was therefore restated rather than relaxed: **each end is pinned to its
+own named metro**, both queried live, and the compute cell must sit with the
+SOURCE because that is the leg read shard by shard. Both reject branches were
+exercised locally before submitting.
+
+### Two Traps The Smoke Caught, Which A Direct Full Run Would Not Have
+
+Worth keeping because both were invisible until a real file existed:
+
+- **A copy does not inherit the destination directory's encoding.** The
+  3-shard smoke landed `r=3.2` (3.02x) despite the directory being set up for
+  it, because `gfile.Copy` needs the encoding named in its own options. On
+  1097 shards that is 4.6 TiB instead of 2.2 TiB. The fix names it per file and
+  then **reads it back**, since a cell may silently downgrade.
+- **A directory created by the job does not inherit group accounting.** The
+  copier's own `MakeDirs` created `data/cc12m` fresh, so the shards were
+  charged to the 500 GiB personal ceiling and would have died about a third of
+  the way in. Setting `quota_accounting` on the *home root* recursively fixes
+  both the existing files and everything created later.
+
+The general lesson is the one already in `../storage.md`: verify the property on
+a real object, never on the request that was supposed to produce it.
+
