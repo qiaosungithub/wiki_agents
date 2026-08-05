@@ -366,3 +366,37 @@ converts "the script looks right" into "the script agrees with reality".
 Copying a watcher for a second job also needs its labels and paths updated, or
 it reports the previous job's cells under the new job's name.
 
+## Correction: The Regional Buckets Are Different Datasets, Not Replicas
+
+**The three `kmh-gcp-us-*` buckets hold three independent crawls.** The same
+shard index differs in size across them -- `00000.tar` is 943,411,200 bytes in
+`us-east5`, 1,584,363,520 in `us-central1` and 1,682,739,200 in `us-central2`.
+This follows directly from a fact already recorded above (kmh RE-CRAWLED the
+metadata with img2dataset, landing at 62-66% success), but it was not carried
+through when choosing where to copy from.
+
+Sourcing each metro from its own same-region bucket therefore produced **three
+different datasets**, which makes a loss curve in one metro incomparable to
+another -- the exact property a reproduction must not lose. Verify sameness by
+comparing a shard's size across buckets before assuming a bucket is a replica.
+
+**The corrected shape is the two-hop one, and it was the instruction all
+along:**
+
+```
+hop 1   gs://kmh-gcp-us-east5  ->  /cns/go-d      same region (cmh), $0
+hop 2   /cns/go-d              ->  is-d/nm-d/li-d CNS->CNS, internal, $0
+```
+
+Hop 2 is deliberately cross-metro and costs nothing because both ends are
+internal Colossus -- proven on the earlier lpp leg, whose `_SUCCESS` recorded
+`bigstore_paths_used: 0`. **A same-region bucket read is not the only free
+option, and picking a bucket per metro to chase "same region" trades dataset
+identity for a saving that CNS-to-CNS already provides.**
+
+The wrong replicas were deleted from `is-d`, `nm-d` and `li-d`, and all three
+are being refilled from the single `go-d` copy of the us-east5 crawl. Each
+fan-out binary pins compute to `go` (with the SOURCE, the leg read shard by
+shard), asserts `src.metro == cmh` and `dst.metro == <its own literal>`, both
+queried live; all three reject branches were exercised before submitting.
+
