@@ -18,8 +18,12 @@ Longest guide here, and mostly reference — jump to what you need:
 ## Data And Model Invariants
 
 - `EqR-jax` maps configured dataset aliases in `data_util.py`; verify the live
-  mapping for names such as `Maze-dynamic` and `Sudoku-aug1000` instead of
-  rewriting paths in launch commands.
+  mapping for names such as `Maze-dynamic`, `Maze-30x30-multi` and
+  `Sudoku-aug1000` instead of rewriting paths in launch commands. An alias that
+  is not in `DATASET_PATHS` is passed through as a LITERAL path and the job dies
+  at startup with "Dataset split train in <alias> does not exist" — and the
+  entry has to exist in the checkout you launch FROM, which is not always the
+  one you edited.
 - **The maze grid is `30 x 30` holding a `29 x 29` perfect maze, padded — not
   cropped.** `_generate_perfect_maze` needs an odd size, so the generator takes
   `maze_n = n if n % 2 else n - 1` and writes `open_mask[:29, :29]`, leaving row
@@ -330,6 +334,42 @@ specifics that keep biting.
   scoring a checkpoint after the fact. Verify the sizing in the config rather
   than assuming it: a config whose product differs is measuring a different
   population, whichever direction the number moved.
+
+## A Generative Model Is Scored On Whether Its Output Is A Solution
+
+This is a generative loop: it *produces* an answer, so the question to ask is
+"is what it produced a solution", not "does it equal the stored one". Those are
+the same question only when the answer is unique — and every stock maze split
+here is a `perfect` maze, i.e. acyclic, so its S→G shortest path IS unique.
+`exact_accuracy` has therefore been answering the reproduction question while
+being read as the solving one. Harmless on those splits; badly wrong off them.
+
+**Use `Maze-30x30-multi` whenever the claim is about solving.** 1000 fixed
+braided mazes, every one carrying ≥2 shortest paths, built and verified per
+puzzle by `tools/build_maze_multisolution_testset.py`. The gap it exposes is not
+subtle: the same checkpoint scores **40.2 exact vs 99.3 solution** (D16, EMA).
+The model was solving 99% of them and the old metric said 40%.
+
+- **`solution_accuracy` is reported alongside `exact_accuracy`, never instead of
+  it**, and auto-enables on a maze dataset. So an old run can be re-scored and
+  no existing number moves. `evaluation.solution_scoring` forces either way.
+- **A longer legal route counts as solved, deliberately.** Requiring the
+  shortest path puts the label back into a metric whose purpose is to not need
+  one. `shortest_solution_accuracy` carries the strict number separately — and
+  it is a real finding, not a footnote: that same checkpoint draws legal routes
+  99.3% of the time but *shortest* ones only 8.5%. Nothing on a unique-solution
+  split could have revealed that.
+- **Both scorers check against the INPUT board, never the label**, so neither
+  can be satisfied by copying the target. `maze_solution.py` (grid heads) and
+  `maze_walk.py` (AR heads) are the same definition for two output formats;
+  keep them that way.
+- **The empty prediction must be rejected explicitly.** A pad row decodes to no
+  path at all, and "the cells form a route from S to G" is vacuously true for
+  the empty set when S adjoins G — the same trap `_row_exact_correct` guards
+  with its `supervised > 0` term.
+- A test-only split still needs a `train/` directory: `just_evaluate` builds a
+  train dataloader purely to read `vocab_size`/`seq_len` and never iterates it.
+  One puzzle is enough, and keeps the split unusable for training.
 
 ## Eval Protocol: Report B=1 First
 
