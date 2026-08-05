@@ -306,7 +306,21 @@ byte landed on the group. Each `_SUCCESS` records `bucket_region_proved_by:
 live bigstore metadata`, so same-region is evidenced per run rather than
 assumed.
 
-`lpp` is fed by a CNS-to-CNS hop from `is-d` (XID 277230370). That copy is
+`lpp` completed too (XID 277230370): **2196/2196 verified, `objects_bad: []`,
+1.52 TiB, `rs=9.4`, group-charged, `bigstore_paths_used: 0`**, with each end's
+metro proved by a live lookup. Its `_SUCCESS` reports only 65 s of wall time
+because the task had restarted: `{copied: 8, skipped_already_correct: 2188}`.
+That is the `.inflight`-plus-size-check design working as intended -- a resumed
+run re-verifies every object and re-copies only what is missing -- but it does
+mean **wall time in a resumed run is not the transfer cost**; read
+`bytes_copied_this_run` instead.
+
+All three replicas now agree at 1097 tars each (1.52 / 1.62 / 1.52 TiB; tul
+differs because its bucket holds a different crawl). `fileutil quota qiaos
+<cell>` answers *no such user* in all three, so no byte landed on a personal
+ceiling anywhere.
+
+That hop is
 **deliberately cross-metro** and safe on cost alone: both ends are internal
 Colossus, so nothing is billed however far apart they are. The predecessor
 asserted `src.metro == dst.metro == <one literal>`, which is right for a copy
@@ -333,4 +347,22 @@ Worth keeping because both were invisible until a real file existed:
 
 The general lesson is the one already in `../storage.md`: verify the property on
 a real object, never on the request that was supposed to produce it.
+
+### Watching A Long Job: Match The Status Column, And Self-Test The Matcher
+
+Two false "it finished" reports came from the watcher script, not the jobs, and
+both were avoidable:
+
+- **`tpu check` prints `XID STATUS NAME`.** A pattern like `<name>.*running`
+  can never match, so the watcher concluded "not running" on its first poll and
+  fired immediately. Match the status *before* the name.
+- **The status vocabulary is wider than the common cases**: `SUBMITTED` and
+  `unknown` both appear before `running`, so a matcher listing only
+  `running|starting|PENDING` reports a just-launched job as finished.
+
+The habit that catches both: **run the matcher against real current output and
+assert the count you expect before trusting the watcher.** One command, and it
+converts "the script looks right" into "the script agrees with reality".
+Copying a watcher for a second job also needs its labels and paths updated, or
+it reports the previous job's cells under the new job's name.
 
