@@ -69,6 +69,12 @@ When a knob or flag looks suspicious, **grep for the reader, not the setter**. A
 setting nothing consumes is worse than a missing one: it promises behavior that
 does not exist.
 
+That rule has a mirror image worth checking separately: **a setting can arrive
+from somewhere that is not a config file.** A grep over every yaml can correctly
+report that nothing sets a knob while a CHECKPOINT sets it on every restore — a
+merged `extra.json` silently re-specified a model's compute dtype that way. When
+a value surprises you, ask what else writes it, not just which file declares it.
+
 Related checkouts diverge deliberately. Preserve each side's execution model,
 sharding, dependency, and initialization choices; do not port runtime, data, or
 checkpoint behavior as incidental cleanup.

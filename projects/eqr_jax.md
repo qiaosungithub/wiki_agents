@@ -41,21 +41,34 @@ Longest guide here, and mostly reference — jump to what you need:
   from `train.py` that way while nine yamls kept setting `evaluation.online_eval`
   — the config promised a D16/D64 curve and the code measured one point, for
   eleven commits.
-- **`puzzle_emb_ndim: 128, puzzle_emb_len: 16` is ONE register plus fifteen dead
-  slots.** `_input_embeddings` reshapes the `ndim`-wide table row into
-  `puzzle_emb_len * hidden_size` and zero-pads the shortfall, so only the first
-  slot carries table content; the rest are constant zeros that never receive
-  gradient. All sixteen still shift every real token's rope index, and the
-  q-head still reads slot 0. Faithful to upstream, but describe such a run as
-  one register, not sixteen.
-- **A zero-initialised trainable register is not equivalent to a small random
-  one.** The table does receive gradient from step 0 and does grow (verifiable
-  in `params/inner/puzzle_emb` across checkpoints), so "it never moves" is the
-  wrong worry. The failure is early symmetry: with registers on, the q-head
-  reads a register slot rather than a board cell, and a zero slot feeds it
-  nothing during the steps that decide whether ACT ever learns to halt. Treat
-  `puzzle_emb_init_std` as a load-bearing hyperparameter and ablate it
-  alongside any register experiment.
+- **Registers are plain trainable tokens, and the knob is `arch.num_registers`.**
+  An `(N, hidden)` table in `params` prepends N tokens, added after `embed_scale`
+  so `register_init_std` is the std the trunk actually sees. The older
+  `puzzle_emb_*` surface it replaced was inert three times over — a zero,
+  non-trainable `consts` table looked up by a `puzzle_identifiers` column every
+  dataset here fills with a constant 0, then reshaped by ceiling division and
+  zero-padded so fifteen of sixteen slots were dead. All the retired names raise
+  and name their successor, because pydantic drops an unknown field in silence.
+  A checkpoint carrying `puzzle_emb` no longer restores; torch checkpoints
+  convert with `--num-registers`.
+- **A zero-initialised register is not a neutral default.** `register_init_std`
+  defaults to 0.02 rather than upstream's 0, because the failure is early
+  symmetry: with registers on, the q-head can read a register slot instead of a
+  board cell, and a zero slot feeds it nothing during the steps that decide
+  whether ACT ever learns to halt. Treat it as a load-bearing hyperparameter and
+  ablate it alongside any register experiment.
+- **`mlp_t: true` makes `pos_encodings` a complete no-op** — bit-identical
+  logits across `rope`, `rope2d` and `none`, because the MLP-T branch replaces
+  self-attention and never reads the table. Every `local_debug*` config and
+  upstream's own sudoku recipe set it. A run reported as "rope2d" alongside
+  `mlp_t` measured no position encoding at all.
+- **`rope2d` combined with registers is refused at config load.** The flat table
+  that used to serve that combination was not a rotation: row and column angles
+  landed in one 2x2 block, so it was orthogonal only on the board diagonal
+  (mean det 0.609, 17.8% orientation-flipped) and translation invariance was
+  gone. Rebuilding it needs PaliGemma's layout — half-width `[row(q), col(q)]`
+  then DUPLICATE. Plain 1-D `rope` is fine with a prefix: the shift is exactly
+  invariant.
 
 ## Launch And Packaging
 
@@ -141,10 +154,14 @@ of guessing (see `../jobs.md` §Debugging A Job That Dies With No Log):
   job. Older orbax hides this by reading the checkpoint's `_sharding` file and
   only warning, so it cannot be reproduced on a single-device CPU box.
 - The released sudoku checkpoint was **not** trained with the released training
-  recipe: its `extra.json` says `pos_encodings: none` and `puzzle_emb_ndim/len:
-  512/16` (hence `seq_len` 97, not 81), while `config/train/eqr_sudoku.yaml` says
-  `rope` and no puzzle embedding. Reproducing the paper's numbers by training
-  requires the checkpoint's arch, not the published recipe.
+  recipe, but not for the reason its `extra.json` first suggests. The
+  `pos_encodings: none` there is NOT a deviation from the recipe's `rope` — both
+  run `mlp_t: true`, so the two are the same function. The real difference is
+  the puzzle embedding: the checkpoints set `puzzle_emb_ndim/len` 512/16 (hence
+  `seq_len` 97, not 81) with a NON-ZERO table (std ~0.03-0.04, no zero entries),
+  while the reference yaml never mentions the knob. So the published weights
+  were not produced by the published code, and reproducing the paper's numbers
+  by training requires the checkpoint's arch.
 - Compare against the right baseline. Upstream `README.md` reports **two** sets:
   a 2048-example smoke eval (`cumulative_exact_acc_top1` 99.19 ± 0.12) and the
   423,168-example full set (99.79). `different_init/any_correct` is
@@ -167,10 +184,19 @@ overridable:
 
 **When you add a new compute cell, mirror the data and add both entries.**
 
-Related but distinct: `utils/ckpt_util.py` has one host read a REPLICATED
-checkpoint and broadcast it, because N hosts reading the same file amplifies the
-read N-fold. Distance and amplification are separate problems needing separate
-fixes.
+Related but distinct: **every host must read the checkpoint itself.** The
+obvious optimisation — one host reads and broadcasts, since N hosts reading one
+file amplifies the read N-fold — is not available, because `ocp.Checkpointer.
+restore()` is ITSELF a collective: it ends in a `sync_global_processes` barrier.
+"Rank 0 reads, the rest wait in `broadcast_one_to_all`" therefore puts two
+different programs on one channel and halts the TPU core with
+`RuntimeUnexpectedCoreHalt`, after the read has already succeeded. It cannot be
+patched as written — the non-readers would have to predict the dtype orbax
+returns, and a leaf stored as bf16 defeats any static guess. It was buying 0.22s
+on a 108 MiB tree against an uncatchable halt. `ckpt_util.py` records the one
+construction that would work (`MultiprocessingOptions(primary_host=0,
+active_processes={0})`) so nobody re-adds it blind. Distance and amplification
+remain separate problems, but only distance has a fix here.
 
 ## Sampler State Must Not Scale With The Corpus
 
@@ -380,6 +406,17 @@ point). Breadth is an extra, not the headline — it multiplies eval cost by B a
 answers a different question. The spreadsheet's `EqR-reproduction` tab is laid
 out this way: `Acc B=1 D=16`, `Acc B=1 D=64`, `Acc-any-correct (B=1)`, then a
 free-text `additional results` column for anything breadth-derived.
+
+### A breadth eval can silently deliver less breadth than you asked for
+
+The restart latents are drawn from a key broadcast to every device, so a draw is
+a function of the WITHIN-DEVICE row index only. The effective breadth is
+therefore `min(per_device_rows, n_init)`: when one example's B replicas straddle
+devices, two of them get the same latent. Nothing in the metrics shows it —
+`total_samples` stays right and `avg_pass_rate` still matches
+`all/exact_accuracy` — only diversity shrinks, so `different_init/any_correct`
+and `convergence_top_k` under-report by exactly that factor. Config load now
+refuses such a layout, but read the rule when sizing an eval by hand.
 
 ### What the paper actually reports for breadth
 
