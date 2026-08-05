@@ -97,3 +97,31 @@ currently good on *both* rather than the best on either.
 The launcher's `_CELL_BUCKETS` now maps every v7 cell to a same-metro bucket,
 so `--cell=<v7 cell>` alone picks the right storage; it prints the choice at
 launch, which is worth reading as confirmation.
+
+## Decision (2026-08-05): Three Metros To Maintain Data In
+
+Datasets are mirrored into **`cbf`, `tul`, `lpp`** and nowhere else. Chosen on
+the intersection of live obtainability, storage headroom, and a verified smoke,
+weighting *breadth of cells* because a metro with one cell is one stockout away
+from useless.
+
+| metro | v7 cells live | chips | storage cell | smoke |
+|---|---|---|---|---|
+| **`cbf`** | `yucbfiv`, `yucbful` (+`je`, `yucbfwv` idle) | 6804 | `is-d` 69.1 PiB sp50 | completed 12/12 |
+| **`tul`** | `yutulpz` | 2388 | `nm-d` 44.0 PiB sp50 | scheduled, 8 tasks |
+| **`lpp`** | `yulpptr` | 1552 | `li-d` 85.2 PiB sp50 | ran to step 6 |
+
+`cbf` is the primary: **four v7 cells, two live**, the only metro with any
+redundancy, plus PiB-scale storage and a completed run. `tul` is the second NA
+metro and is where the existing `jax_llava` work already sits. `lpp` is the
+European leg, and carries the largest storage of the three.
+
+Rejected, with the reason, so this is not re-litigated:
+
+- `ske` (13724 chips) and `kul`, `phx` -- **most chips of all, zero team
+  storage**. Compute without co-located storage is the pruner-kill case.
+- `grq` / `el` -- the best storage (95.4 PiB) but obtainability swung 0 -> 937
+  across a day. A single cell that thin cannot be a primary.
+- `sin` -- completed its smoke, but one cell, 9.7 PiB, and far from the others.
+- `ckv`, `dfw` -- good storage, **zero obtainable** in every sample taken.
+
