@@ -244,3 +244,48 @@ Ordered so the cheapest thing that can fail, fails first.
   GiB in this launcher), and every task stages its own copy. WDS is a sequential
   streaming read and needs no full-shard spool; only tokenizer/CLIP weights need
   fast local access, and those are better baked into the Bazel package.
+
+## Full cc12m: Three Regional Copies, No Cross-Region Byte
+
+**Decision: mirror into `cbf`, `tul`, `lpp`** -- the metros picked in
+`v7_storage_placement.md`. Stage 1 is being reproduced for real, so the 150-shard
+slice is retired in favour of the full 1097 shards.
+
+**The bucket owner's regions line up with two of the three metros, so hop 1 is
+free by construction and not by care:**
+
+| metro | GCP region | source bucket (same region) | CNS destination |
+|---|---|---|---|
+| `cbf` | us-central1 | `gs://kmh-gcp-us-central1` | `/cns/is-d/home/qiaos/data/cc12m` |
+| `tul` | us-central2 | `gs://kmh-gcp-us-central2` | `/cns/nm-d/home/qiaos/data/cc12m` |
+| `lpp` | europe-north1 | **none** | `/cns/li-d/...` -- must come CNS->CNS |
+
+Each regional bucket holds 1097 tars + 1097 `_stats.json`; payload measured at
+1.52 TiB (us-central1) and 1.62 TiB (us-central2). At `rs=9.4` (1.4505x) that
+is ~2.2 and ~2.4 TiB of disk against 12.0 and 11.8 PiB of free group quota --
+not a constraint. `lpp` has no regional bucket, so it is fed by a CNS-to-CNS
+hop, which is internal network and free.
+
+**The copier is `cc12m_full`, a destination-table version of `cc12m_copy`.**
+The original hard-coded bucket, region, cell, metro and path as constants,
+reasoning that a flag is a way to read the wrong thing. That reasoning survives:
+the new `--dest` selects a whole ROW, and a row fixes all five together, so no
+combination of flags can express a cross-region pair. `--num_shards` below the
+full count marks the copy partial and suppresses `_SUCCESS`, so a smoke can
+never be mistaken for a complete dataset.
+
+All three reject branches were exercised locally before submitting: wrong cell
+(`BORG_CELL=yuskedq` against `dest=cbf`), unreadable cell (no `BORG_CELL`), and
+a faked bucket location (`--test_force_bucket_region=us-east5`) -- each aborts
+before any open. The guard also proved it reads the LIVE bucket location rather
+than trusting the name.
+
+**`tpu queue` needed a passthrough channel.** Its parser is an allowlist, which
+is correct -- a mistyped flag should be refused, not silently dropped on Borg --
+but it cannot know every packaged binary's flags. Added `--app.<flag>=<v>`,
+which forwards one named flag verbatim; a typo in a *wrapper* flag still errors.
+
+**Preflight cannot verdict a CPU-only job** (`Unknown accelerator arch 'cpu'`),
+so copy jobs submit with `--skip-preflight`. That is not a warning being
+ignored: preflight only models TPU allocations.
+
