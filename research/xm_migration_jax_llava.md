@@ -531,3 +531,29 @@ them, so **the object count is dominated by KNN, not by the benchmarks**.
 Fan-out to the three metros is the same CNS-to-CNS shape as cc12m, from the
 single `go-d` copy.
 
+### Eval Bundle Complete In All Three Metros (2026-08-06)
+
+Fan-out from the single `go-d` copy: **1282/1282 verified on each side,
+`objects_bad: []`, `bigstore_paths_used: 0`**, at 701 / 815 / (lpp) MiB/s.
+
+Identity checked per object against `go-d`, not by totals: **1309 data objects,
+zero missing, zero extra, zero size mismatch**, and all three sum to exactly
+182,554,645,814 bytes. Charged to the group; `fileutil quota qiaos <cell>`
+still answers *no such user* in all three.
+
+Both datasets are now in place in `cbf`, `tul` and `lpp`:
+
+| | objects | payload |
+|---|---|---|
+| cc12m | 1097 shards + sidecars | 1.5044 TiB |
+| eval bundle | 1309 | 170 GiB |
+
+**One imperfection, deliberately not fixed.** The size-based encoding split
+added to the bigstore copier was never ported to the CNS-to-CNS one, so the 27
+files under 1 MiB landed at `rs=9.4` in the replicas rather than `r=3.2`. They
+total 1.4 MiB of payload, so even a large padding factor is noise against PiBs
+of headroom, and the writes succeeded -- erasure coding tolerates small files
+on the CNS-to-CNS path where the bigstore path refused them. Re-copying to
+tidy the encoding would cost more than it saves; recorded so the discrepancy is
+not mistaken later for a partial copy.
+
