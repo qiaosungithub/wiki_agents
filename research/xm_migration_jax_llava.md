@@ -440,3 +440,45 @@ and the answer is both correct and available the instant it becomes true. Job
 status is a convenience view with a cache behind it; `deep_probe` on the XID
 gives the authoritative state when it is genuinely needed.
 
+## Eval Bundle: The Same Two-Hop Shape
+
+Every dataset any `jax_llava` config enables, taken from the **same us-east5
+crawl** as cc12m and fanned out to the same three metros. The union across all
+configs is 19 eval tasks, which reduce to 13 source prefixes:
+
+`vqav2`, `mme`, `textvqa`, `pope`, `coco/train2014` (refcocog images),
+`eval/pixelbench` (this one bundle supplies `mmvp`, `vstar`, `ocrbench` and
+`countbenchqa`), plus `gqa-balanced`, `seed-bench-image`, `cambrian-cvbench`,
+`vlms-are-blind`, `docvqa`, `realworldqa` under `vlm_eval_benchmarks/`, and
+`tensorflow_datasets/imagenet2012` for `knn_full` / `knn_partial`.
+
+Sizes: ~27 GiB for the benchmarks, **143 GiB for TFDS ImageNet**, so KNN
+dominates the bundle. Total ~170 GiB, about a ninth of cc12m.
+
+Two structural differences from the cc12m copier, both of which change how
+completeness is judged:
+
+- **The bundle is a nested tree, not a flat numbered shard set.** Members are
+  discovered by walking each prefix, and an empty prefix is a hard abort --
+  otherwise a `_SUCCESS` could cover a bundle that silently omits a dataset
+  some eval config enables. Destination paths mirror the bucket layout, so a
+  config only has to swap the root.
+- **"Partial" is a cap on object count** (`--max_objects`), and any cap
+  suppresses `_SUCCESS`, same contract as `--num_shards` had.
+
+Nested output also means the parent directory of each object may not exist:
+`MakeDirs` per file, idempotent.
+
+### `gfile` Has No `ListRecursively`
+
+The first attempt used it, failed on Borg with `AttributeError`, and produced a
+work-unit status carrying no exception text at all -- a shape that reads like
+the job vanished. **Running the staged binary locally named the missing
+attribute in three seconds**, against roughly ten minutes per remote attempt.
+The recursive walk is `gfile.Walk`, with `os.walk` semantics.
+
+This is the case `../jobs.md` already describes: reproduce locally first,
+because flags parse only after every import has run. Worth re-reading before
+the next remote launch of new code -- the cost asymmetry is an order of
+magnitude even when the bug is one line.
+

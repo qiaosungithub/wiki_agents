@@ -69,6 +69,21 @@ ids, configs, and failure modes, so collapsing them loses the ability to say
 which half went wrong. A train row with no eval row is a run without a
 conclusion — mark it, do not quote its in-training numbers as results.
 
+**A run that outlasts its block's budget is logged as two rows, not one.** The
+metric columns of a block are only meaningful if every row in them stopped at
+the same step. So put the value **at the block's budget** in the metric columns
+of the run's own row, and pair the longer result directly beneath as
+`  ↳ @<steps>, same run` — same shape as the train/eval pair above. Both rows
+carry the same job id; the `Details` cell names which segment each one covers.
+If the run is still rising at the block's budget, the shorter point is also its
+peak and there is nothing to choose; otherwise record the pre-budget peak, since
+a single endpoint on the logging grid is not the run's best behaviour.
+
+Do not instead widen the tab with a second set of metric columns. Those columns
+stay empty for every row that ran the normal budget, which is most of them, and
+an empty column is read as a missing measurement rather than an inapplicable
+one. Adding a row costs nothing and keeps the comparison vertical.
+
 ## Write Short Cells
 
 **Do not write essays in a spreadsheet.** A cell exists to let the next reader
