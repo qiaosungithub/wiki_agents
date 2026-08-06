@@ -233,6 +233,105 @@ Four things make this bite harder than it looks:
   ~9 KB file can occupy several MB — so it suits large shards, not a
   directory of sidecars.
 
+## An Over-Quota Cell Looks Like A Broken Program
+
+The failure this section exists for cost a 130,000-step run its entire log and
+then sent two investigations after the wrong suspect. **Rule out quota before
+believing any "the writer is broken" story.**
+
+**The signature is a 0-byte file, not an error.** Colossus checks the quota when
+it allocates a stripe, which is the *first write*, not the open. So `mkdir`
+succeeds, the file is created, and the first byte is refused. What survives on
+disk is a file that exists with length zero — indistinguishable at a glance from
+a process that died before it logged anything. Anything that creates its files
+up front and writes later shows this shape.
+
+Asymmetries that decide the diagnosis:
+
+- **Reads keep working.** A cell you cannot write is still fully readable, which
+  is what makes recovery possible and also what makes the state confusing.
+- **A writer that retries survives; one that does not, dies permanently.**
+  Poison expires. Checkpoints written every few thousand steps kept landing
+  while a 20-second log flush with no retry latched `broken` on its first
+  refusal and stayed silent for the rest of the run. Two writers in one process
+  disagreeing about whether storage works is a quota symptom, not a bug in
+  either writer.
+- **It is time-dependent, so it splits identical jobs.** Two jobs from the same
+  code, differing only in a config value, can look like "this feature breaks
+  logging" when the real variable is which one happened to flush inside the
+  poisoned window. Before blaming a code path, check whether the *other* job
+  also lost output later on.
+
+### Confirm it in one command
+
+```bash
+fileutil quota <user> <cell>-d                                   # usage vs limit
+echo probe > /tmp/qprobe.txt                                     # cp has no stdin form
+fileutil cp -f /tmp/qprobe.txt /cns/<cell>-d/home/<user>/qprobe.txt
+```
+
+A refused write names the condition outright: `Poisoned file handle: "<user>" is
+over Colossus bytes HDD quota`. (`fileutil cp -` does **not** read stdin — it
+looks for a file literally named `-` and fails with `not_found` before reaching
+the quota, which reads like a completely different problem. Stage a real file.)
+
+`fileutil quota` prints two pairs — usage first, then the limit. Compare
+**`disk_bytes`**, never `data_bytes`: the ceiling applies to bytes after
+replication, so 144 G of payload can be 417 G against a 500 G limit.
+`fileutil stat` on the directory shows the encoding responsible (`r=3.2` ⇒
+multiply payload by ~2.9).
+
+### Recover, cheapest first
+
+1. **Delete what nothing reads.** Usually this is enough and needs no
+   permissions. See the next section: checkpoint accumulation is the normal
+   cause.
+2. **Move the bill to the group** — the real fix, since the group holds PiB
+   against a personal 500 GiB. `fileutil chstat -R "quota_accounting{...}"` as
+   above, but **verify the group is registered in that cell first**
+   (`flex.par list_ceiling`): accounting to an unregistered group is *worse*
+   than leaving it alone.
+3. **Move the data to a cell where the group has a ceiling**, when the current
+   cell has no registration at all. Some accelerator cells have no team storage
+   whatsoever; `research/v7_storage_placement.md` records which.
+
+Release is not instant — the block clears minutes after usage actually drops, so
+verify by writing rather than by re-reading the quota.
+
+## Checkpoints Are The Default Reason A Cell Fills Up
+
+**A checkpoint writer with no retention policy will eventually take down every
+write in the cell.** This is not hypothetical: 1850 checkpoints accumulated in
+one cell, exhausted a 500 GiB personal ceiling, and poisoned the log mirror of
+every job that ran there afterwards.
+
+The trap is an API distinction. In orbax, retention (`max_to_keep`) belongs to
+`CheckpointManager`; code that calls a plain `StandardCheckpointer` has **no
+retention at all**, and nothing in the API says so. A 150k-step run saving every
+2500 steps leaves 60 directories, of which two are ever read again — at 331 MiB
+apiece that is 17 GiB for one run.
+
+So: **grep for the reader, not the setter.** A `checkpoint_interval_steps`
+setting proves checkpoints are written, not that any are deleted. Confirm a
+deletion path exists before assuming one does.
+
+What is worth keeping, per run: the **newest** checkpoint (auto-resume restores
+from it), a **second** one in case the newest is a torn write, and a coarse
+ladder (every 25k–50k steps) for re-evaluating a finished run. Everything
+between is dead weight.
+
+**Never delete the newest checkpoint, and do not try to decide whether a run is
+still alive.** A torn write and an in-flight write are indistinguishable from
+the filesystem — both are a `step_<N>/` directory missing the completeness
+marker. Keeping the newest unconditionally costs one directory per run and makes
+a sweeper safe to point at a cell with live jobs on it; guessing costs a running
+job its only unrecoverable state.
+
+Cleaning up an existing backlog: `tpu gc` (`~/work/tpu_cmd/scripts/ckpt_gc.py`)
+applies exactly these rules, dry-run by default, `--go` to delete, `--no-size`
+to skip the slow `du` pass. Prefer fixing retention in the writer as well, or
+the backlog rebuilds.
+
 ## Deciding Whether Two Locations Are "Far Apart"
 
 Locality has two different stakes and they need different rules. Getting the

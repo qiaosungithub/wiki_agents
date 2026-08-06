@@ -60,6 +60,14 @@ application log anywhere including any mirroring the app installs, and no
 surviving job handle. Seeing all three at once *is* the diagnosis. Do not
 re-launch to collect logs that cannot exist.
 
+**But check the storage quota before you trust that shape.** An over-quota cell
+produces the same evidence from a job that ran for hours: the log file is
+*created* and its first write refused, so a 0-byte log can mean "never started"
+or "could not write". Checkpoints or other artefacts with timestamps long after
+launch settle it instantly — that is a job that ran and was silenced, not one
+that died early. `storage.md` §An Over-Quota Cell Looks Like A Broken Program
+has the one-command check and the recovery.
+
 Getting logs, most reliable first:
 
 1. Run the staged binary locally.
