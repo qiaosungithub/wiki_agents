@@ -482,3 +482,37 @@ because flags parse only after every import has run. Worth re-reading before
 the next remote launch of new code -- the cost asymmetry is an order of
 magnitude even when the bug is one line.
 
+### A Suffix Partition Copied Nothing And Reported Success
+
+The eval copier inherited its execution stage from the cc12m one, which split
+the work queue two ways:
+
+```
+todo_stats = [t for t in todo if t[0].endswith('_stats.json')]
+todo_tars  = [t for t in todo if t[0].endswith('.tar')]
+```
+
+For cc12m that partition is total -- every object is one or the other. The eval
+bundle holds `.parquet`, `.json`, `_SUCCESS` and TFDS shards, so **every object
+fell into neither group**: the planner correctly listed 44 files to copy, both
+worker groups received an empty list, and the run finished quickly with nothing
+transferred. The verify step caught it (`dst=None`), but a partition that can
+drop work silently should not exist -- it is now a split on SIZE, which is
+total by construction and carries an assert that the two halves re-sum.
+
+**When adapting a copier, audit every place the old data model is assumed.**
+Filename conventions are the easiest of these to miss because they look like
+formatting, not logic.
+
+### A Workstation Cannot Test The Write Half Of A bigstore -> CNS Copy
+
+Running the staged binary locally reproduces imports, flags, planning and the
+guards -- which is how the `ListRecursively` bug and the suffix partition were
+both found in seconds. It cannot reproduce the copy itself: a corp credential
+is refused with `DestinationPermission: Wrong type CORP in restriction`, while
+the same binary on Borg runs as `<user>@prod.google.com` and is accepted.
+
+So the local run is a fast filter for everything up to the first byte, and the
+last mile still has to be proven on Borg. Read a local write failure as "cannot
+test this here", not as "the copy is broken".
+
