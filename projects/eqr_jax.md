@@ -376,15 +376,26 @@ puzzle by `tools/build_maze_multisolution_testset.py`. The gap it exposes is not
 subtle: the same checkpoint scores **40.2 exact vs 99.3 solution** (D16, EMA).
 The model was solving 99% of them and the old metric said 40%.
 
-- **`solution_accuracy` is reported alongside `exact_accuracy`, never instead of
-  it**, and auto-enables on a maze dataset. So an old run can be re-scored and
-  no existing number moves. `evaluation.solution_scoring` forces either way.
+- **`solution_acc` (grid heads) / `walk_acc` (`final_head_type: ar`) is THE MAZE
+  HEADLINE**, and `acc` stays beside it as a diagnostic rather than being
+  removed — `acc` is emitted by the loss head for every dataset, and it is what
+  tells you whether a model with `walk_acc` 0 learned anything at all. Scoring
+  auto-enables on a maze dataset; `evaluation.solution_scoring` forces either
+  way. Both reach the in-training periodic eval, so a maze run's result is
+  `D16/ema/walk_acc` on its own training curve, exactly where `D16/ema/acc` is
+  for sudoku.
 - **A longer legal route counts as solved, deliberately.** Requiring the
   shortest path puts the label back into a metric whose purpose is to not need
-  one. `shortest_solution_accuracy` carries the strict number separately — and
-  it is a real finding, not a footnote: that same checkpoint draws legal routes
-  99.3% of the time but *shortest* ones only 8.5%. Nothing on a unique-solution
-  split could have revealed that.
+  one. `shortest_solution_acc` / `shortest_walk_acc` carry the strict number
+  separately, and its reference length is BFSed **from the row's own input
+  board**, not read from the split's spec file.
+- **Any `shortest_*` number measured before that BFS landed is a LOWER BOUND.**
+  The spec array is in split order and the scorer indexed it by row-within-batch,
+  so only the first batch at breadth 1 was aligned — 52.5% of rows at the shipped
+  512-row eval, 0.33% at the B=128 sweep point. A wrong reference can only flip
+  `shortest` True→False, so the error is one-directional and no arithmetic
+  corrects it: re-score. The non-strict columns never read the reference and are
+  unaffected.
 - **Both scorers check against the INPUT board, never the label**, so neither
   can be satisfied by copying the target. `maze_solution.py` (grid heads) and
   `maze_walk.py` (AR heads) are the same definition for two output formats;
@@ -399,12 +410,18 @@ The model was solving 99% of them and the old metric said 40%.
 
 ## Eval Protocol: Report B=1 First
 
-The headline number for any EqR run is **exact accuracy at B=1** (one restart,
-no selection), reported at both depths the paper uses: **D=16** (the arch's own
+The headline number for any EqR run is **accuracy at B=1** (one restart, no
+selection), reported at both depths the paper uses: **D=16** (the arch's own
 `halt_max_steps`, the paper's baseline point) and **D=64** (its depth-scaling
 point). Breadth is an extra, not the headline — it multiplies eval cost by B and
-answers a different question. The spreadsheet's `EqR-reproduction` tab is laid
-out this way: `Acc B=1 D=16`, `Acc B=1 D=64`, `Acc-any-correct (B=1)`, then a
+answers a different question.
+
+**Which accuracy** depends on the dataset: `acc` on sudoku, `solution_acc` /
+`walk_acc` on a maze (§A Generative Model Is Scored On Whether Its Output Is A
+Solution). Both arrive from the same periodic eval, so the protocol is the same
+and only the column name changes.
+
+The spreadsheet's `EqR-reproduction` tab is laid out this way: `Acc B=1 D=16`, `Acc B=1 D=64`, `Acc-any-correct (B=1)`, then a
 free-text `additional results` column for anything breadth-derived.
 
 ### A breadth eval can silently deliver less breadth than you asked for
