@@ -400,3 +400,43 @@ fan-out binary pins compute to `go` (with the SOURCE, the leg read shard by
 shard), asserts `src.metro == cmh` and `dst.metro == <its own literal>`, both
 queried live; all three reject branches were exercised before submitting.
 
+### Done: One Crawl, Three Metros, Byte-Identical (2026-08-06)
+
+`gs://kmh-gcp-us-east5` -> `/cns/go-d` (same region, $0) -> `is-d` / `nm-d` /
+`li-d` (CNS-to-CNS, internal, $0). Every replica now carries the SAME crawl.
+
+| | go-d (cmh) | is-d (cbf) | nm-d (tul) | li-d (lpp) |
+|---|---|---|---|---|
+| tars | 1097 | 1097 | 1097 | 1097 |
+| payload | 1.5044 TiB | 1.5044 | 1.5044 | 1.5044 |
+| verified | 2194/2194 | 2196/2196 | 2196/2196 | 2196/2196 |
+| `bigstore_paths_used` | n/a | 0 | 0 | 0 |
+| throughput | 120 MiB/s | 878 | 647 | 303 |
+
+**Identity was checked per object, not per total.** All 2194 names were
+compared against `go-d` with their sizes: zero missing, zero extra, zero size
+mismatch, on all three. Equal totals would not have proved this -- three
+different crawls can sum to similar numbers.
+
+All three are `rs=9.4`, charged to `deepmind-resources-colossus`, and
+`fileutil quota qiaos <cell>` still answers *no such user* in every one.
+
+Note the throughput spread on an identical payload out of one source: 878 / 647
+/ 303 MiB/s to cbf / tul / lpp. Distance shows up, but even the European leg
+beat the 120 MiB/s bigstore read -- **CNS-to-CNS is the fast leg as well as the
+free one**, which is the second reason to prefer one crawl fanned out over
+per-metro bucket reads.
+
+### A Cached Job Status Stalled The Pipeline For An Hour
+
+The `go-d` copy finished at 22:51 and wrote its `_SUCCESS`; `tpu check` still
+reported `SUBMITTED` an hour later, while Borg had the work unit as
+`BORG_STATE_SUCCESS`. An orchestrator waiting for the status to change waited
+for nothing.
+
+**For a copy, completion is a property of the filesystem, not of the scheduler.**
+Gate on the artifacts -- expected object count plus the completion marker --
+and the answer is both correct and available the instant it becomes true. Job
+status is a convenience view with a cache behind it; `deep_probe` on the XID
+gives the authoritative state when it is genuinely needed.
+
