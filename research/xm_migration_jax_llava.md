@@ -516,3 +516,18 @@ So the local run is a fast filter for everything up to the first byte, and the
 last mile still has to be proven on Borg. Read a local write failure as "cannot
 test this here", not as "the copy is broken".
 
+### Eval Bundle hop 1 Done (2026-08-06)
+
+`gs://kmh-gcp-us-east5` -> `/cns/go-d/home/qiaos/data/eval_bundle`, same
+region: **1280/1280 verified, `objects_bad: []`**, 170 GiB at 120 MiB/s in
+20.5 min. `status_counts` reads `{copied: 1109, skipped_already_correct: 171}`
+-- the 171 are the survivors of the run that died on the suffix-partition bug,
+re-verified rather than re-copied.
+
+1312 objects on disk = 1310 data files + `_SUCCESS` + `manifest.jsonl`; the
+planner counts only the 1280 it was asked to place. TFDS ImageNet is 1094 of
+them, so **the object count is dominated by KNN, not by the benchmarks**.
+
+Fan-out to the three metros is the same CNS-to-CNS shape as cc12m, from the
+single `go-d` copy.
+
