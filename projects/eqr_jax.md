@@ -406,15 +406,27 @@ specifics that keep biting.
 This is a generative loop: it *produces* an answer, so the question to ask is
 "is what it produced a solution", not "does it equal the stored one". Those are
 the same question only when the answer is unique — and every stock maze split
-here is a `perfect` maze, i.e. acyclic, so its S→G shortest path IS unique.
+here is a `perfect` maze, i.e. acyclic, so exactly one simple S→G path exists.
 `acc` has therefore been answering the reproduction question while
 being read as the solving one. Harmless on those splits; badly wrong off them.
+
+**On a unique-solution split the solution metric and `acc` must agree EXACTLY,
+row for row, and a divergence is a bug in the scorer rather than a finding.**
+Acyclic means one simple path, and the corpus labels differ from their input
+only on path cells (S and G stay S and G) — so the correct grid is fully
+determined and the two questions have the same answer set. Use that as the
+scorer's test: measure both on a unique split and require equality before
+trusting either off one.
 
 **Use `Maze-30x30-multi` whenever the claim is about solving.** 1000 fixed
 braided mazes, every one carrying ≥2 shortest paths, built and verified per
 puzzle by `tools/build_maze_multisolution_testset.py`. The gap it exposes is not
-subtle: the same checkpoint scores **40.2 exact vs 99.3 solution** (D16, EMA).
-The model was solving 99% of them and the old metric said 40%.
+subtle: the same checkpoint scores **40.2 exact vs 99.3 solution** (D16, EMA) —
+the solution figure measured by the pre-completeness scorer, so read it as a
+ceiling. The direction is not in doubt: exact match counts a solved maze as
+wrong whenever the model picks another valid route, and on this split a solver
+choosing uniformly among shortest paths would match the stored label only 36.5%
+of the time.
 
 - **`solution_acc` (grid heads) / `walk_acc` (`final_head_type: ar`) is THE MAZE
   HEADLINE**, and `acc` stays beside it as a diagnostic rather than being
@@ -428,7 +440,24 @@ The model was solving 99% of them and the old metric said 40%.
   shortest path puts the label back into a metric whose purpose is to not need
   one. `shortest_solution_acc` / `shortest_walk_acc` carry the strict number
   separately, and its reference length is BFSed **from the row's own input
-  board**, not read from the split's spec file.
+  board**, not read from the split's spec file. This is a property of the
+  ROUTE only, and it does not license a wrong cell anywhere else — nor does it
+  bite on a `perfect` maze, where no longer simple route exists to draw.
+- **Every cell of a grid head's output is an answer, so a cell painted that
+  should not be is an ERROR.** `solution_acc` requires both halves: the painted
+  cells form a legal S→G route, AND every unpainted cell still equals the input
+  board. Dropping the second half is what let a correct route carry a corrupted
+  board — S or G painted over, a wall opened, a corridor bricked up — and score
+  solved while `acc` said wrong. The completeness half is what makes the
+  equality above exact; it constrains the cells AROUND the route and never which
+  route was drawn, so `Maze-30x30-multi` still separates the two metrics.
+- **That rule has NO counterpart in `walk_acc`, and the asymmetry is the
+  format's.** A move sequence has no off-path cells to get wrong: the answer is
+  the walk, every token before EOS is executed, and the board is an input the
+  head cannot write to. One consequence when comparing the columns — a walk may
+  enter a dead end and come back, which a painting cannot express (the spur is a
+  degree-3 junction), so on a unique split `solution_acc` equals `acc` while
+  `walk_acc` stays strictly more permissive.
 - **Any `shortest_*` number measured before that BFS landed is a LOWER BOUND.**
   The spec array is in split order and the scorer indexed it by row-within-batch,
   so only the first batch at breadth 1 was aligned — 52.5% of rows at the shipped
@@ -436,10 +465,22 @@ The model was solving 99% of them and the old metric said 40%.
   `shortest` True→False, so the error is one-directional and no arithmetic
   corrects it: re-score. The non-strict columns never read the reference and are
   unaffected.
+- **Two one-directional errors in OPPOSITE directions do not compose into a
+  bound.** `shortest_solution_acc` measured before both the BFS reference and
+  the completeness rule is pushed down by the first and up by the second, so it
+  is not a lower bound, not an upper bound, and not correctable — only
+  re-scoring recovers it. State which fixes a number predates before calling it
+  a bound in either direction.
 - **Both scorers check against the INPUT board, never the label**, so neither
-  can be satisfied by copying the target. `maze_solution.py` (grid heads) and
-  `maze_walk.py` (AR heads) are the same definition for two output formats;
-  keep them that way.
+  can be satisfied by copying the target — the completeness rule compares the
+  unpainted cells with the BOARD, which is why the metric can demand a whole
+  correct grid without becoming exact match. `maze_solution.py` (grid heads) and
+  `maze_walk.py` (AR heads) are the same definition for two output formats; keep
+  them that way, minus the rule above that only one format can state.
+- **A scorer that reads only part of the output can only OVER-report**, so its
+  numbers are upper bounds and no arithmetic repairs them: re-score. Where the
+  split is unique-solution the corrected value is that run's own `acc`, already
+  reported — read it off rather than paying for an eval.
 - **The empty prediction must be rejected explicitly.** A pad row decodes to no
   path at all, and "the cells form a route from S to G" is vacuously true for
   the empty set when S adjoins G — the same trap `_row_exact_correct` guards
