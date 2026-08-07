@@ -626,3 +626,42 @@ deep in most prefixes.
 be satisfied by the copy of a marker, and it is cheap: one recursive list per
 prefix.
 
+## Stage-2: Seven Assumptions That Only Break On Borg
+
+Stage-1 runs clean, stage-2 did not, and every failure was the same shape: code
+written for the GCP cluster, where data sits on NFS or in `gs://`, meeting Borg,
+where only CNS exists. They surfaced one launch at a time because each one hides
+the next.
+
+| # | Assumption | Symptom |
+|---|---|---|
+| 1 | region json fetched by shelling out to `gcloud` | `/bin/sh: gcloud: command not found` |
+| 2 | visual_genome present wherever the job runs | not on CNS at all |
+| 3 | `visual-genome-det` resolvable by name | still resolved to `gs://` |
+| 4 | the other eleven stage-2 sources likewise | same |
+| 5 | `_SUCCESS` sits at the dataset root | upstream marker is three levels down, beside the shards |
+| 6 | COCO vis images readable from NFS | only on the GCP cluster's mount |
+| 7 | only `gs://` paths need glob expansion | `unexpected '*' at p 6` from Colossus |
+
+Then one that is not about paths at all: **the generation KV cache was
+hard-coded `bfloat16`** while params load as float32, and gemma updates it with
+`lax.dynamic_update_slice`, which requires identical dtypes and raises rather
+than promoting. Invisible in stage 1 because generation only runs when eval or
+sampling is enabled.
+
+Two things would have collapsed this into one or two launches:
+
+- **Enumerate the whole surface before the first launch.** After #4 I started
+  resolving every dataset offline against CNS, which caught ten failures in one
+  pass. Had I written that check before the first stage-2 attempt rather than
+  after the fourth, #5 and #7 would have come with it. The check is fifteen
+  lines and runs in a minute; a remote attempt costs ten.
+- **A resume reuses the ORIGINAL run's code.** `--resume_xid` restages the
+  snapshot the first work unit was built from, so three fixes landed in git and
+  none reached the cluster -- the run failed on a bug I had already fixed. Use a
+  fresh xid plus `--load_from <checkpoint>` whenever the code has moved.
+
+The stdout metrics mirror paid for itself here: the dtype traceback, with the
+frame inside `models/llava.py`, was recoverable from the CNS log after the task
+was gone. The work-unit status carried only the exception's one-line message.
+
