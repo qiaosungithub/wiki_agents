@@ -375,29 +375,40 @@ specifics that keep biting.
   cannot be re-evaluated or published.
 
   *The peak survives retention on purpose.* `training.checkpoint_best_metric`
-  promotes the best-scoring step to `checkpoint_best_<n>/`, a name that
+  promotes the best-scoring step to `checkpoint_best_<metric>_<n>/`, a name that
   deliberately falls OUTSIDE the `step_<N>` namespace every retention rule
   matches on — so the in-job pruner, `tpu gc`, and auto-resume all ignore it,
   and no future step-based sweeper has to be taught about it. Without it the
   default policy (newest 2 plus a 50k ladder) deletes exactly the checkpoint a
   peak-reporting row depends on: this family peaks off the ladder, at 120k of
-  150k on maze and 40-45k of 50k on sudoku. `"auto"` resolves the metric
+  150k on maze and 40-45k of 50k on sudoku. `"auto"` resolves the metrics
   against the FIRST REAL METRICS DICT rather than the config, because which
-  accuracy a run reports depends on its dataset and head; it takes the maze
-  headline (`walk_acc`/`solution_acc`) over `acc` where both exist, and a
-  resolution that finds nothing disables the feature with a warning naming the
-  keys that were available. Auto-resume still restores from the NEWEST
-  checkpoint, never from the best — the two answer different questions.
+  accuracy a run reports depends on its dataset and head; a resolution that
+  finds nothing disables the feature with a warning naming the keys that were
+  available. Auto-resume still restores from the NEWEST checkpoint, never from
+  the best — the two answer different questions.
 
-  *A retention policy driven by a metric inherits that metric's bugs, and the
-  loss is IRREVERSIBLE.* The selected step is the one kept; the others are
-  deleted on the ladder. So a scorer that over-reports does not merely mis-state
-  a number — it keeps the wrong checkpoint, and re-scoring afterwards cannot
-  recover a peak whose weights are gone. Re-rank the retained step against the
-  run's own logged curve after ANY metric fix, and expect some true peaks to be
-  unrecoverable. Prefer a selection metric that is cheap and stable: on a
-  unique-solution split `solution_acc` and `acc` are the same function, so
-  selecting on the elaborate one buys nothing and risks exactly this.
+  *A retention policy driven by ONE metric inherits that metric's bugs, and the
+  loss is IRREVERSIBLE — so track SEVERAL.* The selected step is the one kept;
+  the others are deleted on the ladder. A scorer that over-reports therefore
+  does not merely mis-state a number — it keeps the wrong checkpoint, and
+  re-scoring afterwards cannot recover a peak whose weights are gone. This was
+  paid once: `auto` resolved to the single key `solution_acc`, that key was
+  buggy, and three of four completed runs kept a step that was not the peak.
+  `auto` now keeps the best under EVERY headline key the run reports
+  (`walk_acc`, `solution_acc`, `acc`), one directory each, deduplicated to one
+  copy when two metrics choose the same step — a maze grid run pays one extra
+  331 MiB copy, sudoku pays nothing because only `acc` exists there. A metric
+  fix then costs a re-score instead of the run. Still re-rank the retained steps
+  against the run's own logged curve after ANY metric fix, and expect peaks from
+  before this change to be unrecoverable.
+
+  *Never sweep a name you do not recognise.* `checkpoint_best_<n>` — the
+  single-metric name — is still on CNS and is some finished runs' ONLY surviving
+  peak, so both the job and `tpu gc` match both shapes and neither ever deletes
+  an unfamiliar one. When a retention rule cannot PROVE a copy is superseded
+  (unreadable sidecar, no metric named), it keeps it: a kept copy costs disk
+  that a tool reports, a deleted one costs weights nobody can reproduce.
 
   *Sample count.* It is a FIXED-SIZE SUBSET wherever the split is larger — 2048
   rows of sudoku's 422,786, comparable to upstream's 2048-sample figure and not
