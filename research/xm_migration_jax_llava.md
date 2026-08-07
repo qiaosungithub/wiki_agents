@@ -557,3 +557,72 @@ on the CNS-to-CNS path where the bigstore path refused them. Re-copying to
 tidy the encoding would cost more than it saves; recorded so the discrepancy is
 not mistaken later for a partial copy.
 
+## Stage-1 Reproduced, And What It Took (2026-08-06)
+
+**Stage-1 matches the reference.** Pulled `worthy-bird-70`'s curve from WandB
+(`sqa24-massachusetts-institute-of-technology/jax-llava`, run `gtqntg5g`) and
+compared against our run at every logged step:
+
+| step | ref acc | ref loss | ours | delta |
+|---|---|---|---|---|
+| 100 | 0.4707 | 5.700 | 0.4649 | +0.006 |
+| 600 | 0.5923 | 1.665 | 0.6015 | -0.009 |
+| 1200 | 0.6198 | 1.498 | 0.6250 | -0.005 |
+| 1700 | 0.6274 | 1.457 | 0.6316 | -0.004 |
+| 2100 | 0.6296 | **1.444** | — | — |
+
+Within ±0.009 throughout, ours marginally ahead -- consistent with the
+reference having used the 150-shard cc12m slice where we now read all 1097.
+**Stage-1 end state: loss ~1.444, acc ~0.630.** Throughput on v7-32:
+**1.37 steps/s (351 samples/s at bs256), 2180 steps in ~26 min.**
+
+**v7-64 does not exist.** Borg supports v7 slices of 4/8/16/32 only; preflight
+rejects 64 outright. v7-32 is the ceiling.
+
+**The spreadsheet cannot answer a stage-1 question.** Its `Train acc / Train
+loss` columns hold the *stage-2* endpoint (75k steps), because a row records
+one number per stage boundary. WandB has the per-step history for both stages
+and is the right source for any mid-run comparison -- worth reaching for
+before concluding a number is unavailable.
+
+### Metrics Have To Be Written Somewhere That Outlives The Task
+
+`write_scalars` reaches only the datatable, and after a run ends that is not
+readable here: the Borg task log is GC'd within minutes, and `borg tasklog`
+from a workstation is refused by the corp credential. Both stage-1 runs
+therefore finished having left **no recoverable loss curve** -- the numbers
+above exist only because the job was polled while alive.
+
+Training scalars now also go to stdout, which is mirrored to the checkpoint
+bucket and outlives the task. For a 15-hour stage-2 that is the difference
+between having a curve to compare and having none.
+
+### Adapting A Copier: Audit Every Assumption, Not The One That Broke
+
+The stage-2 fan-out failed three times on three separate assumptions inherited
+from the cc12m copier, each invisible until it fired:
+
+- work split by filename suffix (`.tar` / `_stats.json`) -- matched nothing in
+  a mixed bundle, so both worker groups got empty lists and the run "succeeded"
+  having copied nothing;
+- root-level `manifest.jsonl` + `_SUCCESS` demanded at the source -- a
+  multi-prefix source has neither, so the planner refused a complete set;
+- the encoding canary hard-coded the manifest as its probe object.
+
+Each fix took minutes; finding them one launch at a time cost hours. **When a
+copier is adapted to a new data shape, re-read every place the old shape is
+assumed** -- filename conventions and sidecar layout are the two that read as
+formatting rather than logic.
+
+### A `_SUCCESS` You Did Not Write Proves Nothing
+
+These datasets ship their own upstream `_SUCCESS` inside each prefix, and a
+recursive walk copies it like any other file. So the marker appears at the
+destination as soon as the small files land -- long before the shards do. An
+orchestrator gating on it would have fanned out a replica that was ~4 objects
+deep in most prefixes.
+
+**Gate on object count against the source.** It is the only check that cannot
+be satisfied by the copy of a marker, and it is cheap: one recursive list per
+prefix.
+
