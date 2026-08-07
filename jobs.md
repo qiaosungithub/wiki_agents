@@ -133,6 +133,35 @@ so passing a guess both supplies an unusable path and disables the mechanism
 that would have found the right one. Reserve an explicit load path for a
 genuinely external checkpoint, and point it at a concrete step directory.
 
+**A resume re-runs the ORIGINAL snapshot, never the current checkout.** The
+snapshot the run was packaged from is immutable and already built, so reusing it
+is both correct and cheaper; packaging the working tree instead means resuming a
+checkpoint into code it has never seen. Two ways that bites, and both happen
+within days of each other on an active checkout:
+
+- **The config dialect moves on.** Retired keys are *refused* by the newer
+  validator, so recovering a run's own config out of its snapshot and handing it
+  to today's binary dies at flag-parse time — after a full packaging round.
+- **The parameter tree moves on.** A new default that adds or renames a module
+  makes the checkpoint unrestorable, surfacing minutes in as a checkpoint /
+  model mismatch rather than at launch.
+
+So resolve the stagedir from the job registry and re-run that. Treat a missing
+or unknown stagedir as an error: falling back to "package whatever is here now"
+is the bug, not the recovery. A deliberate code change belongs in a **new
+experiment**, where the comparison is honest, rather than arriving through a
+resume where nothing records that the code changed.
+
+**Prefer cells whose metro holds storage you can actually write.** The scheduler
+ranks on capacity and price and knows nothing about where your data lives, so
+the cell with the most free chips is often the one with no team storage at all
+— where everything lands on the personal per-cell ceiling. Express this as a
+*preference* over a cell list, not a ban: a storage-less cell is still real
+capacity and stays usable as long as something sweeps the quota. Note the
+platform reads a multi-cell allow-list only in its spatially-flexible mode, so
+the allow-list and that mode must be set together, and pinning one cell
+explicitly bypasses both.
+
 **Auto-resume must live in the application.** With no external daemon in the
 loop, the decision happens in-process at startup: read the checkpoint prefix,
 skip if an explicit load was requested or the run is eval-only, enumerate the
