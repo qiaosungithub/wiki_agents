@@ -40,6 +40,22 @@ Longest guide here, and mostly reference — jump to what you need:
   at startup with "Dataset split train in <alias> does not exist" — and the
   entry has to exist in the checkout you launch FROM, which is not always the
   one you edited.
+- **`dataset.online_aug` is the SUDOKU symmetry group, not a generic augmenter.**
+  It reshapes each batch to `(B, 9, 9)`, so on a 900-cell board it raises inside
+  the TRAIN LOADER — after packaging, scheduling and staging are all paid for.
+  It is inherited rather than mistyped: a scale-up recipe tuned on sudoku carries
+  it, and copying that recipe onto a maze corpus looks fine until the job dies.
+  Config load now refuses it off sudoku.
+- **A corpus directory holds more than the arrays the loader reads, and staging
+  copies whatever is there.** `sync_dataset_to_local` mirrors the split into
+  `/tmp`, which on Borg is a RAM disk sized by `--tmp_ram_fs_gib` (default 16),
+  and every task stages its OWN copy. The Setting-A corpora ship a `shards/`
+  tree of generation intermediates comparable in size to the payload itself
+  (90,002 directories, 450,010 files, 34 GiB beside 34 GiB of `all__*.npy`), so
+  the naive stage asked for 68 GiB one 16 MiB chunk at a time. `_UNUSED_BY_TRAINING`
+  skips `shards/`, `seeds.npy` and `provenance.json` at both levels. **Size
+  `--tmp_ram_fs_gib` from the payload before launching a 20M-row corpus**, and
+  read the `Staged N MB` line to confirm what actually landed.
 - **The maze grid is `30 x 30` holding a `29 x 29` perfect maze, padded — not
   cropped.** `_generate_perfect_maze` needs an odd size, so the generator takes
   `maze_n = n if n % 2 else n - 1` and writes `open_mask[:29, :29]`, leaving row
@@ -457,6 +473,19 @@ of the time.
   way. Both reach the in-training periodic eval, so a maze run's result is
   `D16/ema/walk_acc` on its own training curve, exactly where `D16/ema/acc` is
   for sudoku.
+- **A PERIODIC-WALL corpus needs the CLOCKED scorer, and the wrong one scores
+  the GROUND TRUTH zero.** The Setting-A splits add one token per residue class,
+  so a phase cell is passable terrain that blinks. `maze_solution.py` has no
+  clock and no phase token: its completeness rule reads a painted phase cell as
+  "painted a cell that is not OPEN" and rejects it, scoring the corpus's own
+  labels 0/1000. `eval_fn.maze_scoring` therefore picks `maze_periodic.py`
+  whenever the SPLIT's `vocab_size` implies `P = vocab − 6 > 0`, and P comes from
+  that number rather than from a board, because a board need not use every
+  residue. The failure this prevents is not a crash: `solution_acc` sits at 0.0
+  for the whole run while `acc` climbs, which reads as a modelling result. Check
+  the `[eval] maze solution scoring ON` line and the first eval's value against
+  `acc` before believing a zero. `walk_acc` has no timing rule at all, so an AR
+  head on a periodic corpus reports an upper bound and says so.
 - **A longer legal route counts as solved, deliberately.** Requiring the
   shortest path puts the label back into a metric whose purpose is to not need
   one. `shortest_solution_acc` / `shortest_walk_acc` carry the strict number
