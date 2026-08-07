@@ -17,6 +17,22 @@ Longest guide here, and mostly reference — jump to what you need:
 
 ## Data And Model Invariants
 
+- **The q head is deliberately initialised never to halt**: zero weights and a
+  `-5` bias, so `sigmoid(-5) ~ 0.0067` and ACT spends its full budget early on,
+  learning to solve before learning to stop. Faithful to the torch reference.
+  But **weight decay erodes it** — unmasked `wd 1.0` gives the bias a ~6900-step
+  half-life, so the prior is largely gone by 50k (verifiable on a released
+  checkpoint: the dead `q_continue` bias is the pure decay curve and matches
+  `exp(-1e-4 t)` to three significant figures). Treat the `-5` as an early-
+  training device, not a standing property, and note no test pins it.
+- **`arch.q_head_sg` severs the halt objective from the trunk.** With it on the
+  q head reads a `stop_gradient` latent, so its BCE updates only the head's own
+  two parameters and the trunk gradient from the q term is exactly zero
+  (measured across every `q_readout` mode). It also makes
+  `arch.loss.q_halt_loss_weight` irrelevant: that weight is already a no-op on
+  the head itself, since `atan2` is scale-invariant and the head's only gradient
+  is the q term — what it really scales is the q signal's pull on the SHARED
+  trunk, which `q_head_sg` removes entirely.
 - `EqR-jax` maps configured dataset aliases in `data_util.py`; verify the live
   mapping for names such as `Maze-dynamic`, `Maze-30x30-multi` and
   `Sudoku-aug1000` instead of rewriting paths in launch commands. An alias that
@@ -145,7 +161,7 @@ of guessing (see `../jobs.md` §Debugging A Job That Dies With No Log):
 - **Orbax `partial_restore=True` returns unmatched leaves unchanged**, i.e. still
   holding `model.init`'s random values, with no error and no warning. A fully
   mismatched key set therefore evaluates at chance (Sudoku showed `all/accuracy`
-  0.0907 = 1/11 with `exact_accuracy` 0.0) and looks like a modelling problem.
+  0.0907 = 1/11 with `acc` 0.0) and looks like a modelling problem.
   `utils/ckpt_util.assert_tree_matches` compares key sets and shapes before
   restoring, and `assert_restored_differs` catches the case where metadata is
   unreadable. Never add a restore path that bypasses both.
@@ -167,7 +183,7 @@ of guessing (see `../jobs.md` §Debugging A Job That Dies With No Log):
   423,168-example full set (99.79). `different_init/any_correct` is
   mathematically `pass@n` but is the only one reported, since `pass@k` is emitted
   only for `k < n`. `cumulative_exact_acc_topN` is the mean accuracy of the N
-  most-converged samples, so `...top4` equals `convergence_top_k/exact_accuracy`.
+  most-converged samples, so `...top4` equals `convergence_top_k/acc`.
 
 ## Data And Checkpoint Locality
 
@@ -214,27 +230,27 @@ recorded instead and `_iter_train` replays the permutation. 890 bytes.
 **Anything added to sampler state must be O(1) in corpus size. If it is not,
 store the seed and replay it.**
 
-## The Boundary-Checkpoint Stall
+## Training Length Is A Step Count
 
-A checkpoint written on an **iteration boundary** could not be resumed from, and
-the failure was silent.
+`training.total_steps` is the only run-length input and the train loader is
+endless. `epochs`, `max_steps` and `train_epochs_per_iter` are retired and raise
+naming their successor; a fixed-size corpus still gets its epoch budget printed,
+as a report and never a stopping rule.
 
-`epoch_idx` in `puzzle_dataset._iter_train` counts epochs consumed *within* the
-current iteration, so the last save of an iteration stored
-`epoch_idx == epochs_per_iter`. Resuming evaluated `while 5000 < 5000` -> False,
-the loader yielded **zero batches**, training "finished" without a step, the
-process exited 0, and Borg restarted it. Every attempt looked like a clean
-success, and with the default cadence it poisoned every other checkpoint, so
-recovering from a preemption was a coin flip.
-
-Fixed in `0b31a2a`: an exhausted cursor now means "the previous iteration
-finished", so the resume starts the next one at 0 and drops the spent
-permutation. Two things to carry forward:
+That deleted a whole failure mode rather than fixing it. Training used to be cut
+into `epochs / train_epochs_per_iter` outer iterations, and a checkpoint written
+on an iteration boundary stored an exhausted cursor: the resume evaluated
+`while N < N` -> False, the loader yielded **zero batches**, training "finished"
+without a step, the process exited 0, and Borg restarted it. Every attempt
+looked like a clean success. Two things outlive the code:
 
 - **Verify a resume by step progress, not by exit status** (`../jobs.md` §A restart
   loop is not evidence of a crash).
-- **Inspect `train_dataset.train_state.epoch_idx` in `extra.json`** when a resume
-  makes no progress. One `fileutil cat` settles it.
+- An "epoch" here was never a pass over the data. Every builder writes
+  `mean_puzzle_examples = 1` and every corpus holds 1000 groups, so at the
+  shipped batch size `steps_per_epoch` floored to **1** — `epochs: 50000` meant
+  50,000 steps. The name is gone; distrust the concept if you meet it in an old
+  config or checkpoint.
 
 ## Experiment Tracking
 
@@ -298,7 +314,7 @@ specifics that keep biting.
   so it used to count as a perfect solve for every replica, and one maze eval
   reported an accuracy that was entirely manufactured by 24 pad rows. Read
   `total_samples` to confirm which regime a number came from, and check that
-  `different_init/avg_pass_rate` equals `all/exact_accuracy` **of the same
+  `different_init/avg_pass_rate` equals `acc` **of the same
   weight set** — `ema/` against `ema/`, never across the two. They measure the
   same thing by different routes, so they agree exactly or something is wrong.
 
@@ -324,7 +340,7 @@ specifics that keep biting.
 - **`train/lm_loss` is not comparable across runs that halt at different
   depths.** It is measured at whatever ACT depth each model chose, so a run
   pinned at `halt_max_steps` is buying its lower loss with more compute than a
-  run that halts early. Check `train/steps` before putting two of these numbers
+  run that halts early. Check `train/act_loops_mean` before putting two of these numbers
   in one table; if they differ, the comparison needs a fixed-depth eval instead.
 
 - **`final train/*` is ONE BATCH, and the code will not smooth it for you.**
@@ -334,7 +350,7 @@ specifics that keep biting.
   that existed averaged the pre-denominator sums, so its "smoothed loss" was
   ~`global_batch_size` times the real one.
 
-- **The in-training `D16/{ema,online}/all/exact_accuracy` and its D64 twin ARE
+- **The in-training `D16/{ema,online}/acc` and its D64 twin ARE
   the numbers to read.** The periodic eval runs the headline protocol — B=1 at
   D=16 and D=64, on both weight sets — every `training.eval_interval_steps`, and
   every training config sizes
@@ -367,7 +383,7 @@ This is a generative loop: it *produces* an answer, so the question to ask is
 "is what it produced a solution", not "does it equal the stored one". Those are
 the same question only when the answer is unique — and every stock maze split
 here is a `perfect` maze, i.e. acyclic, so its S→G shortest path IS unique.
-`exact_accuracy` has therefore been answering the reproduction question while
+`acc` has therefore been answering the reproduction question while
 being read as the solving one. Harmless on those splits; badly wrong off them.
 
 **Use `Maze-30x30-multi` whenever the claim is about solving.** 1000 fixed
@@ -431,7 +447,7 @@ a function of the WITHIN-DEVICE row index only. The effective breadth is
 therefore `min(per_device_rows, n_init)`: when one example's B replicas straddle
 devices, two of them get the same latent. Nothing in the metrics shows it —
 `total_samples` stays right and `avg_pass_rate` still matches
-`all/exact_accuracy` — only diversity shrinks, so `different_init/any_correct`
+`acc` — only diversity shrinks, so `different_init/any_correct`
 and `convergence_top_k` under-report by exactly that factor. Config load now
 refuses such a layout, but read the rule when sizing an eval by hand.
 
@@ -458,7 +474,7 @@ win, which is why it is such a strong selector.
 `convergence_top_k=4` caps the candidate pool before top-1 is taken, and that
 cap binds: for the released checkpoint, `convergence_top_k/any_correct` is
 **95.70 at both D=16 and D=64**, so conv-top1 cannot benefit from depth. Base
-capability does improve (`all/exact_accuracy` 82.61 -> 89.30, reproducing the
+capability does improve (`acc` 82.61 -> 89.30, reproducing the
 paper's 82.2 -> 88.9).
 
 Meanwhile deeper reasoning makes the B restarts agree MORE, so replica diversity
@@ -494,8 +510,13 @@ because the sweep is expensive; an empty sweep with it on is rejected at config
 load rather than ending a long run with a log line.
 
 **Every logged eval column names its point and its weights**, as
-`D<depth>[B<breadth>]/{ema,online}/...`, and appears exactly once — there is no
-bare `all/...` copy to point a chart at. Charts and flatboard URLs use
-`D16/ema/all/exact_accuracy`. The distinction that matters when reading code: a
-standalone `evaluate()` still RETURNS `{"all": {...}}` and its results json is
-still keyed `all/...` — only the logged column name carries the prefix.
+`D<depth>[B<breadth>]/{ema,online}/...`, and appears exactly once. Charts and
+flatboard URLs use `D16/ema/acc`. The sweep path carries the same point tag as
+the in-training eval, so a training curve and a standalone eval point are
+directly comparable; the `eval/depth`-style coordinate columns that used to
+carry that information are gone from the metric sink and print to the log.
+
+The dataset `set` level is gone everywhere — column, `evaluate()`'s return value
+and the results json alike. It only ever held the single value `all`, because
+every corpus here declares `sets=["all"]`; a dataset declaring two sets makes
+the level reappear.

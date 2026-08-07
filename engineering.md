@@ -79,6 +79,30 @@ Related checkouts diverge deliberately. Preserve each side's execution model,
 sharding, dependency, and initialization choices; do not port runtime, data, or
 checkpoint behavior as incidental cleanup.
 
+## Sharing One Worktree
+
+Several agents committing into one checkout lose each other's work in ways that
+look like tool corruption. Two rules cover almost all of it.
+
+**`git commit -- <pathspec>` IGNORES THE INDEX.** It re-reads those paths from
+the working tree, so a peer's uncommitted hunk in a file you also touched lands
+in your commit no matter how carefully you staged. Verified in a scratch repo:
+stage one line, let someone else edit another, `git diff --cached` correctly
+shows only yours, and the commit contains both. Put the pathspec on `git add`,
+check `git diff --cached` CONTENTS, then `git commit` with **no** pathspec — and
+verify AFTER with `git show HEAD:<file>`, because `git diff --cached` is empty
+once the commit exists and reads as a false all-clear.
+
+**Never leave anything staged, and land a declaration with its implementation.**
+A `git rm` sitting in the index gets swept into someone else's commit and splits
+an atomic change in half — that is a broken build, where a swept-up edit is only
+mis-attribution. Likewise a config key declared in one commit and implemented in
+the next opens a window where a yaml sets a field the model does not have, and
+pydantic drops it in silence.
+
+A suite run in a shared worktree is a smoke signal only. Attribute nothing
+without a clean `git archive HEAD` export pinned to your own commit.
+
 ## External Writes Are Transactions
 
 Establish identity and target, validate assumptions, write the smallest scope,
