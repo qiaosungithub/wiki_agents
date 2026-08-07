@@ -643,6 +643,27 @@ the next.
 | 6 | COCO vis images readable from NFS | only on the GCP cluster's mount |
 | 7 | only `gs://` paths need glob expansion | `unexpected '*' at p 6` from Colossus |
 
+### Then Three That Are About The Hardware, Not The Paths
+
+Once the data resolved, the next three failures came from the *shape of a
+v7-32* -- 8 hosts x 4 chips over a 2x4x4 torus -- and every one of them only
+runs when eval/sampling is enabled, so stage 1 never touched them:
+
+- **`global_array_to_host_local_array` requires each host's devices to form a
+  contiguous subcube.** A v7-32 does not satisfy that, and the call raises
+  rather than falling back. Both the sampler and the KNN eval used it purely to
+  get their own slice onto the CPU afterwards.
+- **`device_get` is not the replacement**: it refuses an array spanning
+  non-addressable devices. The working form is
+  `multihost_utils.process_allgather`, which the rest of the KNN eval already
+  used -- the fix was to match the file's own convention.
+- and the dtype one below.
+
+**When a helper raises on a topology, check whether the surrounding code needs
+the sharded round-trip at all.** Both sites were moving a handful of values to
+a log line; the sharded path existed to avoid copying something large, and the
+constraint it carried outlived the reason for it.
+
 Then one that is not about paths at all: **the generation KV cache was
 hard-coded `bfloat16`** while params load as float32, and gemma updates it with
 `lax.dynamic_update_slice`, which requires identical dtypes and raises rather
