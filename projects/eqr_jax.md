@@ -350,12 +350,14 @@ specifics that keep biting.
   run that halts early. Check `train/act_loops_mean` before putting two of these numbers
   in one table; if they differ, the comparison needs a fixed-depth eval instead.
 
-- **`final train/*` is ONE BATCH, and the code will not smooth it for you.**
-  The logged final value is whichever step landed on the `log_per_step` grid, so
-  it carries full batch-to-batch variance. Compute a tail-window mean over the
-  logged curve and compare runs on that. There is deliberately no knob: the one
-  that existed averaged the pre-denominator sums, so its "smoothed loss" was
-  ~`global_batch_size` times the real one.
+- **A logged `train/*` value is the WHOLE INTERVAL, not one batch.**
+  `StepAccumulator` folds every step and the step landing on the `log_per_step`
+  grid drains it, with the divisor scaled by the interval length. So a point is
+  already an average over `log_per_step` steps — but the FINAL point is still one
+  interval, not a converged number, so compare runs on a tail-window mean over
+  the logged curve rather than on the last row. There is deliberately no
+  smoothing knob: the one that existed averaged the pre-denominator sums, so its
+  "smoothed loss" was ~`global_batch_size` times the real one.
 
 - **The in-training `D16/{ema,online}/acc` and its D64 twin ARE
   the numbers to read.** The periodic eval runs the headline protocol — B=1 at
