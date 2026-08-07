@@ -98,6 +98,13 @@ Longest guide here, and mostly reference — jump to what you need:
   is recovered from its immutable snapshot with `sexy <xid>`, not by keeping a
   file per run. The directory has been pruned twice already because launching by
   config name made every launch leave a file behind.
+- **Several agents share this checkout, so launch from a copy** (`../jobs.md`
+  §Submission Contract). `rsync -aL` the tree minus `.git`/`data`/`logs` into
+  `/tmp`, write `configs/remote_run_config.yml` there, `tpu queue` from that
+  directory, delete it. The tree is ~5 MB, `tpu queue` re-rsyncs it into the
+  CitC stagedir anyway, and `xm_launcher.py` is a symlink that `-aL`
+  dereferences — Bazel refuses to glob a package containing an absolute
+  symlink, so the dereference is required, not incidental.
 - EqR-jax uses XManager service tiers (`PROD` or `BATCH`), not legacy
   `xm_priority`. Resource selection and allocator constraints are in `../jobs.md`.
 - Treat the active BUILD target and launcher as authoritative. The current
@@ -364,6 +371,21 @@ specifics that keep biting.
   checkpoint behind it. Keep that alignment when changing either: report the
   peak for a family that rises then collapses, and a peak with no checkpoint
   cannot be re-evaluated or published.
+
+  *The peak survives retention on purpose.* `training.checkpoint_best_metric`
+  promotes the best-scoring step to `checkpoint_best_<n>/`, a name that
+  deliberately falls OUTSIDE the `step_<N>` namespace every retention rule
+  matches on — so the in-job pruner, `tpu gc`, and auto-resume all ignore it,
+  and no future step-based sweeper has to be taught about it. Without it the
+  default policy (newest 2 plus a 50k ladder) deletes exactly the checkpoint a
+  peak-reporting row depends on: this family peaks off the ladder, at 120k of
+  150k on maze and 40-45k of 50k on sudoku. `"auto"` resolves the metric
+  against the FIRST REAL METRICS DICT rather than the config, because which
+  accuracy a run reports depends on its dataset and head; it takes the maze
+  headline (`walk_acc`/`solution_acc`) over `acc` where both exist, and a
+  resolution that finds nothing disables the feature with a warning naming the
+  keys that were available. Auto-resume still restores from the NEWEST
+  checkpoint, never from the best — the two answer different questions.
 
   *Sample count.* It is a FIXED-SIZE SUBSET wherever the split is larger — 2048
   rows of sudoku's 422,786, comparable to upstream's 2048-sample figure and not

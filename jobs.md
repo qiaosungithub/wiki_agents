@@ -26,9 +26,24 @@ explain what you see.
   (one project reached 39, was pruned to 5, and grew back). Recovering a past
   run's config is already solved — the source snapshot is immutable, so a helper
   copies the exact file back out.
+- **When the checkout is shared, edit the run config in a COPY and launch from
+  it.** "In place" means *in the file the launcher reads*, not *in the shared
+  worktree*: the run config is a single file that every launch overwrites, so
+  two agents launching within a few minutes of each other silently package each
+  other's experiment. Copy the checkout, write the config into the copy, launch
+  from there, delete the copy. This costs nothing — the packaging step already
+  rsyncs the tree into a fresh snapshot, it never reads VCS state, and it does
+  not care which directory it was started from. The immutable snapshot is still
+  the run's record, so nothing about recovering a past config changes.
+  Code changes are the exception: they belong in the shared checkout and must be
+  committed there, because a copy is deleted and its provenance with it.
 - **Confirm before launching**: checkout, branch, dirty state, effective config,
   allocator, target. Use real attribution; never insert a placeholder to silence
   a prompt.
+- **Verify the SNAPSHOT, not the file you edited.** Diff the packaged config
+  against the one you meant to run, before the job gets far. It is the only
+  check that covers the whole path — the copy, the overwrite, and the launcher's
+  own staging — and it costs one `diff`.
 - **Packaging freezes the code.** The wrapper snapshots the checkout and
   packages that snapshot; edits afterwards do not affect a queued or running
   job.
