@@ -389,6 +389,16 @@ specifics that keep biting.
   keys that were available. Auto-resume still restores from the NEWEST
   checkpoint, never from the best — the two answer different questions.
 
+  *A retention policy driven by a metric inherits that metric's bugs, and the
+  loss is IRREVERSIBLE.* The selected step is the one kept; the others are
+  deleted on the ladder. So a scorer that over-reports does not merely mis-state
+  a number — it keeps the wrong checkpoint, and re-scoring afterwards cannot
+  recover a peak whose weights are gone. Re-rank the retained step against the
+  run's own logged curve after ANY metric fix, and expect some true peaks to be
+  unrecoverable. Prefer a selection metric that is cheap and stable: on a
+  unique-solution split `solution_acc` and `acc` are the same function, so
+  selecting on the elaborate one buys nothing and risks exactly this.
+
   *Sample count.* It is a FIXED-SIZE SUBSET wherever the split is larger — 2048
   rows of sudoku's 422,786, comparable to upstream's 2048-sample figure and not
   to its full-split one. Maze's 1000-puzzle split is covered whole.
