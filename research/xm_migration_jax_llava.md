@@ -722,3 +722,36 @@ xmanager stop --experiment_id=<xid> --work_unit_id=<n> --skip_confirmation=true
 `tpu cancel` and a bare `xmanager stop` both take the whole experiment, which
 is wrong when one duplicate work unit has to go and the other must keep running.
 
+## When The Error Names No Path, Make It Name One
+
+Three stage-2 launches died inside fsspec with `No module named 'gcsfs'` and a
+traceback containing only fsspec frames -- no dataset, no URL. I spent an hour
+reading candidate call sites (`_glob`, the glob expander, the OV1.5 group
+builder, the eval roots) and got nowhere, then briefly mis-diagnosed it as a
+dataloader-state problem.
+
+Adding four lines that raise with the offending URL turned every subsequent
+occurrence into a one-look diagnosis:
+
+```
+webdataset asked to open a gs:// URL on Borg:
+  '.../configs/llava_instruct/shard-000228.tar'
+```
+
+**When a failure says a resource is missing but not which one, the first move
+is to make it say which one.** That is cheaper than reading the code paths that
+could have produced it, and it keeps paying off -- the next launch surfaced a
+different config (`Docmatix-part-09-of-10`) and cost one minute instead of an
+hour.
+
+### Fix At The Chokepoint, Not At Each Source
+
+Those two configs were the same bug reached by different routes: OV1.5 shard
+roots are assembled across several modules and not all of them pass through
+`data_util`'s gs:// -> CNS rewrite. Patching resolution, then the glob expander,
+each fixed one route and left the others -- two launches, two more failures.
+
+The durable fix went into the **webdataset opener**, which every shard passes
+through no matter who built its path. A guard belongs where the paths converge;
+placing it upstream means finding, and remembering, every producer.
+
