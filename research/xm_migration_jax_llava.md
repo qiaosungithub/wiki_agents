@@ -686,3 +686,39 @@ The stdout metrics mirror paid for itself here: the dtype traceback, with the
 frame inside `models/llava.py`, was recoverable from the CNS log after the task
 was gone. The work-unit status carried only the exception's one-line message.
 
+## Stage-2 Is Running: Measured Cost (2026-08-07)
+
+After nine attempts the run trains: sampling produces sensible captions, the
+`[metrics]` line reaches the CNS mirror, and checkpoints land.
+
+**Throughput on v7-32: 0.357 steps/s (21.4 steps/min)** at bs256, image 336,
+`max_txt_len` 512 -- the reference recipe's stage-2 settings. That is **4x
+slower than stage-1** (1.37 steps/s), which is expected: stage 2 reads the
+12-source SFT mix with far longer sequences and runs periodic sampling.
+
+75000 steps therefore costs **~56 hours**, not the ~15 h a naive extrapolation
+from stage-1 suggested. Checkpointing is not the culprit: a save measures 236 s
+and happens every 800 steps, so it is 11% -- pure training is 0.40 steps/s.
+Quadrupling the checkpoint interval would recover only 4 h and cost 3200 steps
+of progress per preemption, which is the wrong trade on a preemptible slice.
+
+**PROD is preemptible.** The first stage-2 run was killed by slice defrag
+(Borg repacking the pod) after 220 steps. That is not a failure to debug: the
+checkpoint was intact and `--resume_xid` picked it up. On a run this long,
+resume has to be automatic -- the watcher resubmits on any non-completion exit
+and stops after a bounded number of resumes so a real crash cannot loop.
+
+### `borg ... jobs` Is Not A Command
+
+Several of my de-duplication watchers called `borg --borg=<cell> --user=<u>
+jobs` to find a work unit's Borg job, and silently found nothing -- so they
+never cancelled anything, across several launches. The usable route is at the
+XManager layer:
+
+```
+xmanager stop --experiment_id=<xid> --work_unit_id=<n> --skip_confirmation=true
+```
+
+`tpu cancel` and a bare `xmanager stop` both take the whole experiment, which
+is wrong when one duplicate work unit has to go and the other must keep running.
+
