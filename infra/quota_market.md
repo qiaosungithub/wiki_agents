@@ -5,6 +5,12 @@ before setting any price cap. This is allocator internals; most work never needs
 it. Source-verified against the scheduling pipeline in mid-2026 — re-verify
 before relying on a mechanism, and prefer live state over this text.
 
+**This file is about the ACCELERATOR market only.** Everything below prices
+chip-hours and is irrelevant to a CPU-only job: those are billed in GCU against
+a different ledger, and an unschedulable CPU job is almost never a market
+outcome — see `../jobs.md` §Requirements And Runtime for the pool it should be
+in instead.
+
 ## The Model To Hold In Your Head
 
 On a dynamic (market) pool, **quota is an output of the market, not an input**.

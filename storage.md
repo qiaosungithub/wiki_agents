@@ -396,6 +396,40 @@ that resolved its shard list at startup will not pick up shards that appear
 later. Never infer completeness from a directory listing, and never record
 mirror status in memory — re-verify live before scheduling.
 
+## Existence Is Not Completeness
+
+A distributed write is not atomic. A task killed mid-copy leaves a file that
+**exists and is zero bytes**, and `exists()` cannot tell it from a good one. So
+every "do we already have this?" check on a distributed path must test **size**,
+not presence — a name-only check turns a truncated write into a permanent one,
+because the resume logic then skips it forever.
+
+This has produced four distinct failures here, all silent:
+
+- A completion marker written last but **not atomically**: preemption during
+  the write left a 0-byte marker, which counted as done, was skipped by every
+  resume, and only surfaced hours later when a reader hit `json.loads("")`.
+  Write the marker to a temporary name and **rename** it — rename is atomic,
+  so the marker is either absent or complete.
+- A "already staged locally?" test that listed four filenames while the reader
+  needed five: the fifth could be truncated and the shard still counted as
+  present. Use **one shared predicate** that every stage and the reader call,
+  so the list cannot drift.
+- A mirror verifier comparing the wrong column of `fileutil ls -l` — field 4 is
+  the mdb group and reads `empty` for every file, so it compared `"empty" ==
+  "empty"` and **passed unconditionally**, even against a nonexistent
+  destination. Size is field 5. A verifier that cannot fail is worse than none,
+  because a completion marker then certifies nothing.
+- A copy timeout tuned for one file applied to a 2000-directory batch, killing
+  the transfer partway and leaving truncated files behind. Scale any timeout
+  with the batch, or the timeout itself becomes the corruption source.
+
+Two habits close the whole class. **Give every checker a reverse test** — point
+it at a deliberately corrupt file and require it to fail; the mirror bug lived
+only because nobody ever watched the check say no. And **make failure
+conservative**: a partial listing should under-count completed work, never
+invent it, so a crash during verification is safe.
+
 ## Distributed Reads On An Interactive Path
 
 Applies to any status table, watch loop, or progress display that reads a

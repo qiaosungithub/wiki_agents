@@ -41,6 +41,8 @@ Files here apply to every task. Subdirectories are read on demand; each has a
 | Read a distributed path interactively | `storage.md` §Distributed Reads |
 | Reclaim local disk | `storage.md` §Local Disk Cleanup |
 | A write fails, or a job produced 0-byte logs | `storage.md` §An Over-Quota Cell Looks Like A Broken Program |
+| Resume skips work, or a 0-byte file counts as done | `storage.md` §Existence Is Not Completeness |
+| A CPU-only batch job will not schedule | `jobs.md` §Requirements And Runtime |
 | Checkpoints filling a cell; pruning them | `storage.md` §Checkpoints Are The Default Reason A Cell Fills Up |
 | TPU codename, HBM, legal shape, equivalence | `tpu_reference.md` |
 | A job will not schedule; capping spend | `infra/quota_market.md` |

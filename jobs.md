@@ -55,6 +55,22 @@ explain what you see.
 - A job meant to consume guaranteed capacity must set the PROD service tier
   explicitly. Do not substitute a legacy priority field or silently accept a
   lower tier.
+- **A CPU-only batch job does not belong in an accelerator group.** In GQM,
+  CPU and RAM are *ancillary* resources allotted against accelerator usage, so
+  a job asking for neither is scheduled last, always. This is structural, not
+  bad luck, and no amount of waiting fixes it: a priority-0 probe here was
+  admitted and then sat in `starting` for 14 hours without ever being
+  scheduled. The documented path (`go/gdm-cpu-only-jobs`) is the shared
+  best-effort CPU pool, which is **pre-authorised** — any team member submits
+  under their own LDAP, no request, no approval. It is `--group=8` in our
+  launcher, and the ceiling is per user (order 1000 GCU, 1 TiB RAM). Two 900-
+  task jobs exceed it and evict *each other*, so run large CPU jobs serially.
+  A 20M-row generation cost 7,455 core-hours there and billed nothing.
+- **Priority <= 25 charges the person; above it charges the group.** So the
+  free tiers are not "free" in a different accounting sense — they simply do
+  not touch the team's GCU allocation. `BATCH` reads like the cheap option and
+  is the opposite: it is a *paying* best-effort tier that bills the group.
+  Omitting the tier entirely defaults to PROD.
 - Container-style packaging requires the pool to have a mapped cloud project;
   native allocators without one need Bazel packaging.
 - In JAX jobs, parse flags before distributed initialization, and never
@@ -131,6 +147,23 @@ declared dead. Always pass an explicit scheduling policy. Ours allows unlimited
 task failures but at most one per task per credit window — a long run should
 survive any number of unrelated preemptions, while a task that keeps dying is a
 real bug and should be declared dead rather than retried forever.
+
+**A preempted job can stay `running` and never progress again.** Where each
+task walks a fixed list of work items, an index it has already passed is never
+revisited, so once the tail is preempted the job holds its slot, reports
+healthy, and produces nothing for the rest of time. A completion gate must
+therefore watch *progress*, not liveness — poll the count of finished units and
+act when it **stalls**, not when the job disappears. Two 20M-row corpora both
+stopped at 89,942 of 90,000 this way; the last 58 units had to be built
+elsewhere. Budget for finishing the tail by other means.
+
+**Size a work unit against the preemption window, not against convenience.** A
+unit longer than the mean uninterrupted window can never complete, and the
+failure is silent: every task is busy, nothing is ever emitted, no error is
+raised. Measured window here was ~6 minutes against an initial 195-minute
+shard, i.e. permanent zero progress that looks exactly like a healthy job.
+Re-slicing to ~2 minutes fixed it and cost nothing, because the work was a pure
+function of its index — worth designing for on any restartable batch job.
 
 Two settings worth copying into any launcher: open log-read access, so anyone
 including future-you can read the logs without an ACL dance; and no
@@ -251,6 +284,27 @@ not as allocator or quota rejections.
   launcher must be copied into the source tree with symlinks dereferenced. The
   rejection is cached in the package glob cache, so fixing the tree is not
   enough — the build server has to be restarted before the error clears.
+- **The launcher forwards flags as a `key=value` dict, so the binary must
+  survive that shape.** `--app.<flag>=<v>` passes one flag through verbatim,
+  but there is no way to express a *positional* argument, and a `store_true`
+  flag arrives as `--flag=` and is rejected by argparse. Both failures kill
+  every task inside argument parsing, before any logging: 900 tasks exit in a
+  second, and with an unlimited restart budget the job churns forever writing
+  nothing, which reads exactly like a scheduler problem. Select subcommands
+  with a valued flag, and give every boolean an explicit value.
+- **A flag must behave correctly for BOTH "absent" and "present but empty".**
+  They are different inputs, and a default of `""` collapses them: the flag was
+  passed, the value parsed as empty, the code took the default branch, and the
+  whole fleet ran the wrong mode silently. Default to `None` and test all
+  spellings. This one bit twice in a row on the same flag.
+- **Have each task record its own identity and mode where you can read it
+  later.** On a job whose tasks never log, a startup marker written to
+  distributed storage may be the only diagnostic that exists — here `borg
+  tasklog` crashed on the workstation, the log CLI was blocked by credentials,
+  and the work-unit status message was empty. Two root causes (`$BORG_TASK_INDEX`
+  is never set by XManager — use the BCL `%task%` macro; and the empty-value
+  collapse above) were found only because the marker disagreed with the launch
+  log.
 
 Distinguishing these from remote failures is cheap: a job that never created a
 work unit, or a launch that produced no XID, never reached the scheduler at all.
@@ -262,6 +316,11 @@ preflight check runs in about fifteen seconds and catches the common rejections:
 illegal topologies and per-allocator minimum slice rules, allocations with no
 capacity of that platform, and thin headroom. It returns green/yellow/red, and
 the wrapper refuses to submit on red without an override.
+
+**Preflight cannot verdict a CPU-only job at all** (`Unknown accelerator arch
+'cpu'`) — it models TPU allocations and nothing else. Submit those with
+`--skip-preflight`; that is not overriding a warning, it is skipping a check
+that has no opinion.
 
 **A green verdict is necessary, not sufficient.** Preflight cannot see topology
 fragmentation — an allocation can have hundreds of free chips spread across

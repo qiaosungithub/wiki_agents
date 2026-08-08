@@ -253,6 +253,29 @@ recorded instead and `_iter_train` replays the permutation. 890 bytes.
 **Anything added to sampler state must be O(1) in corpus size. If it is not,
 store the seed and replay it.**
 
+## Two Loader Defects That Only Appear On A Large Corpus
+
+Both were invisible for as long as every split here was 1k rows, and both bite
+harder the bigger the corpus gets. Re-check them if either is ever reverted.
+
+**A dtype mismatch in `np.searchsorted` cost 364x on the eval path.** The index
+arrays are `int32`; passing a Python `int` (always int64) makes NumPy upcast the
+*entire* array to int64 on **every batch** — 68 ms warm, 4.5 s when the array is
+mmapped and has to be faulted in. On a 20M-row split that is ~20 hours for one
+pass instead of ~3 minutes (281 -> 102,219 rows/s). Cast the key to the array's
+dtype. The diagnostic signature is worth recognising: **throughput pinned at a
+constant batches/s regardless of batch size** means a fixed per-batch cost, not
+an I/O volume problem — here the disk could stream the whole corpus in 3
+minutes. This sat on `_iter_test`, so every evaluation on a large corpus paid
+it.
+
+**A batch larger than the split makes the loader spin silently.** The train
+path is drop-last, so it yields nothing at all, re-shuffles, and yields nothing
+again — 100% CPU, no batches, no error, forever. Any epoch-counting loop never
+runs because it is downstream of a batch that never arrives. Clamp with
+`min(batch_size, n)`. **This applies to training configs too:** a global batch
+larger than a small eval split hangs the run rather than failing it.
+
 ## Training Length Is A Step Count
 
 `training.total_steps` is the only run-length input and the train loader is
@@ -454,6 +477,20 @@ only on path cells (S and G stay S and G) — so the correct grid is fully
 determined and the two questions have the same answer set. Use that as the
 scorer's test: measure both on a unique split and require equality before
 trusting either off one.
+
+**`Maze-period-easy` / `Maze-period-hard` are the dynamic-maze corpora**, 20M
+train + 1k test each, mirrored to all three metros and registered in
+`_SETTINGA_MIRRORS`. Same 30x30 geometry as the static maze corpora, so they
+are drop-in comparable; the board additionally carries **period-P blinking
+walls**, one token per phase (`easy` P=2, vocab 8; `hard` P=3, vocab 9). The
+solution is still a drawable wait-free line, so image-to-image is unchanged.
+Two things do not transfer from the static splits: the score is
+`2^-floor(e/2)` for `easy` but `2^-e` for `hard` (the bipartite parity argument
+behind floor-halving fails at P=3, where one WAIT shifts the residue), and
+`hard` exists specifically because P=2 admits an O(1) shortcut — wall lethality
+is `phase == (row+col+parity(S)) % 2`, which scored 100% on `easy` and drops to
+chance on `hard`. Full definition, invariants, and the interactive-environment
+semantics live in `~/work/maze_settingA_data/DATASET_SPEC.md`.
 
 **Use `Maze-30x30-multi` whenever the claim is about solving.** 1000 fixed
 braided mazes, every one carrying ≥2 shortest paths, built and verified per
