@@ -1,36 +1,30 @@
 # VLM Benchmark Reporting
 
-Read this when writing a VLM result into the shared spreadsheet, or when a
-benchmark number looks wrong. The general "settle the protocol first" rule is in
-`../research/result_logging.md`; this file holds the specific conventions that tab
-uses. Verify column letters against the live sheet — a layout note ages.
+Read this before a VLM result reaches the shared spreadsheet, or when a
+benchmark number looks wrong. `../research/result_logging.md` owns the general
+"settle the protocol first" rule and the write mechanics; verify column letters
+against the live sheet, since a layout note ages.
 
-## Protocol Choices That Are Not Interchangeable
+## One Benchmark Name, Several Numbers
 
-- Use stage-1 final metrics for pretraining rows and stage-2 final metrics for
-  SFT rows. Represent a pretrain/SFT pair as adjacent rows even when one
-  tracking run contains both stages.
-- The main POPE column is **adversarial F1**, not macro F1.
-- ImageNet KNN protocols (raw versus PCA-whitened) are different numbers.
-- Greedy and beam-search VStar / VisWiz values are different numbers.
-- MMVP uses the official 150-pair both-correct accuracy, not 300-item accuracy.
-- CVBench uses the official source-balanced score. VLMs Are Blind uses the
-  official eight-task mean.
-- RefCOCOg valid-answer count is a diagnostic. Note it when already logged;
-  write `n/a` rather than opening result data solely to compute it.
+**Report the variant named here; the alternatives are different numbers, not
+rounding.** Pretraining rows take stage-1 final metrics and SFT rows stage-2
+final metrics, as two adjacent rows even when one run covers both stages.
 
-## Trivial-Score Floors
+| Benchmark | The number that counts | Trivial floor |
+|---|---|---|
+| POPE | **adversarial F1**, not macro F1 | — |
+| MMVP | official 150-pair both-correct accuracy, not 300-item | `25%` |
+| CVBench | official source-balanced score | `42.4889%` protocol-aligned, displayed `42.49` |
+| VLMs Are Blind | official eight-task mean | `24.00%` published uniform-random |
+| ImageNet KNN | raw and PCA-whitened are separate protocols | — |
+| VStar / VisWiz | greedy and beam-search are separate protocols | — |
+| DocVQA | ANLS per `vlm_data.md`; Stage-3 training already includes DocVQA-train through the OV1.5 grouped stream, so this is in-domain supervised evaluation, **never zero-shot document generalization** | — |
+| RefCOCOg valid answers | a diagnostic: note it when already logged, else `n/a`; never open result data solely to compute it | — |
 
-Each benchmark's random-choice floor comes from its own protocol, so a threshold
-borrowed from another protocol raises false alarms. Mark a value red only when
-it is **strictly below its own floor**: MMVP `25%`, CVBench `42.4889%`
-(protocol-aligned, displayed `42.49`), VLMs Are Blind `24.00%` (published
-uniform-random). Results produced under a superseded protocol are marked as
-protocol-invalid instead, never scored against the current floor.
-
-## Formatting
-
-Label cells and metric cells carry two *different* signals: labels are red only
-for a verified encoder misconfiguration, metrics for a below-trivial score.
-Inserting a row inherits both formats, so clear inherited backgrounds before
-reapplying either.
+**Red on a metric means strictly below its OWN floor above** — each follows from
+its benchmark's protocol, so one borrowed from a neighbour raises false alarms —
+while **red on a label means a verified encoder misconfiguration.** Two
+different signals, and inserting a row inherits both, so clear inherited
+backgrounds before reapplying either. A result produced under a superseded
+protocol is marked protocol-invalid instead, never scored against a floor.

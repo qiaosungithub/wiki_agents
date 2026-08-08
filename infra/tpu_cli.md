@@ -1,7 +1,8 @@
 # The `tpu` Tooling Itself
 
-Read this only when changing, rebuilding, or debugging the `tpu` CLI and its
-daemon. Using it to launch and inspect jobs is `../jobs.md`. Native code and
+The `tpu` CLI, its checkers, cache daemon, job registry, and preflight
+internals. Read this only when changing, rebuilding, or debugging the tool —
+using it to launch and inspect jobs is `../jobs.md`. Native code and
 `~/work/tpu_cmd/README.md` outrank this file for flags and workflows.
 
 ## Two Halves, Two Repositories, And Why
@@ -11,80 +12,73 @@ daemon. Using it to launch and inspect jobs is `../jobs.md`. Native code and
 | Shell + launcher | `~/work/tpu_cmd/` | wrapper script, launcher, README |
 | Built checkers | a google3 CitC path under `experimental/users/<user>/tpu_utils/` | money/quota/infra checkers, shared utilities, preflight (topology, capacity, market, router), probes |
 
-The split is forced by the build system, not by preference: the checker half
+The split is forced by the build system, not preference: the checker half
 imports google3 packages, depends on internal build targets, and the daemon runs
 its compiled binaries on a loop.
 
 **The google3 half cannot be symlinked out.** All three variants fail — an
 absolute directory symlink is rejected outright, a relative one escapes the
-source root, and per-file symlinks fail at action execution. Only the reverse
-works: real files in google3, a symlink in `~/work` pointing at them, for
-navigation only.
+source root, per-file symlinks fail at action execution. Only the reverse works:
+real files in google3, a symlink in `~/work` pointing at them, for navigation.
 
-Both halves are versioned. The google3 half uses a separate git directory so the
-worktree stays in place and the build is unaffected — only a tiny pointer file
-sits in the source tree. Do not try to unify them with one repo plus a symlink:
-git records a symlink as the link itself, so committing it would back up none of
-the files behind it.
+Both halves are versioned, the google3 half through a separate git directory so
+the worktree stays in place and the build is unaffected — only a tiny pointer
+file sits in the source tree. Do not unify them with one repo plus a symlink:
+git records a symlink as the link itself, so committing it backs up none of the
+files behind it. And **a source-control checkout is not a backup** — the checker
+half was originally unknown to the depot, so until its change submits the git
+repo is the only recovery path.
 
-**A source-control checkout is not a backup.** The checker half was originally
-unknown to the depot entirely; until its change submits, the git repo is the
-only recovery path.
-
-Self-asserting test scripts (ones that exit non-zero on failure rather than
-using the test framework) must be declared as test targets. Declared as
-binaries they silently never run and the test command cheerfully reports that no
-tests were found.
+**Self-asserting test scripts** (exiting non-zero on failure instead of using
+the test framework) must be declared as test targets; declared as binaries they
+silently never run and the test command reports that no tests were found.
 
 ## The Cache Daemon
 
 The status commands read a cache file, so they are instant; all latency lives in
-the background daemon that refreshes it. The commands warn when that cache is
-stale, so **a full daemon round must finish well inside the staleness
+the background daemon refreshing it, and the commands warn when the cache is
+stale. **A full daemon round must therefore finish well inside the staleness
 threshold.**
 
-- Each checker binary pays a substantial interpreter cold start while its actual
-  RPCs cost under a second. Running them serially paid that tax repeatedly and
-  pushed a round past the threshold. They are independent and write to disjoint
-  outputs, so they run **concurrently**.
-- When the staleness alarm fires, **check the round duration the daemon logs
-  before believing its "credentials expired" hint** — that message is a guess and
-  is usually wrong.
+- **Run the checkers concurrently.** Each pays a substantial interpreter cold
+  start while its RPCs cost under a second, so serial runs paid that tax
+  repeatedly and pushed a round past the threshold. They are independent and
+  write to disjoint outputs.
 - **Rebuild all checker binaries in one build invocation.** Building a single
   target can publish an output namespace holding only that target, and the
   daemon then reports failures that look like data or auth bugs.
-- **Never `readlink -f` the build output symlink.** It is a chain of two hops
-  with opposite lifetimes: the first is stable and worth pinning against a
-  concurrent build, the second is republished per build and only the targets of
-  *that* build land behind it. Collapsing both freezes the daemon inside one
-  build's namespace, where no later rebuild can ever reach it — the binaries sit
-  in `blaze-bin`, correctly built, while the daemon insists they do not exist.
-  Pin one hop; re-resolve the rest at each use, and fall back to the live path.
+- **Never `readlink -f` the build output symlink.** It is two hops with opposite
+  lifetimes: the first is stable and worth pinning against a concurrent build,
+  the second is republished per build with only that build's targets behind it.
+  Collapsing both freezes the daemon inside one build's namespace where no later
+  rebuild can reach it — binaries sit in `blaze-bin`, correctly built, while the
+  daemon insists they do not exist. Pin one hop, re-resolve the rest at each
+  use, and fall back to the live path.
+- When the staleness alarm fires, **check the round duration the daemon logs
+  before believing its "credentials expired" hint** — that message is a guess
+  and is usually wrong.
 - **A checker the daemon cannot find is repaired by the daemon**, rate-limited,
   rebuilding all of them together. A hint printed into a detached tmux pane is
-  not a fix, and the staleness auto-recovery restarts the session — which was
-  never the problem.
+  not a fix, and the staleness auto-recovery restarts the session — never the
+  problem.
 
 ## Job Bookkeeping
 
 The live registry is the file `tpu check` renders from; an older predecessor
 file is no longer written and survives only as a fallback for resume.
 
-**Clear archives rather than deletes**, moving entries to a legacy file. Keep
-it: an entry is the only mapping from an experiment id back to its checkpoint
-bucket, staging directory, and launch log once the job and work unit are gone.
-
-**Cancel is not clear.** Cancelling stops the experiment and pins the registry
-entry so the daemon's auto-retry can never resubmit an explicitly killed job;
-the entry stays on the board until archived.
-
-**Recovering a past run's config** is a shell helper that reads the staging
-directory from the registry (falling back to the legacy file, so archived ids
-still resolve) and copies the exact config out of that immutable snapshot. It
-learns *which* file to copy by grepping the launch log, because a snapshot
-contains the whole config directory. This is why deleting a finished
-experiment's config from the checkout is safe, and it is the answer to "which
-config produced this run".
+- **Clear archives rather than deletes**, moving entries to a legacy file. Keep
+  it: an entry is the only mapping from an experiment id back to its checkpoint
+  bucket, staging directory, and launch log once the job and work unit are gone.
+- **Cancel is not clear.** Cancelling stops the experiment and pins the registry
+  entry so the daemon's auto-retry can never resubmit an explicitly killed job;
+  the entry stays on the board until archived.
+- **Recovering a past run's config** is a shell helper that reads the staging
+  directory from the registry (falling back to the legacy file, so archived ids
+  still resolve) and copies the exact config out of that immutable snapshot,
+  learning *which* file by grepping the launch log because a snapshot holds the
+  whole config directory. This answers "which config produced this run", and is
+  why deleting a finished experiment's config from the checkout is safe.
 
 ## Error Classification And Auto-Retry
 
@@ -93,48 +87,47 @@ preemption, resource exhaustion, allocator rejection (the fallback for a failure
 with no stated reason), and unknown.
 
 **Auto-retry is narrow on purpose**: only a guaranteed-tier job rejected by the
-allocator is retried, a few times, minutes apart. That is the client resubmitting
-a *new experiment*, which is a completely different mechanism from the in-job
-restart budget in `../jobs.md`. **Preempted jobs are not covered by it.**
+allocator is retried, a few times, minutes apart. That is the client
+resubmitting a *new experiment*, a completely different mechanism from the
+in-job restart budget in `../jobs.md`, and **preempted jobs are not covered.**
 
-**A preempted job is dead, not pending.** With no restart budget the torn-down
-gang counts as a task failure and the job is never re-queued. The status tool
-used to render any work unit whose message merely contained "preempt" as
-pending, which made dead experiments look like they were queuing for hours.
-Terminal state must win over a substring match; a genuinely queued job that was
-preempted earlier is labelled as such. When changing this logic, remember the
-daemon runs compiled binaries — a source edit does nothing until you rebuild.
+**A preempted job is dead, not pending** (`../jobs.md` owns why: no restart
+budget means the torn-down gang counts as a task failure). Rendering any work
+unit whose message merely contained "preempt" as pending made dead experiments
+look like they were queuing for hours: **terminal state must win over a
+substring match**, while a genuinely queued job preempted earlier is labelled as
+such. When changing this logic, remember the daemon runs compiled binaries — a
+source edit does nothing until you rebuild.
 
 ## Preflight Internals
 
-Verdict layers, from cheapest: an in-process topology whitelist plus
+Verdict layers, cheapest first: an in-process topology whitelist plus
 per-allocation minimum-slice rules; one availability RPC asking whether any cell
 in this allocation and tier has enough obtainable chips; and a headroom
-heuristic that warns when remaining quota is thin. On dynamic pools that last
+heuristic warning when remaining quota is thin — on dynamic pools that last
 warning is near-permanent and low-signal.
 
 The router ranks surviving candidates by cap-blocked status (a blocked
 combination is kept and explained rather than silently dropped), verdict,
 headroom, cost, and accelerator preference. **Headroom differs by tier on
-purpose**: the guaranteed tier uses remaining quota, the batch tier uses
-obtainable chips, because the batch pass never consults a floor at all.
+purpose**: the guaranteed tier uses remaining quota, the batch tier obtainable
+chips, because the batch pass never consults a floor. Market data comes from a
+cache the money checker writes each daemon round, so the router stays offline
+and fast; when that cache is missing or stale it says so loudly and falls back
+to price-blind ranking rather than failing.
 
-Market data comes from a cache written by the money checker each daemon round,
-so the router stays offline and fast; when that cache is missing or stale it
-says so loudly and falls back to price-blind ranking rather than failing.
-
-Per-allocation minimum-slice rules are **pool policy, not physical law** — a
-slice below the minimum is a perfectly valid hardware topology, just disallowed
-by the admission config, and rejected instantly. The batch tier typically allows
-down to the architecture's own minimum. These rules live in a table in the
-preflight code; update it when you meet an allocation that behaves differently.
+**Per-allocation minimum-slice rules are pool policy, not physical law** — a
+slice below the minimum is a valid hardware topology, disallowed by the
+admission config and rejected instantly. The batch tier typically allows down to
+the architecture's own minimum. These rules live in a table in the preflight
+code; update it when an allocation behaves differently.
 
 ## Metrics Tables
 
-Tables expire after a long window measured from **last access**, and renew on
-every read or write. Pin one explicitly if it must outlive that.
+Tables expire after a long window measured from **last access**, renewing on
+every read or write; pin one explicitly if it must outlive that.
 
-The table CLI does not work from this workstation — a restricted credential
-blocks the service, and every local binary hits the same wall. This is a
-workstation limitation only; a job writes fine. Use the browser URLs in
+**The table CLI does not work from this workstation** — a restricted credential
+blocks the service and every local binary hits the same wall. This is a
+workstation limitation only, a job writes fine; use the browser URLs in
 `../research/result_logging.md`.

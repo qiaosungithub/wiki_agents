@@ -1,16 +1,15 @@
 # Archive
 
-Nothing under this directory is part of the default agent read path.
+Not part of the default read path. Use it to recover provenance or to
+troubleshoot a case the core guides cannot resolve — never to learn how the
+system works now. These files span several generations and can contradict
+current code; verify anything before acting on it.
 
-- `audits/` holds dated audit snapshots: scan counts, validation numbers, and
-  status observations that back a rule in a core guide. They age; the guide's
-  rule stays authoritative, and status must be re-verified live.
-- `evidence/` holds verbatim pre-restructure copies of core guides, kept for the
-  measurements, source paths, and incident forensics that a core guide must not
-  carry. Its own README maps each file to what replaced it.
-- `legacy/` preserves verbatim snapshots of older repository-local agent memory.
+| Directory | Holds |
+|---|---|
+| `audits/` | Dated investigations backing a rule in a core guide: scan counts, validation numbers, root causes. The guide's rule stays authoritative; re-verify status live. |
+| `evidence/` | Findings from checkouts that were deleted. See its README. |
+| `legacy/` | Verbatim snapshots of older repository-local agent memory, from before centralization. |
 
-Use these files only to recover provenance or troubleshoot a case that the core
-guides cannot resolve. They describe multiple generations of the system and can
-contradict current code. Never promote an archived command or state assumption
-without verifying it against the current repository and live system.
+Git history is the real archive. Prefer deleting a stale file here over keeping
+it: `git log --diff-filter=D --name-only` finds anything removed.

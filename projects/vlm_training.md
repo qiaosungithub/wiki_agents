@@ -1,114 +1,83 @@
 # VLM Training
 
 Read this when changing training, checkpointing, resume, or evaluation code in
-JAX LLaVA, `PaliGemma-baseline`, or `beifen-Paligemma`. Dataset schemas,
-uploads, and coordinate rules are in `vlm_data.md`. Current code and
-project-native configs remain authoritative.
+`jax_llava`, `PaliGemma-baseline`, or `beifen-Paligemma`. Datasets, coordinates,
+and benchmark mirrors are `vlm_data.md`; reporting a result is `vlm_metrics.md`.
+Current code and native configs outrank this file.
 
-## First Principles
+## Contract
 
-- For Kaiming Group Code (Type 1), keep data, checkpoints, and compute in the
-  same region. Validate locality before listing or opening GCS payloads, and
-  fail fast on missing paths.
-- Preserve each checkout's execution model. A correct pmap checkpointing pattern
-  is not automatically correct for a globally sharded JIT/HSDP TrainState.
-- Treat the staged config as the experiment definition. WandB and the tracking
-  spreadsheet record what ran; old row numbers and incident job ids are not
-  architectural truth.
-- When porting between related checkouts, copy behavior deliberately and retain
-  project-specific sharding, dependency, and initialization choices.
+- **These are Type 1 checkouts** (`README.md`, `../storage.md`): data,
+  checkpoints, and compute in one region. Validate locality before listing or
+  opening a payload; fail fast on a missing path.
+- **Preserve each checkout's execution model.** A pmap checkpointing pattern is
+  not automatically correct for a globally sharded JIT/HSDP TrainState; a port
+  keeps each side's sharding, dependency, and initialization choices.
+- **The staged config is the experiment definition.** WandB and the spreadsheet
+  record what ran; old row numbers and incident job ids are not architecture.
+- **Name the concern before changing code** — model semantics, mesh/batch, data
+  stream, checkpoint transaction, stage transition, final eval — then exercise
+  it with the smallest smoke hitting the real path and read the logs and
+  produced state. A clean process exit proves nothing.
 
-## HSDP And Model Semantics
+## Mesh, Model, And Data Stream
 
-- In HSDP, derive process-local batch shape from data mesh axes. The final mesh
-  axis is the model axis and should not be counted as data parallelism.
-- Use explicit mesh-aware sharding for activation constraints and checkpoint
-  restore. Do not assume a mesh context exists during shape evaluation.
-- Avoid materializing full vocabulary logits when hidden-space token loss is
-  available, and avoid gathering a full sharded TrainState onto every host.
-- Preserve deliberate model behavior such as prompt-causal masking, connector
-  optimizer separation, late-fusion gradient stops, and task-specific generation
-  budgets unless the task explicitly changes them.
+- **Process-local batch shape comes from the data mesh axes only**: the last
+  mesh axis is the model axis, not data parallelism. **Shard explicitly and
+  mesh-aware** for activation constraints and checkpoint restore; no mesh
+  context is guaranteed during shape evaluation.
+- **Never materialize full vocabulary logits** where a hidden-space token loss
+  exists, and never gather a full sharded TrainState onto every host.
+- **Deliberate model behavior stays** unless the task changes it: prompt-causal
+  masking, connector optimizer separation, late-fusion gradient stops,
+  task-specific generation budgets.
+- **A stateful loader checkpoint is valid only for a compatible data recipe** —
+  process topology, local batch, workers, roots, mix weights, shuffle state,
+  seeds. Remap only known same-dataset regional replicas, no other path.
+- **Restored loader state defines the stream**, so do not also advance the seed
+  by checkpoint step. **Missing shards are configuration errors**, never
+  transient failures to retry around.
+- WebDataset shuffle state is expensive to serialize; align snapshot cadence
+  with durable checkpoints unless explicitly testing replay.
 
-## Dataloader State And Exact Resume
+## Checkpoints, Stage Boundaries, Final Eval
 
-- A stateful dataloader checkpoint is valid only for a compatible data recipe:
-  process topology, local batch, workers, roots, mix weights, shuffle state, and
-  seeds must agree. Remap only known same-dataset regional replicas, never
-  arbitrary GCS paths.
-- Restoring exact loader state means its saved RNG and cursor define the stream;
-  do not also advance the seed by checkpoint step.
-- Missing dataset shards are configuration errors, not transient failures to hide
-  behind retries.
-- Large WebDataset shuffle state is expensive to serialize. Keep snapshot cadence
-  aligned with durable checkpoints unless explicitly testing replay.
+**A checkpoint counts only after all four steps, in order:** every process
+writes pending dataloader state; the model/optimizer checkpoint completes under
+the execution model's correct Orbax strategy; dataloader sidecars are finalized
+under it; only then is the completion marker logged. **Discovery keys on that
+final marker** — never a `Saving` line, never a sidecar path.
 
-## Checkpoint Transaction
+- **JIT/HSDP saves global sharded arrays with all processes participating**;
+  never `process_allgather` the whole TrainState. The pmap path holds a
+  replicated local replica and may use a process-0 host write — re-check that
+  split if a checkout changes execution model.
+- **Same-stage resume restores full state; a stage boundary may be a params-only
+  restore** with a fresh optimizer, possibly needing shape adaptation before
+  sharding. Assert the restored global step, never infer it, and **always save
+  the stage-boundary checkpoint** even when the cadence does not divide it.
+- **A final-eval-only run restores model state without building or restoring the
+  training dataloader**, which is what allows a different compatible topology.
+  Its checkpoint is still Type 1: copy it into the chosen region or pin the job,
+  never read a remote bucket. Roots, mirror validation, exact-count rules, and
+  scoring for the Stage-3 final eval (DocVQA, RealWorldQA) are in `vlm_data.md`.
 
-For a training checkpoint to count as complete:
+## Telemetry Goes To The Checkpoint Bucket, Never `workdir`
 
-1. Each process writes pending dataloader state.
-2. The model/optimizer checkpoint completes using the execution model's correct
-   Orbax strategy.
-3. Dataloader sidecars are finalized under that checkpoint.
-4. Only then is the completion marker logged.
+**`$CHECKPOINT_BUCKET` is the only location outliving the task**; `workdir` on a
+TPU worker is the task's own tmpfs. Scalars survive through the datatable, but
+images written via `Writer.write_images` did not survive at all on Borg in
+either `jax_llava` or `PaliGemma-baseline`: all three sinks are dead there —
+google3 `wandb` mock, tensorboard refused at construction, PNG fallback under
+`workdir`.
 
-Checkpoint discovery must use the final model completion marker, never a
-`Saving` line or sidecar path. In JIT/HSDP code, save global sharded arrays with
-all processes participating; do not `process_allgather` the whole TrainState.
-In the current pmap path, a replicated local replica can use a process-0 host
-write. Re-evaluate this distinction if a checkout changes execution model.
-
-## Curriculum And Final Evaluation
-
-- A same-stage resume restores full state. A stage-boundary transition can be a
-  params-only restore with a fresh optimizer and may require shape adaptation
-  before sharding. Assert the restored global step rather than inferring it.
-- Always save the stage-boundary checkpoint, even when checkpoint cadence does
-  not divide the stage length.
-- A final-eval-only run should restore model state without constructing or
-  restoring the original training dataloader. This allows evaluation on a
-  different compatible topology.
-- For Kaiming Group Code (Type 1), an eval checkpoint still has to be local to
-  the selected region. Copy it deliberately or pin the job; do not rely on a
-  remote bucket read.
-- Benchmark data roots, scoring protocols, and mirror validation for the
-  default Stage-3 final eval (DocVQA, RealWorldQA) are in `vlm_data.md`.
-
-## Before Changing Training Code
-
-Identify which concern is actually in scope: model semantics, mesh/batch
-semantics, data stream, checkpoint transaction, curriculum transition, or final
-evaluation. Test that concern with the smallest local or remote smoke that can
-exercise the real path, then inspect logs and produced state rather than treating
-successful process exit as sufficient proof.
-
-## Images Must Go To The Checkpoint Bucket
-
-Scalars reach the datatable and survive; **images did not survive at all** on
-Borg, in both `jax_llava` and `PaliGemma-baseline`. All three sinks in
-`Writer.write_images` are dead there: `wandb` resolves to a mock inside
-google3, tensorboard is refused in `__init__`, and the PNG fallback wrote under
-`workdir` -- which on a TPU worker is `/tmp/eqr_log/...`, the task's own tmpfs.
-Four call sites were affected, including both eval visualisations, which are
-the ones a human most needs to see.
-
-**Write telemetry to `$CHECKPOINT_BUCKET`, never to `workdir`.** The bucket is
-the only location that outlives the task. Two things that path needs: create
-the directory first (CNS refuses a write into a nonexistent parent, unlike an
-object store), and swallow failures -- telemetry must not kill a run.
-
-Confirming it works is one command: `fileutil ls $CHECKPOINT_BUCKET/` should
-show a `viz/` beside `checkpoints/` and `logs/`.
-
-### Where To Actually Look At Them
-
-- `http://flatboard/xid/<XID>` renders **scalars only**. Images live at
-  `http://datatable/xid/<XID>/viz` in a browser.
-- The datatable CLI is refused from a workstation by LOAS, so for an agent the
-  workable route is the PNGs themselves: `fileutil cp` them out of
-  `$CHECKPOINT_BUCKET/viz/`. For a page, `gbrowser screenshot --corp <url>`.
-- If image writes are ever sent to a datatable, give them their **own table**,
-  not the scalar one -- large arrays interleaved into the scalar table make
-  flatboard unusably slow even when nobody opens them.
-
+- **Create the destination directory first** (CNS refuses a write into a missing
+  parent) and **swallow telemetry failures**, which must never kill a run.
+  Verify: `fileutil ls $CHECKPOINT_BUCKET/` shows `viz/` beside `checkpoints/`
+  and `logs/`.
+- **`http://flatboard/xid/<XID>` renders scalars only**; images are at
+  `http://datatable/xid/<XID>/viz`. LOAS refuses the datatable CLI from a
+  workstation, so read the PNGs — `fileutil cp` from `$CHECKPOINT_BUCKET/viz/`,
+  or `gbrowser screenshot --corp <url>` for a page. **Images sent to a datatable
+  need their own table**: large arrays interleaved into the scalar table make
+  flatboard unusably slow even when nobody opens it.

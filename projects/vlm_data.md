@@ -1,127 +1,87 @@
 # VLM Data And Benchmarks
 
-Read this when uploading datasets, writing or auditing dataset adapters,
-handling bbox/point coordinates, or preparing evaluation benchmark mirrors for
-the VLM checkouts. Training, checkpointing, and resume semantics are in
-`vlm_training.md`.
+Read this when uploading a dataset, auditing an adapter, handling bbox/point
+coordinates, or preparing a benchmark mirror for the VLM checkouts. Training and
+resume are `vlm_training.md`; reporting a score is `vlm_metrics.md`.
 
 ## Replica Validation Rule
 
-A regional data replica is usable only when every physical root has a verified
-`_SUCCESS` marker and the summary/size/checksum metadata validates. Visible
-shards without the final commit marker are partial data. Loaders resolve and
-cache the shard glob at startup, so shards appearing later will not repair an
-already-started partial stream. Never infer completeness from listing output,
-and never record mirror status in memory — re-verify live before scheduling.
+**A regional replica is usable only when every physical root carries a verified
+`_SUCCESS` marker and its summary/size/checksum metadata validates.** Shards
+visible without that marker are partial data, and shards arriving later cannot
+repair a started stream — loaders resolve and cache the shard glob at startup.
+**Never infer completeness from a listing, and never trust a remembered mirror
+status**: re-verify live before scheduling.
 
 ## Dataset Uploads
 
-- Use `beifen/upload_data.py` with `beifen/data_upload/datasets.json`; old
-  per-dataset launchers are legacy and retained adapters refuse direct use.
-- Queue through the job scheduler. Only worker 0 writes, and all payload/cache/tmp
-  paths stay under `/dev/shm`.
-- For Kaiming Group Code (Type 1), derive locality from VM metadata and restrict
-  GCS payload access to the matching `gs://kmh-gcp-${ZONE_SHORT}/data`; fail
-  closed otherwise.
-- Payload objects are deterministic tar shards, never scattered records. Only
-  bounded manifest/summary/progress/commit/checksum/`_SUCCESS` metadata is loose.
+**Upload with `beifen/upload_data.py` plus `beifen/data_upload/datasets.json`,
+queued through the job scheduler**; the old per-dataset launchers are legacy and
+their adapters refuse direct use. Only worker 0 writes, every payload/cache/tmp
+path stays under `/dev/shm`, and **Type 1 locality is enforced here too**:
+derive it from VM metadata, restrict payload access to the matching
+`gs://kmh-gcp-${ZONE_SHORT}/data`, fail closed otherwise. **Payloads are
+deterministic tar shards, never scattered records** — only bounded
+manifest/summary/progress/commit/checksum/`_SUCCESS` metadata is loose.
 
-## Bounding-Box Coordinate Invariant
+## Coordinates
 
-- The only internal bbox representation is absolute `xyxy` on the decoded
-  original-image canvas, accompanied by an explicit `(width, height)`. Dataset
-  adapters must declare their source schema; never infer `xyxy` versus `xywh`
-  from numeric values.
-- Convert from the canonical box to Qwen `0..1023` coordinates or PaliGemma
-  `<loc>` tokens only after applying the exact image resize/letterbox transform.
-  Drawing a raster box and emitting text coordinates must consume the same
-  canonical box.
-- Audited source schemas: Visual Genome regions are absolute `xywh`; legacy
-  `jxu124/refcoco` WDS stored untagged absolute `xyxy` despite an uploader
-  comment claiming `xywh`; the existing RefCOCOg train WDS and local eval JSON
-  store explicit/legacy COCO `xywh`; the Hugging Face RefCOCOg source itself is
-  `xyxy`. Several LLaVA-OV1.5 configs additionally carry normalized textual
-  bboxes; keep their conversion hard-whitelisted so unrelated math arrays and
-  graph-coordinate pairs are untouched, and rewrite questions and answers plus
-  any coordinate-format prose together. Audit evidence and per-config lists are
-  in `archive/audits/`.
-- Every stateful and legacy loader path must forward `dataset.coord_format` to
-  preprocessing. A config that says `qwen` is not sufficient if an iterator
-  silently calls the default `loc_tokens` path.
-- Current true multi-box exposure is sparse and mostly comes from Sherlock/SVIT.
-  For CVBench-like colored multi-region training, the most practical external
-  sources are ViP-LLaVA Visual7W/VG Relations followed by SPHINX-V MDVP VCR and
-  relationship subsets. Check the non-commercial/research licenses before
-  mirroring them.
+**Internally a box is absolute `xyxy` on the decoded original-image canvas with
+an explicit `(width, height)`, and a point is `(x, y)` on its declared source
+canvas.** Convert to Qwen `0..1023` or PaliGemma `<loc>` only after the exact
+resize/letterbox transform, then clamp; a drawn raster box and the emitted text
+coordinates must consume the same canonical box. PaliGemma loc text serializes
+`y` then `x`, Qwen serializes `(x,y)`.
 
-## Point Coordinate Invariant
+| Rule | Why |
+|---|---|
+| **Declare each source schema; never infer one from observed values** | PixMo validation found points far outside `[0,1]`, and slightly negative |
+| **Every stateful and legacy loader path must forward `dataset.coord_format`** | A config saying `qwen` is not enough if some iterator silently takes the default `loc_tokens` path |
+| **Keep the LLaVA-OV1.5 normalized-textual-bbox conversion hard-whitelisted** | So unrelated math arrays and graph-coordinate pairs stay untouched; rewrite questions, answers, and coordinate-format prose together |
+| **Dense PixMo answers can exceed the Stage-2 `max_txt_length=256` budget** | Generic truncation then cuts a multi-point answer between its y and x tokens. Still open: dense targets need a pair-aware truncation, sampling, or drop policy |
+| Multi-box exposure is sparse, mostly Sherlock/SVIT | For CVBench-like colored multi-region training the practical sources are ViP-LLaVA Visual7W/VG Relations, then SPHINX-V MDVP VCR and relationship subsets — **check their non-commercial/research licenses before mirroring** |
 
-- PixMo-Points stores each point as `(x, y)` on an explicit `0..100` source
-  canvas (`point_scale=100` in the official Molmo adapter), not as `[0,1]`
-  fractions or decoded-image pixels. Convert percentages to the decoded-image
-  canvas first, apply the exact stretch/letterbox transform, then quantize to
-  `0..1023`. Keep the source scale explicit and clamp after conversion; shard
-  validation confirmed values far outside `[0,1]` and slightly negative
-  outliers, so never infer the schema from observed values.
-- PaliGemma loc text serializes each point as `y` token then `x` token; Qwen
-  text serializes `(x,y)`.
-- LLaVA-OV1.5 has no structured point field in the mirrored record schema, and a
-  broad same-region config scan found no Molmo-style `<point>`/`<points>`
-  targets; Visual7W "pointing" examples are textual multiple choice. Treat this
-  as broad config coverage, not an exhaustive scan of all source rows.
-- Dense PixMo annotations can exceed the Stage-2 `max_txt_length=256` budget, so
-  generic text truncation can cut a multi-point answer between its y/x tokens.
-  This is separate from coordinate normalization and still needs a pair-aware
-  truncation, sampling, or drop policy before treating all dense targets as
-  well-formed.
+Audited schemas; per-config lists and evidence in `../archive/audits/`:
+
+| Source | Schema |
+|---|---|
+| Visual Genome regions | absolute `xywh` |
+| legacy `jxu124/refcoco` WDS | untagged absolute `xyxy`, despite an uploader comment claiming `xywh` |
+| existing RefCOCOg train WDS, local eval JSON | explicit/legacy COCO `xywh` |
+| Hugging Face RefCOCOg source | `xyxy` |
+| PixMo-Points | `(x, y)` on an explicit `0..100` canvas (`point_scale=100` in the official Molmo adapter) — not `[0,1]` fractions, not decoded pixels. Convert those percentages to the decoded-image canvas *first*, keeping the source scale explicit, before the stretch/letterbox transform |
+| LLaVA-OV1.5 | no structured point field; a broad same-region config scan found no Molmo-style `<point>`/`<points>` target (its Visual7W "pointing" items are textual multiple choice). Broad config coverage, not an exhaustive row scan |
+| Open Images detection, relationships | `openimages_grounding_v1`, canonical decoded-image absolute `xyxy` |
 
 ## Open Images Grounding Data
 
-- Physical train roots in each region are
-  `gs://kmh-gcp-${ZONE_SHORT}/data/openimages-detection/image_records_wds/train`
-  and
-  `gs://kmh-gcp-${ZONE_SHORT}/data/openimages-relationships/image_records_wds/train`.
-  Both use schema `openimages_grounding_v1` and canonical decoded-image absolute
-  `xyxy` boxes. Before training in any region, apply the replica validation rule
-  to **both** roots; expected global counts and the relationship filter
-  signature are in `archive/audits/`.
-- `beifen-Paligemma` aliases `openimages-detection[-train]` to the detection
-  root. Stage 1 expands every box into a short class-word/phrase target, includes
-  an available official attribute with 50% probability, and conditions on either
-  location tokens or a raster box with equal probability. Drawn boxes sample
-  red, green, or blue uniformly.
-- Aliases `openimages-relationship(s)[-train]` map to the relationships root.
-  Stage 3 consumes uploader-produced structured subject-predicate-object data;
-  it never parses free-form answers to recover roles. Both boxes use the same
-  representation per example--coordinates or drawn boxes, 50/50--and the two
-  drawn colors are distinct RGB choices without a fixed subject color. Prompt
-  sampling uses short variants 80% of the time and explicit role-anchor variants
-  20% of the time. The target is a mechanically rendered single SPO sentence.
+**Both physical train roots are per-region, and each must pass replica
+validation before training in that region:**
+`gs://kmh-gcp-${ZONE_SHORT}/data/openimages-{detection,relationships}/image_records_wds/train`.
+Expected global counts and the relationship filter signature are in
+`../archive/audits/`. `beifen-Paligemma` aliases them, both optionally `-train`:
+
+| Alias | Stage semantics |
+|---|---|
+| `openimages-detection` | Stage 1 expands every box into a short class-word/phrase target, adds an available official attribute with 50% probability, and conditions on location tokens or a raster box with equal probability. Drawn boxes sample red, green, or blue uniformly. |
+| `openimages-relationship(s)` | Stage 3 consumes uploader-produced structured subject-predicate-object data and **never parses free-form answers to recover roles**. Both boxes share one representation per example (coordinates or drawn, 50/50); the two drawn colors are distinct RGB choices with no fixed subject color. Prompts are short variants 80% of the time, explicit role-anchor variants 20%. The target is a mechanically rendered single SPO sentence. |
 
 ## Evaluation Benchmarks
 
-- Zone-local eval roots are
-  `gs://kmh-gcp-${ZONE}/data/vlm_eval_benchmarks/{docvqa,realworldqa}`. Apply
-  the replica validation rule to each root before scheduling final eval. Mirror
-  only DocVQA validation and RealWorldQA test; DocVQA test has hidden gold and
-  its official download terms still apply despite any convenience mirror's
-  dataset-card license.
-- The default Stage-3 final eval in both `beifen-Paligemma` and
-  `PaliGemma-baseline` includes the original 2020 single-page DocVQA validation
-  split (`5,349` questions) and xAI RealWorldQA test (`765` questions). Both
-  evaluators require the exact expected number of unique and scored predictions;
-  partial WDS roots are errors. The baseline JIT/HSDP path keeps these WDS
-  loaders at `num_workers=0` so its synchronized exact-count schedule remains
-  globally deterministic.
-- DocVQA uses the question plus `Answer the question using a single word or
-  phrase.`, generates at most 32 tokens, and reports case-insensitive ANLS as
-  the primary 0--100 metric (best accepted answer, character Levenshtein,
-  strict normalized-distance cutoff `<0.5`). Exact accuracy is secondary.
-  Current Stage-3 training already includes DocVQA-train through the OV1.5
-  grouped stream, so report this as standard in-domain supervised evaluation,
-  not zero-shot document generalization.
-- RealWorldQA questions already contain their output-format instruction. Feed
-  that text unchanged; do not add another prompt. Score A--D questions with the
-  public lmms-eval ranked choice extractor and other answers with lowercased,
-  trimmed exact match (prediction may drop one terminal period). The official
-  images are CC BY-ND 4.0; preserve image bytes and xAI attribution.
+**Zone-local eval roots are
+`gs://kmh-gcp-${ZONE}/data/vlm_eval_benchmarks/{docvqa,realworldqa}`; apply the
+replica validation rule to each before scheduling a final eval**, and mirror
+only the two splits below — DocVQA test has hidden gold, and its official
+download terms bind whatever a convenience mirror's dataset card says. Together
+they are the default Stage-3 final eval in `beifen-Paligemma` and
+`PaliGemma-baseline`; **both evaluators demand the exact expected count of
+unique scored predictions**, so a partial WDS root is an error rather than a
+smaller eval, and the baseline JIT/HSDP path pins these loaders to
+`num_workers=0` to keep its exact-count schedule globally deterministic.
+
+| | DocVQA | RealWorldQA |
+|---|---|---|
+| Split, size | 2020 single-page validation, `5,349` questions | xAI test, `765` questions |
+| Prompt | question + `Answer the question using a single word or phrase.`, max 32 generated tokens | already carries its output-format instruction: feed unchanged, never prepend another |
+| Score | case-insensitive ANLS 0--100 (best accepted answer, character Levenshtein, strict normalized-distance cutoff `<0.5`); exact accuracy secondary | A--D through the public lmms-eval ranked choice extractor, otherwise lowercased trimmed exact match (the prediction may drop one terminal period) |
+| Licence | official download terms | images CC BY-ND 4.0: preserve bytes and xAI attribution |
