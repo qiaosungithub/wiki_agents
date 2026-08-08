@@ -82,3 +82,33 @@ semantics, data stream, checkpoint transaction, curriculum transition, or final
 evaluation. Test that concern with the smallest local or remote smoke that can
 exercise the real path, then inspect logs and produced state rather than treating
 successful process exit as sufficient proof.
+
+## Images Must Go To The Checkpoint Bucket
+
+Scalars reach the datatable and survive; **images did not survive at all** on
+Borg, in both `jax_llava` and `PaliGemma-baseline`. All three sinks in
+`Writer.write_images` are dead there: `wandb` resolves to a mock inside
+google3, tensorboard is refused in `__init__`, and the PNG fallback wrote under
+`workdir` -- which on a TPU worker is `/tmp/eqr_log/...`, the task's own tmpfs.
+Four call sites were affected, including both eval visualisations, which are
+the ones a human most needs to see.
+
+**Write telemetry to `$CHECKPOINT_BUCKET`, never to `workdir`.** The bucket is
+the only location that outlives the task. Two things that path needs: create
+the directory first (CNS refuses a write into a nonexistent parent, unlike an
+object store), and swallow failures -- telemetry must not kill a run.
+
+Confirming it works is one command: `fileutil ls $CHECKPOINT_BUCKET/` should
+show a `viz/` beside `checkpoints/` and `logs/`.
+
+### Where To Actually Look At Them
+
+- `http://flatboard/xid/<XID>` renders **scalars only**. Images live at
+  `http://datatable/xid/<XID>/viz` in a browser.
+- The datatable CLI is refused from a workstation by LOAS, so for an agent the
+  workable route is the PNGs themselves: `fileutil cp` them out of
+  `$CHECKPOINT_BUCKET/viz/`. For a page, `gbrowser screenshot --corp <url>`.
+- If image writes are ever sent to a datatable, give them their **own table**,
+  not the scalar one -- large arrays interleaved into the scalar table make
+  flatboard unusably slow even when nobody opens them.
+
