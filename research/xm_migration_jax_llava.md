@@ -1,806 +1,221 @@
 # Migrating `jax_llava` To XM/Borg Infra
 
-Living progress file for the "run jax_llava on xm infra and reproduce the
-result" program. Owns the plan, the decisions, and what is verified vs assumed.
-Delete or fold into a project guide once the migration lands.
+Living progress file for "run `jax_llava` on xm infra and reproduce the result".
+Owns the current state, the decisions that still bind, and the traps worth
+carrying forward. Fold into `projects/vlm_training.md` once the migration lands.
 
-## Goal
+Branch: `sqa.late_fusion_xm` (`jax_llava`), `data_upload_xm`
+(`paligemma-data-upload`).
 
-Run `jax_llava` (the simpler prototype: stage-1 cc12m pretrain, then stage-2 SFT)
-on Borg via `tpu queue` / `xm_launcher.py`, reading data from CNS, and reproduce
-the existing kmh-infra result. Code changes go on a branch named
-`<current-branch>_xm`.
+## Where This Stands
 
-## Verified Facts
-
-**Data reachability.** `gs://kmh-gcp-*` is unreachable from Borg. In google3,
-`gs://` is rewritten to `/bigstore/` (`third_party/py/etils/epath/gpath.py:33`)
-and the job's principal is `<user>@prod.google.com`; the kmh buckets 403 even
-for `<user>@google.com` from the workstation. The existing pipeline additionally
-opens shards through `fsspec`/`gcsfs` (`input_pipeline.py: register_gcsfs`),
-which needs ADC and public egress -- neither exists on a Borg task. So the data
-must be re-materialized on CNS; there is no credential trick that avoids it.
-
-**The workstation has no kmh NFS mount.** `/kmh-nfs-ssd-us-mount` does not
-exist here. Anything the old scripts read from NFS is not reachable from this
-machine, and the upload toolkit's TPU-VM/SSH launch model does not apply.
-
-**cc12m IS reproducible -- via the recap dataset's own declared source.** An
-earlier reading of `data_upload/datasets.json` (`enabled: false`,
-`safety: external-provenance`) led me to call cc12m unreproducible. That is
-wrong, and the correction matters. The catalog's `metadata_source`,
-`CaptionEmporium/conceptual-captions-cc12m-llavanext`, states in its own README:
-"In the interest of reproducibility, an archive found here on Huggingface was
-used (cc12m-wds)." So the chain closes:
-
-- images = HF `pixparse/cc12m-wds`, a STATIC archive (996 tars, 504.1 GiB) with
-  no link rot;
-- captions = the recap `train.jsonl.gz`, joined on the 9-digit `key`, field
-  `caption_llava` (long) / `caption_llava_short`.
-
-What is unreproducible is only kmh's own copy, because kmh took that metadata
-and RE-CRAWLED the URLs with img2dataset -- which is why it lands at 62-66%
-success. Recorded kmh sanity numbers: 10,968,539 metadata rows, 1097 shards,
-6.80M-7.25M successes per region, 1545-1656 GiB per region, ~227-234 KiB/sample,
-original resolution (`resize_mode=no`).
-
-**A pre-crawled WDS mirror exists.** HF `pixparse/cc12m-wds`: 996 tars,
-504.1 GiB total, plus `_info.json`. Downloading this is a file transfer, not a
-crawl, so it is reproducible and ~3x smaller than a regional kmh copy. It is a
-DIFFERENT dataset from the kmh one (different crawl, and its captions are the
-ORIGINAL CC12M alt-text, not the LLaVA-NeXT recaption) -- see Open Questions.
-
-## Cross-Region Cost: The Rule And The Trap
-
-The operator pays for egress out of his own external GCP project, so a
-cross-region read is a real bill, not a slowdown. Treat every copy as
-same-region-or-abort.
-
-**Do not trust an LLM's claim that internal `/bigstore` reads are exempt from
-egress billing.** That claim was offered and is plausible, but a wrong negative
-here costs money. Design as if egress is always billed, and make it $0 by
-staying physically in one region.
-
-**metro <-> GCP region, verified from google3 source** (six independent files
-agree; this is NOT an LLM answer):
-`//depot/google3/production/borg/cloud_iam/slicer_regions/slicer_metros.pi`
-lines 9 and 12, plus
-`//depot/google3/net/fabric/monitoring/cloud_sdn_management/ai/artifacts/location_mapping.csv`.
-
-| metro | GCP region |
+| Piece | State |
 |---|---|
-| `cbf` | `us-central1` (Iowa) |
-| `cmh` | `us-east5` (Columbus) |
-| `tul` | **none** -- Tulsa maps to no GCP region |
+| Data (cc12m + eval bundle + stage-2 SFT mix) | **Done**, three metros, verified per object |
+| Stage 1 (cc12m pretrain, 2180 steps) | **Reproduced**, matches the WandB reference within ±0.009 |
+| Stage 2 (SFT, 75000 steps) | **Trains**, but the full-coverage smoke still fails on eval/IO paths |
+| Long stage-2 run | Not launched |
 
-**The trap: the launcher's default is cross-region.** `xm_launcher.py` defaults
-to `/cns/yutulpz-d/...`, which is metro `tul`. Copying a kmh bucket there is a
-cross-region transfer of the whole payload. Every job in this program must pin
-its cell and its CNS root explicitly; never accept the default.
+**Stage-1 end state: loss ~1.444, acc ~0.630**, at 1.37 steps/s on v7-32
+(2180 steps in ~26 min). Reference: WandB
+`sqa24-massachusetts-institute-of-technology/jax-llava`, run `gtqntg5g`
+(`worthy-bird-70`); compared at every logged step, ours marginally ahead,
+consistent with the reference having read a 150-shard slice where we read all
+1097.
 
-**The constraint is three-way**, because the training job re-reads the data:
-bucket region == CNS cell metro == Borg cell metro. Satisfying only two of the
-three still pays.
+**Stage-2 measured cost: 0.357 steps/s on v7-32** at bs256 / image 336 /
+`max_txt_len` 512 -- 4x slower than stage 1 (longer sequences, 12-source mix,
+periodic sampling). 75000 steps ~= **57 h of compute**, plus queue time.
+Checkpointing is 11% of that (236 s every 800 steps); widening the interval
+buys 4 h and costs 3200 steps per preemption, which is the wrong trade on a
+preemptible slice.
 
-Verified cells, `mach_locality -b -k metro <cell>` plus a live `fileutil ls`:
+**v7-32 is the ceiling.** Borg supports v7 slices of 4/8/16/32 only; preflight
+rejects v7-64.
 
-| GCP region | metro | CNS cell | Borg cell |
+## The Data: Final Layout
+
+One crawl (`gs://kmh-gcp-us-east5`), fanned out to three metros. Every replica
+byte-identical, verified **per object** (name + size) against the `go-d` copy,
+each carrying a `_SUCCESS` this program wrote.
+
+| | cc12m | eval bundle | stage-2 SFT mix |
 |---|---|---|---|
-| `us-east5` | `cmh` | `/cns/go-d/` (OK) | `go` |
-| `us-central1` | `cbf` | `/cns/nz-d/`, `/cns/yucbfpv-d/` (OK) | `yucbfpv`, `yucbfrl` |
+| objects | 1097 tars + 1097 sidecars | 1309 | 12 sources |
+| payload | 1.5044 TiB | 170 GiB | -- |
 
-**Stage 1 only consumes a fraction of cc12m.** `remote_run_config.yml`:
-`stage1_steps: 2180`, `batch_size: 256` -> 558,080 samples, about 8% of one
-region's ~6.8M successes. At ~230 KiB/sample that is roughly 125 GiB of shards
-actually touched, not 1.5 TiB.
+Roots: `/cns/is-d/home/qiaos/data` (cbf), `/cns/nm-d/…` (tul),
+`/cns/li-d/…` (lpp); `/cns/go-d/…` (cmh) is the source copy.
+`fileutil quota qiaos <cell>` answers *no such user* in every one, i.e. every
+byte is charged to `deepmind-resources-colossus`, not to the 500 GiB personal
+ceiling.
 
-**CNS is the only durable store the job can use, and it has no floor.** Prior
-audit (`archive/audits/20260801-cns-yutulpz-spindle-starvation.md`): no spindle
-commitment, so a neighbouring workload on the same D cell dropped throughput
-9.63 -> 0.04 MiB/s for 12+ h. Cost is per-operation, so large sequential WDS
-shard reads are the favourable access pattern (the >64 KiB bucket degraded 3x
-where the 0-16 KiB bucket degraded 14x), but there is no guarantee.
+Known imperfection, deliberately not fixed: 27 files under 1 MiB landed at
+`rs=9.4` instead of `r=3.2` in the replicas (the size-based encoding split was
+never ported to the CNS-to-CNS copier). 1.4 MiB total; not a partial copy.
 
-**Compute/storage co-location is enforced by the launcher.** `xm_launcher.py`
-maps cell -> same-metro CNS bucket (`_CELL_BUCKETS`); a mismatch previously
-caused a pruner kill (XID 275990419). Data placement must follow the same map.
+### The Cost Rule That Produced That Shape
 
-## Decisions Taken
-
-**Region: `us-east5` / metro `cmh` / Borg cell `go` / CNS `/cns/go-d/home/qiaos/`.**
-Chosen on live market data (`tpu route`), for emptiness at equal price.
-
-The PROD tier is useless here: every PROD candidate is YELLOW and sits in the
-wrong metro (`yuphxrp`=phx, `yulhrp`=**lhr, Europe**, `rs`=dfw, `ej`=**grq,
-Europe**). The BATCH tier, by contrast, lands exactly in the two metros we need:
-
-| cell | metro | region | type | obtainable | price | status |
-|---|---|---|---|---|---|---|
-| `go` | cmh | us-east5 | v5p-64 | **2181 (34x)** | 0.00 | GREEN |
-| `yucbfpv` | cbf | us-central1 | v6p-16 | 291 (18x) | 0.00 | GREEN |
-| `yucbfrl` | cbf | us-central1 | v6e-32 | 372 (11x) | 0.16 | GREEN |
-
-`go` has ~7.5x the obtainable chips at the same zero price; the only priced
-option is on the cbf side. **v7 has no BATCH supply** -- asking for `v7-16`
-makes the router fall back to v5p/v6p, and the only v7 offer (`yuphxrp`, phx) is
-both YELLOW and in the wrong metro. us-central1/cbf is kept as the fallback
-region, fully mapped above.
-
-Caveat to carry into the training phase: BATCH is reclaimed first, so a long run
-needs an explicit scheduling policy (`jobs.md`). Fine for restartable copy jobs.
-
-**Scope: stage 1 only** (cc12m pretrain), one region, one copy. Stage 2 deferred.
-
-**Payload: the first 150 tar shards, 199.2 GiB** (measured with
-`gcloud storage ls -l`, avg 1.33 GiB/shard), not the full 1545.1 GiB. Stage 1 is
-`stage1_steps: 2180` x `batch_size: 256` = 558,080 samples, roughly 8% of a
-region's ~6.8M successes (~125 GiB), so 150 shards leaves headroom and still
-copies 8x less than the full set -- which matters because hop 2 replicates it
-again.
-
-**Two-hop copy, so the paid boundary stays inside one region:**
-
-| hop | path | crosses the user's GCP egress? | cost |
-|---|---|---|---|
-| 1 | `gs://kmh-gcp-us-east5` -> `/cns/go-d` (both metro `cmh`) | same-region only | $0 |
-| 2 | `/cns/go-d` -> `/cns/yuphxrp-d` | no -- pure internal network | $0 |
-
-Hop 1 MUST be initiated from a task in metro `cmh`. Letting a job in the
-destination metro pull directly from the bucket is exactly the cross-region read
-that bills.
-
-**Hop-2 destination: `/cns/yuphxrp-d/home/qiaos/` (metro `phx`, us-west8).**
-
-> **Superseded on the v7 claim.** "`phx` is the only place v7 exists" was an
-> artefact of reading the market table's *sample* cells instead of the full
-> cache: v7 is in 17 cells across 12 metros, and `phx` is one of the four with
-> **no** team storage quota. If this hop is redone, pick a metro that has both
-> -- see `v7_storage_placement.md`. The cost reasoning below still holds.
-
-Full v6p/v7 market scan:
-
-| type | tier | cell | metro | region | obtainable | price |
-|---|---|---|---|---|---|---|
-| v7-16 | PROD | `yuphxrp` | phx | us-west8 | quota 384, headroom **0** | 0.00 |
-| v6p-16/64/256 | PROD | `yulhrp` | lhr | **europe-west2** | 0 | 49.92 |
-| v6p-256 | BATCH | `yuchspe` | chs | us-east1 | 953 (3x) | 0.00 |
-| v6e-32/128 | BATCH | `yucbfrl` | cbf | us-central1 | 2173 (67x) | 0.15 |
-
-Two caveats the table hides: **v6p and v7 are in different metros**, so one data
-replica cannot serve both -- PROD v6p is only in Europe, and a third replica in
-`chs` would be needed for the free BATCH v6p-256. And **v7 headroom is currently
-0**, so the data can be staged there before the chips are actually obtainable.
-`/cns/yuphxrp-d` verified reachable.
-
-The scan above lists one cell per accelerator because it came from the market
-summary table. **That table samples; it does not enumerate.** Read
-`~/.tpu_quota_cache_dir/market.json` for the full cell list before concluding
-anything about where an accelerator does or does not exist.
-
-**The 500 GiB personal ceiling no longer binds: `/cns/go-d/home/qiaos` is now
-charged to `deepmind-resources-colossus`.** Membership was proven by the
-filesystem itself -- `chstat` accepts that group while rejecting `youtube-eng`
-and `search-eng` with an explicit *"qiaos is not a member of"*, so the accept is
-a real permission check, not a silent no-op. The whole home directory was set
-recursively and new subdirectories and files inherit it, verified by `stat`; the
-copy and training code needs no change. Group headroom in the cells that matter:
-`go-d` 20.74 / 26.15 PiB used, `nz-d` 8.00 / 14.06 PiB, `yutulpz-d` 724 GiB /
-100 TiB; `yucbfpv-d` has no record. A 199 GiB payload at 3x replication is
-~0.01% of the `go-d` pool, so default `r=3.2` is now acceptable and Reed-Solomon
-is an optimisation rather than a prerequisite.
-
-**Per-user quota records were absent in `go-d` and `nz-d`** while writes still
-succeeded. That is moot for capacity now, but it still signals no spindle
-commitment, so watch throughput during the first real copy rather than assuming
-it scales.
-
-**Branches:** `sqa.late_fusion_xm` in `jax_llava`, `data_upload_xm` in
-`paligemma-data-upload`.
-
-## Open Questions
-
-1. Does the PROD identity (`qiaos@prod.google.com`) actually reach the kmh
-   bucket through `/bigstore`? Both grants are in place and the workstation
-   (corp identity) can now list `gs://kmh-gcp-us-east5/data/cc12m/`, but the
-   prod identity cannot be tested from here -- only from a Borg job.
-2. If A works, is a same-metro `/bigstore` -> CNS copy actually free? Assume not;
-   the same-region design makes it moot.
-3. Do `jax_llava`'s deps (`torch`, `torchdata==0.8.0`, `webdataset`, `fsspec`,
-   `transformers`, `pycocotools`) exist as google3 targets under the mandatory
-   `PACKAGE_MODE=bazel`? If the loader must be rewritten, that dwarfs the data
-   problem and reorders the whole plan.
-
-## Plan
-
-Ordered so the cheapest thing that can fail, fails first.
-
-1. **Probe (IN FLIGHT, session `breezy-cat`).** CPU-only Borg job pinned to cell
-   `go`, reading exactly one few-KB object
-   (`gs://kmh-gcp-us-east5/data/cc12m/00000_stats.json`) through `/bigstore`, and
-   writing a marker to `/cns/go-d/home/qiaos/probe/`. Carries a fail-closed guard
-   that aborts before any read unless the task's metro is `cmh`. Answers Open
-   Question 1 for a few KB. No `.tar` may be read.
-2. **Dependency feasibility** (Open Question 3), in parallel: can the binary be
-   built with Bazel and survive `--help` on Borg?
-3. Decide A (kmh -> CNS same-metro copy) vs B (rebuild from HF pixparse + recap
-   join). A is ~1.5 TiB over internal network; B is 504 GiB over public egress
-   but needs no kmh access. Probe result decides.
-4. Copy ONE shard, measure, verify, then scale out. Copy jobs are Borg jobs, not
-   workstation jobs -- local bandwidth is the wrong resource.
-5. Port the loader: replace the `gcsfs` `gopen_schemes["gs"]` hook with a
-   CNS/`epath` opener; keep the fail-closed locality guard but teach it cells.
-6. Swap WandB for the internal metric writer (`research/result_logging.md`).
-7. Stage-1 smoke on a small slice, then the real run.
-
-## Operational Rules For This Program
-
-- **Never accept the launcher's default CNS root.** Pin `--cell` and the CNS
-  path together, every time.
-- **The metro guard belongs in the code, fail-closed**, not in a human's memory:
-  assert the task's metro matches the bucket's region before the first read.
-- Read metadata (list, stat) freely; those are metadata ops. Bytes are the thing
-  that costs.
-- `/tmp` on a Borg task is a RAM disk sized by `--tmp_ram_fs_gib` (default 16
-  GiB in this launcher), and every task stages its own copy. WDS is a sequential
-  streaming read and needs no full-shard spool; only tokenizer/CLIP weights need
-  fast local access, and those are better baked into the Bazel package.
-
-## Full cc12m: Three Regional Copies, No Cross-Region Byte
-
-**Decision: mirror into `cbf`, `tul`, `lpp`** -- the metros picked in
-`v7_storage_placement.md`. Stage 1 is being reproduced for real, so the 150-shard
-slice is retired in favour of the full 1097 shards.
-
-**The bucket owner's regions line up with two of the three metros, so hop 1 is
-free by construction and not by care:**
-
-| metro | GCP region | source bucket (same region) | CNS destination |
-|---|---|---|---|
-| `cbf` | us-central1 | `gs://kmh-gcp-us-central1` | `/cns/is-d/home/qiaos/data/cc12m` |
-| `tul` | us-central2 | `gs://kmh-gcp-us-central2` | `/cns/nm-d/home/qiaos/data/cc12m` |
-| `lpp` | europe-north1 | **none** | `/cns/li-d/...` -- must come CNS->CNS |
-
-Each regional bucket holds 1097 tars + 1097 `_stats.json`; payload measured at
-1.52 TiB (us-central1) and 1.62 TiB (us-central2). At `rs=9.4` (1.4505x) that
-is ~2.2 and ~2.4 TiB of disk against 12.0 and 11.8 PiB of free group quota --
-not a constraint. `lpp` has no regional bucket, so it is fed by a CNS-to-CNS
-hop, which is internal network and free.
-
-**The copier is `cc12m_full`, a destination-table version of `cc12m_copy`.**
-The original hard-coded bucket, region, cell, metro and path as constants,
-reasoning that a flag is a way to read the wrong thing. That reasoning survives:
-the new `--dest` selects a whole ROW, and a row fixes all five together, so no
-combination of flags can express a cross-region pair. `--num_shards` below the
-full count marks the copy partial and suppresses `_SUCCESS`, so a smoke can
-never be mistaken for a complete dataset.
-
-All three reject branches were exercised locally before submitting: wrong cell
-(`BORG_CELL=yuskedq` against `dest=cbf`), unreadable cell (no `BORG_CELL`), and
-a faked bucket location (`--test_force_bucket_region=us-east5`) -- each aborts
-before any open. The guard also proved it reads the LIVE bucket location rather
-than trusting the name.
-
-**`tpu queue` needed a passthrough channel.** Its parser is an allowlist, which
-is correct -- a mistyped flag should be refused, not silently dropped on Borg --
-but it cannot know every packaged binary's flags. Added `--app.<flag>=<v>`,
-which forwards one named flag verbatim; a typo in a *wrapper* flag still errors.
-
-**Preflight cannot verdict a CPU-only job** (`Unknown accelerator arch 'cpu'`),
-so copy jobs submit with `--skip-preflight`. That is not a warning being
-ignored: preflight only models TPU allocations.
-
-### Result: cbf and tul hold the full dataset (2026-08-05)
-
-| | `is-d` (cbf) | `nm-d` (tul) |
-|---|---|---|
-| objects | **2194 / 2194 verified**, `objects_bad: []` | **2194 / 2194 verified**, `objects_bad: []` |
-| payload | 1.52 TiB | 1.62 TiB |
-| encoding | `rs=9.4` on every sampled shard | `rs=9.4` |
-| charged to | `deepmind-resources-colossus` | same |
-| throughput | 81 MiB/s (5.4 h) | 129 MiB/s (3.7 h) |
-| `_SUCCESS` | written, carries the guard's proof | written |
-
-**The personal quota was never touched**: `fileutil quota qiaos is-d` answers
-*no such user in cell*, which is the strongest possible confirmation that every
-byte landed on the group. Each `_SUCCESS` records `bucket_region_proved_by:
-live bigstore metadata`, so same-region is evidenced per run rather than
-assumed.
-
-`lpp` completed too (XID 277230370): **2196/2196 verified, `objects_bad: []`,
-1.52 TiB, `rs=9.4`, group-charged, `bigstore_paths_used: 0`**, with each end's
-metro proved by a live lookup. Its `_SUCCESS` reports only 65 s of wall time
-because the task had restarted: `{copied: 8, skipped_already_correct: 2188}`.
-That is the `.inflight`-plus-size-check design working as intended -- a resumed
-run re-verifies every object and re-copies only what is missing -- but it does
-mean **wall time in a resumed run is not the transfer cost**; read
-`bytes_copied_this_run` instead.
-
-All three replicas now agree at 1097 tars each (1.52 / 1.62 / 1.52 TiB; tul
-differs because its bucket holds a different crawl). `fileutil quota qiaos
-<cell>` answers *no such user* in all three, so no byte landed on a personal
-ceiling anywhere.
-
-That hop is
-**deliberately cross-metro** and safe on cost alone: both ends are internal
-Colossus, so nothing is billed however far apart they are. The predecessor
-asserted `src.metro == dst.metro == <one literal>`, which is right for a copy
-meant to stay local and wrong here -- it would reject the intended transfer. The
-guard was therefore restated rather than relaxed: **each end is pinned to its
-own named metro**, both queried live, and the compute cell must sit with the
-SOURCE because that is the leg read shard by shard. Both reject branches were
-exercised locally before submitting.
-
-### Two Traps The Smoke Caught, Which A Direct Full Run Would Not Have
-
-Worth keeping because both were invisible until a real file existed:
-
-- **A copy does not inherit the destination directory's encoding.** The
-  3-shard smoke landed `r=3.2` (3.02x) despite the directory being set up for
-  it, because `gfile.Copy` needs the encoding named in its own options. On
-  1097 shards that is 4.6 TiB instead of 2.2 TiB. The fix names it per file and
-  then **reads it back**, since a cell may silently downgrade.
-- **A directory created by the job does not inherit group accounting.** The
-  copier's own `MakeDirs` created `data/cc12m` fresh, so the shards were
-  charged to the 500 GiB personal ceiling and would have died about a third of
-  the way in. Setting `quota_accounting` on the *home root* recursively fixes
-  both the existing files and everything created later.
-
-The general lesson is the one already in `../storage.md`: verify the property on
-a real object, never on the request that was supposed to produce it.
-
-### Watching A Long Job: Match The Status Column, And Self-Test The Matcher
-
-Two false "it finished" reports came from the watcher script, not the jobs, and
-both were avoidable:
-
-- **`tpu check` prints `XID STATUS NAME`.** A pattern like `<name>.*running`
-  can never match, so the watcher concluded "not running" on its first poll and
-  fired immediately. Match the status *before* the name.
-- **The status vocabulary is wider than the common cases**: `SUBMITTED` and
-  `unknown` both appear before `running`, so a matcher listing only
-  `running|starting|PENDING` reports a just-launched job as finished.
-
-The habit that catches both: **run the matcher against real current output and
-assert the count you expect before trusting the watcher.** One command, and it
-converts "the script looks right" into "the script agrees with reality".
-Copying a watcher for a second job also needs its labels and paths updated, or
-it reports the previous job's cells under the new job's name.
-
-## Correction: The Regional Buckets Are Different Datasets, Not Replicas
-
-**The three `kmh-gcp-us-*` buckets hold three independent crawls.** The same
-shard index differs in size across them -- `00000.tar` is 943,411,200 bytes in
-`us-east5`, 1,584,363,520 in `us-central1` and 1,682,739,200 in `us-central2`.
-This follows directly from a fact already recorded above (kmh RE-CRAWLED the
-metadata with img2dataset, landing at 62-66% success), but it was not carried
-through when choosing where to copy from.
-
-Sourcing each metro from its own same-region bucket therefore produced **three
-different datasets**, which makes a loss curve in one metro incomparable to
-another -- the exact property a reproduction must not lose. Verify sameness by
-comparing a shard's size across buckets before assuming a bucket is a replica.
-
-**The corrected shape is the two-hop one, and it was the instruction all
-along:**
+The operator pays egress out of his own external GCP project, so a
+cross-region read is a real bill. Design as if egress is always billed and make
+it $0 by staying in one region.
 
 ```
-hop 1   gs://kmh-gcp-us-east5  ->  /cns/go-d      same region (cmh), $0
-hop 2   /cns/go-d              ->  is-d/nm-d/li-d CNS->CNS, internal, $0
+hop 1   gs://kmh-gcp-us-east5  ->  /cns/go-d       same region (cmh), $0
+hop 2   /cns/go-d              ->  is-d/nm-d/li-d  CNS->CNS, internal, $0
 ```
 
-Hop 2 is deliberately cross-metro and costs nothing because both ends are
-internal Colossus -- proven on the earlier lpp leg, whose `_SUCCESS` recorded
-`bigstore_paths_used: 0`. **A same-region bucket read is not the only free
-option, and picking a bucket per metro to chase "same region" trades dataset
-identity for a saving that CNS-to-CNS already provides.**
-
-The wrong replicas were deleted from `is-d`, `nm-d` and `li-d`, and all three
-are being refilled from the single `go-d` copy of the us-east5 crawl. Each
-fan-out binary pins compute to `go` (with the SOURCE, the leg read shard by
-shard), asserts `src.metro == cmh` and `dst.metro == <its own literal>`, both
-queried live; all three reject branches were exercised before submitting.
-
-### Done: One Crawl, Three Metros, Byte-Identical (2026-08-06)
-
-`gs://kmh-gcp-us-east5` -> `/cns/go-d` (same region, $0) -> `is-d` / `nm-d` /
-`li-d` (CNS-to-CNS, internal, $0). Every replica now carries the SAME crawl.
-
-| | go-d (cmh) | is-d (cbf) | nm-d (tul) | li-d (lpp) |
-|---|---|---|---|---|
-| tars | 1097 | 1097 | 1097 | 1097 |
-| payload | 1.5044 TiB | 1.5044 | 1.5044 | 1.5044 |
-| verified | 2194/2194 | 2196/2196 | 2196/2196 | 2196/2196 |
-| `bigstore_paths_used` | n/a | 0 | 0 | 0 |
-| throughput | 120 MiB/s | 878 | 647 | 303 |
-
-**Identity was checked per object, not per total.** All 2194 names were
-compared against `go-d` with their sizes: zero missing, zero extra, zero size
-mismatch, on all three. Equal totals would not have proved this -- three
-different crawls can sum to similar numbers.
-
-All three are `rs=9.4`, charged to `deepmind-resources-colossus`, and
-`fileutil quota qiaos <cell>` still answers *no such user* in every one.
-
-Note the throughput spread on an identical payload out of one source: 878 / 647
-/ 303 MiB/s to cbf / tul / lpp. Distance shows up, but even the European leg
-beat the 120 MiB/s bigstore read -- **CNS-to-CNS is the fast leg as well as the
-free one**, which is the second reason to prefer one crawl fanned out over
-per-metro bucket reads.
-
-### A Cached Job Status Stalled The Pipeline For An Hour
-
-The `go-d` copy finished at 22:51 and wrote its `_SUCCESS`; `tpu check` still
-reported `SUBMITTED` an hour later, while Borg had the work unit as
-`BORG_STATE_SUCCESS`. An orchestrator waiting for the status to change waited
-for nothing.
-
-**For a copy, completion is a property of the filesystem, not of the scheduler.**
-Gate on the artifacts -- expected object count plus the completion marker --
-and the answer is both correct and available the instant it becomes true. Job
-status is a convenience view with a cache behind it; `deep_probe` on the XID
-gives the authoritative state when it is genuinely needed.
-
-## Eval Bundle: The Same Two-Hop Shape
-
-Every dataset any `jax_llava` config enables, taken from the **same us-east5
-crawl** as cc12m and fanned out to the same three metros. The union across all
-configs is 19 eval tasks, which reduce to 13 source prefixes:
-
-`vqav2`, `mme`, `textvqa`, `pope`, `coco/train2014` (refcocog images),
-`eval/pixelbench` (this one bundle supplies `mmvp`, `vstar`, `ocrbench` and
-`countbenchqa`), plus `gqa-balanced`, `seed-bench-image`, `cambrian-cvbench`,
-`vlms-are-blind`, `docvqa`, `realworldqa` under `vlm_eval_benchmarks/`, and
-`tensorflow_datasets/imagenet2012` for `knn_full` / `knn_partial`.
-
-Sizes: ~27 GiB for the benchmarks, **143 GiB for TFDS ImageNet**, so KNN
-dominates the bundle. Total ~170 GiB, about a ninth of cc12m.
-
-Two structural differences from the cc12m copier, both of which change how
-completeness is judged:
-
-- **The bundle is a nested tree, not a flat numbered shard set.** Members are
-  discovered by walking each prefix, and an empty prefix is a hard abort --
-  otherwise a `_SUCCESS` could cover a bundle that silently omits a dataset
-  some eval config enables. Destination paths mirror the bucket layout, so a
-  config only has to swap the root.
-- **"Partial" is a cap on object count** (`--max_objects`), and any cap
-  suppresses `_SUCCESS`, same contract as `--num_shards` had.
-
-Nested output also means the parent directory of each object may not exist:
-`MakeDirs` per file, idempotent.
-
-### `gfile` Has No `ListRecursively`
-
-The first attempt used it, failed on Borg with `AttributeError`, and produced a
-work-unit status carrying no exception text at all -- a shape that reads like
-the job vanished. **Running the staged binary locally named the missing
-attribute in three seconds**, against roughly ten minutes per remote attempt.
-The recursive walk is `gfile.Walk`, with `os.walk` semantics.
-
-This is the case `../jobs.md` already describes: reproduce locally first,
-because flags parse only after every import has run. Worth re-reading before
-the next remote launch of new code -- the cost asymmetry is an order of
-magnitude even when the bug is one line.
-
-### A Suffix Partition Copied Nothing And Reported Success
-
-The eval copier inherited its execution stage from the cc12m one, which split
-the work queue two ways:
-
-```
-todo_stats = [t for t in todo if t[0].endswith('_stats.json')]
-todo_tars  = [t for t in todo if t[0].endswith('.tar')]
-```
-
-For cc12m that partition is total -- every object is one or the other. The eval
-bundle holds `.parquet`, `.json`, `_SUCCESS` and TFDS shards, so **every object
-fell into neither group**: the planner correctly listed 44 files to copy, both
-worker groups received an empty list, and the run finished quickly with nothing
-transferred. The verify step caught it (`dst=None`), but a partition that can
-drop work silently should not exist -- it is now a split on SIZE, which is
-total by construction and carries an assert that the two halves re-sum.
-
-**When adapting a copier, audit every place the old data model is assumed.**
-Filename conventions are the easiest of these to miss because they look like
-formatting, not logic.
-
-### A Workstation Cannot Test The Write Half Of A bigstore -> CNS Copy
-
-Running the staged binary locally reproduces imports, flags, planning and the
-guards -- which is how the `ListRecursively` bug and the suffix partition were
-both found in seconds. It cannot reproduce the copy itself: a corp credential
-is refused with `DestinationPermission: Wrong type CORP in restriction`, while
-the same binary on Borg runs as `<user>@prod.google.com` and is accepted.
-
-So the local run is a fast filter for everything up to the first byte, and the
-last mile still has to be proven on Borg. Read a local write failure as "cannot
-test this here", not as "the copy is broken".
-
-### Eval Bundle hop 1 Done (2026-08-06)
-
-`gs://kmh-gcp-us-east5` -> `/cns/go-d/home/qiaos/data/eval_bundle`, same
-region: **1280/1280 verified, `objects_bad: []`**, 170 GiB at 120 MiB/s in
-20.5 min. `status_counts` reads `{copied: 1109, skipped_already_correct: 171}`
--- the 171 are the survivors of the run that died on the suffix-partition bug,
-re-verified rather than re-copied.
-
-1312 objects on disk = 1310 data files + `_SUCCESS` + `manifest.jsonl`; the
-planner counts only the 1280 it was asked to place. TFDS ImageNet is 1094 of
-them, so **the object count is dominated by KNN, not by the benchmarks**.
-
-Fan-out to the three metros is the same CNS-to-CNS shape as cc12m, from the
-single `go-d` copy.
-
-### Eval Bundle Complete In All Three Metros (2026-08-06)
-
-Fan-out from the single `go-d` copy: **1282/1282 verified on each side,
-`objects_bad: []`, `bigstore_paths_used: 0`**, at 701 / 815 / (lpp) MiB/s.
-
-Identity checked per object against `go-d`, not by totals: **1309 data objects,
-zero missing, zero extra, zero size mismatch**, and all three sum to exactly
-182,554,645,814 bytes. Charged to the group; `fileutil quota qiaos <cell>`
-still answers *no such user* in all three.
-
-Both datasets are now in place in `cbf`, `tul` and `lpp`:
-
-| | objects | payload |
-|---|---|---|
-| cc12m | 1097 shards + sidecars | 1.5044 TiB |
-| eval bundle | 1309 | 170 GiB |
-
-**One imperfection, deliberately not fixed.** The size-based encoding split
-added to the bigstore copier was never ported to the CNS-to-CNS one, so the 27
-files under 1 MiB landed at `rs=9.4` in the replicas rather than `r=3.2`. They
-total 1.4 MiB of payload, so even a large padding factor is noise against PiBs
-of headroom, and the writes succeeded -- erasure coding tolerates small files
-on the CNS-to-CNS path where the bigstore path refused them. Re-copying to
-tidy the encoding would cost more than it saves; recorded so the discrepancy is
-not mistaken later for a partial copy.
-
-## Stage-1 Reproduced, And What It Took (2026-08-06)
-
-**Stage-1 matches the reference.** Pulled `worthy-bird-70`'s curve from WandB
-(`sqa24-massachusetts-institute-of-technology/jax-llava`, run `gtqntg5g`) and
-compared against our run at every logged step:
-
-| step | ref acc | ref loss | ours | delta |
-|---|---|---|---|---|
-| 100 | 0.4707 | 5.700 | 0.4649 | +0.006 |
-| 600 | 0.5923 | 1.665 | 0.6015 | -0.009 |
-| 1200 | 0.6198 | 1.498 | 0.6250 | -0.005 |
-| 1700 | 0.6274 | 1.457 | 0.6316 | -0.004 |
-| 2100 | 0.6296 | **1.444** | — | — |
-
-Within ±0.009 throughout, ours marginally ahead -- consistent with the
-reference having used the 150-shard cc12m slice where we now read all 1097.
-**Stage-1 end state: loss ~1.444, acc ~0.630.** Throughput on v7-32:
-**1.37 steps/s (351 samples/s at bs256), 2180 steps in ~26 min.**
-
-**v7-64 does not exist.** Borg supports v7 slices of 4/8/16/32 only; preflight
-rejects 64 outright. v7-32 is the ceiling.
-
-**The spreadsheet cannot answer a stage-1 question.** Its `Train acc / Train
-loss` columns hold the *stage-2* endpoint (75k steps), because a row records
-one number per stage boundary. WandB has the per-step history for both stages
-and is the right source for any mid-run comparison -- worth reaching for
-before concluding a number is unavailable.
-
-### Metrics Have To Be Written Somewhere That Outlives The Task
-
-`write_scalars` reaches only the datatable, and after a run ends that is not
-readable here: the Borg task log is GC'd within minutes, and `borg tasklog`
-from a workstation is refused by the corp credential. Both stage-1 runs
-therefore finished having left **no recoverable loss curve** -- the numbers
-above exist only because the job was polled while alive.
-
-Training scalars now also go to stdout, which is mirrored to the checkpoint
-bucket and outlives the task. For a 15-hour stage-2 that is the difference
-between having a curve to compare and having none.
-
-### Adapting A Copier: Audit Every Assumption, Not The One That Broke
-
-The stage-2 fan-out failed three times on three separate assumptions inherited
-from the cc12m copier, each invisible until it fired:
-
-- work split by filename suffix (`.tar` / `_stats.json`) -- matched nothing in
-  a mixed bundle, so both worker groups got empty lists and the run "succeeded"
-  having copied nothing;
-- root-level `manifest.jsonl` + `_SUCCESS` demanded at the source -- a
-  multi-prefix source has neither, so the planner refused a complete set;
-- the encoding canary hard-coded the manifest as its probe object.
-
-Each fix took minutes; finding them one launch at a time cost hours. **When a
-copier is adapted to a new data shape, re-read every place the old shape is
-assumed** -- filename conventions and sidecar layout are the two that read as
-formatting rather than logic.
-
-### A `_SUCCESS` You Did Not Write Proves Nothing
-
-These datasets ship their own upstream `_SUCCESS` inside each prefix, and a
-recursive walk copies it like any other file. So the marker appears at the
-destination as soon as the small files land -- long before the shards do. An
-orchestrator gating on it would have fanned out a replica that was ~4 objects
-deep in most prefixes.
-
-**Gate on object count against the source.** It is the only check that cannot
-be satisfied by the copy of a marker, and it is cheap: one recursive list per
-prefix.
-
-## Stage-2: Seven Assumptions That Only Break On Borg
-
-Stage-1 runs clean, stage-2 did not, and every failure was the same shape: code
-written for the GCP cluster, where data sits on NFS or in `gs://`, meeting Borg,
-where only CNS exists. They surfaced one launch at a time because each one hides
-the next.
-
-| # | Assumption | Symptom |
-|---|---|---|
-| 1 | region json fetched by shelling out to `gcloud` | `/bin/sh: gcloud: command not found` |
-| 2 | visual_genome present wherever the job runs | not on CNS at all |
-| 3 | `visual-genome-det` resolvable by name | still resolved to `gs://` |
-| 4 | the other eleven stage-2 sources likewise | same |
-| 5 | `_SUCCESS` sits at the dataset root | upstream marker is three levels down, beside the shards |
-| 6 | COCO vis images readable from NFS | only on the GCP cluster's mount |
-| 7 | only `gs://` paths need glob expansion | `unexpected '*' at p 6` from Colossus |
-
-### Then Three That Are About The Hardware, Not The Paths
-
-Once the data resolved, the next three failures came from the *shape of a
-v7-32* -- 8 hosts x 4 chips over a 2x4x4 torus -- and every one of them only
-runs when eval/sampling is enabled, so stage 1 never touched them:
-
-- **`global_array_to_host_local_array` requires each host's devices to form a
-  contiguous subcube.** A v7-32 does not satisfy that, and the call raises
-  rather than falling back. Both the sampler and the KNN eval used it purely to
-  get their own slice onto the CPU afterwards.
-- **`device_get` is not the replacement**: it refuses an array spanning
-  non-addressable devices. The working form is
-  `multihost_utils.process_allgather`, which the rest of the KNN eval already
-  used -- the fix was to match the file's own convention.
-- and the dtype one below.
-
-**When a helper raises on a topology, check whether the surrounding code needs
-the sharded round-trip at all.** Both sites were moving a handful of values to
-a log line; the sharded path existed to avoid copying something large, and the
-constraint it carried outlived the reason for it.
-
-Then one that is not about paths at all: **the generation KV cache was
-hard-coded `bfloat16`** while params load as float32, and gemma updates it with
-`lax.dynamic_update_slice`, which requires identical dtypes and raises rather
-than promoting. Invisible in stage 1 because generation only runs when eval or
-sampling is enabled.
-
-Two things would have collapsed this into one or two launches:
-
-- **Enumerate the whole surface before the first launch.** After #4 I started
-  resolving every dataset offline against CNS, which caught ten failures in one
-  pass. Had I written that check before the first stage-2 attempt rather than
-  after the fourth, #5 and #7 would have come with it. The check is fifteen
-  lines and runs in a minute; a remote attempt costs ten.
-- **A resume reuses the ORIGINAL run's code.** `--resume_xid` restages the
-  snapshot the first work unit was built from, so three fixes landed in git and
-  none reached the cluster -- the run failed on a bug I had already fixed. Use a
-  fresh xid plus `--load_from <checkpoint>` whenever the code has moved.
-
-The stdout metrics mirror paid for itself here: the dtype traceback, with the
-frame inside `models/llava.py`, was recoverable from the CNS log after the task
-was gone. The work-unit status carried only the exception's one-line message.
-
-## Stage-2 Is Running: Measured Cost (2026-08-07)
-
-After nine attempts the run trains: sampling produces sensible captions, the
-`[metrics]` line reaches the CNS mirror, and checkpoints land.
-
-**Throughput on v7-32: 0.357 steps/s (21.4 steps/min)** at bs256, image 336,
-`max_txt_len` 512 -- the reference recipe's stage-2 settings. That is **4x
-slower than stage-1** (1.37 steps/s), which is expected: stage 2 reads the
-12-source SFT mix with far longer sequences and runs periodic sampling.
-
-75000 steps therefore costs **~56 hours**, not the ~15 h a naive extrapolation
-from stage-1 suggested. Checkpointing is not the culprit: a save measures 236 s
-and happens every 800 steps, so it is 11% -- pure training is 0.40 steps/s.
-Quadrupling the checkpoint interval would recover only 4 h and cost 3200 steps
-of progress per preemption, which is the wrong trade on a preemptible slice.
-
-**PROD is preemptible.** The first stage-2 run was killed by slice defrag
-(Borg repacking the pod) after 220 steps. That is not a failure to debug: the
-checkpoint was intact and `--resume_xid` picked it up. On a run this long,
-resume has to be automatic -- the watcher resubmits on any non-completion exit
-and stops after a bounded number of resumes so a real crash cannot loop.
-
-### `borg ... jobs` Is Not A Command
-
-Several of my de-duplication watchers called `borg --borg=<cell> --user=<u>
-jobs` to find a work unit's Borg job, and silently found nothing -- so they
-never cancelled anything, across several launches. The usable route is at the
-XManager layer:
-
-```
-xmanager stop --experiment_id=<xid> --work_unit_id=<n> --skip_confirmation=true
-```
-
-`tpu cancel` and a bare `xmanager stop` both take the whole experiment, which
-is wrong when one duplicate work unit has to go and the other must keep running.
-
-## When The Error Names No Path, Make It Name One
-
-Three stage-2 launches died inside fsspec with `No module named 'gcsfs'` and a
-traceback containing only fsspec frames -- no dataset, no URL. I spent an hour
-reading candidate call sites (`_glob`, the glob expander, the OV1.5 group
-builder, the eval roots) and got nowhere, then briefly mis-diagnosed it as a
-dataloader-state problem.
-
-Adding four lines that raise with the offending URL turned every subsequent
-occurrence into a one-look diagnosis:
-
-```
-webdataset asked to open a gs:// URL on Borg:
-  '.../configs/llava_instruct/shard-000228.tar'
-```
-
-**When a failure says a resource is missing but not which one, the first move
-is to make it say which one.** That is cheaper than reading the code paths that
-could have produced it, and it keeps paying off -- the next launch surfaced a
-different config (`Docmatix-part-09-of-10`) and cost one minute instead of an
-hour.
-
-### Fix At The Chokepoint, Not At Each Source
-
-Those two configs were the same bug reached by different routes: OV1.5 shard
-roots are assembled across several modules and not all of them pass through
-`data_util`'s gs:// -> CNS rewrite. Patching resolution, then the glob expander,
-each fixed one route and left the others -- two launches, two more failures.
-
-The durable fix went into the **webdataset opener**, which every shard passes
-through no matter who built its path. A guard belongs where the paths converge;
-placing it upstream means finding, and remembering, every producer.
-
-## Stage-2 Is Training (2026-08-08)
-
-Running from `checkpoint_2400` after sixteen attempts. **0.357 steps/s
-sustained on v7-32**, acc 0.630 (stage-1 end) -> 0.675 at step 3600. 75000
-steps costs ~57 h of compute, plus however long it spends queued.
-
-### Two Self-Inflicted Failures Worth Not Repeating
-
-Neither was a code bug; both came from how I drove the tooling.
-
-**`tpu queue` submits twice.** Its post-submit check misreads success as
-failure and retries, and both submissions land. If both work units reach the
-training loop they write the same checkpoint path and one dies with
-`Destination .../checkpoint_2400 already exists` -- which killed two runs.
-Deduplicate within a few minutes of submitting, well before the first
-checkpoint interval. Work-unit granularity is
-`xmanager stop --experiment_id=<xid> --work_unit_id=<n>`; `tpu cancel` and a
-bare `xmanager stop` both take the whole experiment.
-
-**A resume must not carry `--load_from`.** Passing the stage-1 checkpoint on
-every restart makes each attempt begin at 2180 again, and it then collides with
-the checkpoint the previous attempt already wrote -- an unbreakable loop. Use
-`--resume_xid` and let the application's autoresume find the newest complete
-checkpoint. `jobs.md` says this; I forgot it mid-debugging. The exception is a
-code change, which needs a fresh xid *and* an explicit `--load_from`, because
-`--resume_xid` restages the original run's snapshot.
-
-### Queued Is Not Failed
-
-The alloc's v7 quota went to 752/656 -- over-subscribed by other users -- and
-work units sat PENDING for hours. A supervisor that treats "not running" as
-"dead" then resubmits, and every resubmission adds two more colliding work
-units. Classify before acting: read the work-unit state, treat
-`PENDING`/`STARTING` as healthy, and only resume when nothing is alive.
-
-Also note `tpu preflight` reports **globally obtainable** chips per cell, which
-says nothing about whether this alloc can have them. The honest answer is in
-the work unit's own scheduling message (`GQM_RESOURCE_DEFICIT_INFO`).
-
-### Verify A Watcher Against Live Output Before Trusting It
-
-Four supervisors in a row misreported, each from an unverified command:
-`borg ... jobs` (not a subcommand, so the de-dup never ran), a `tpu check`
-pattern with the columns in the wrong order, a status vocabulary missing
-`SUBMITTED`, and `blaze run --cwd=` (not a flag, so the state parse returned
-empty and a queued run was declared dead). Every one produced a plausible
-empty result rather than an error. **Run the predicate against current output
-and assert the answer you expect** before letting a watcher act on it.
-
+Hop 1 must be initiated from a task in the bucket's own metro. Hop 2 is
+deliberately cross-metro and free because both ends are internal Colossus
+(proven: `bigstore_paths_used: 0` in its `_SUCCESS`). CNS-to-CNS is also the
+FAST leg -- 878 / 647 / 303 MiB/s to cbf / tul / lpp against 120 MiB/s for the
+bigstore read.
+
+**The three `kmh-gcp-us-*` buckets are three independent crawls, not
+replicas.** `00000.tar` is 943 MB in us-east5, 1584 MB in us-central1, 1683 MB
+in us-central2 (kmh re-crawled the metadata with img2dataset, 62-66% success).
+Sourcing each metro from "its own same-region bucket" therefore produces three
+DIFFERENT datasets and makes loss curves incomparable -- the exact property a
+reproduction must not lose. Verify sameness by comparing a shard's size across
+buckets before calling a bucket a replica.
+
+metro -> GCP region, verified from google3 source (not an LLM answer):
+`cbf`=us-central1, `cmh`=us-east5, `tul`=us-central2, `lpp`=europe-north1;
+`tul` maps to no GCP region for egress purposes.
+
+**Never accept the launcher's default CNS root** (`/cns/yutulpz-d/...`). Pin
+`--cell` and the CNS path together, every time; `xm_launcher.py` maps cell ->
+same-metro bucket and a mismatch has already caused a pruner kill.
+
+## Traps Worth Carrying Forward
+
+### Copiers
+
+- **A copy does not inherit the destination directory's encoding.** Name it in
+  the copy options per file, then READ IT BACK -- a cell may silently
+  downgrade. (3-shard smoke landed `r=3.2` where `rs=9.4` was configured:
+  4.6 TiB instead of 2.2 TiB at full scale.)
+- **A directory created by the job does not inherit group accounting.** Set
+  `quota_accounting` on the home root recursively; that fixes existing files
+  and everything created later.
+- **When adapting a copier to a new data shape, re-audit every place the old
+  shape is assumed.** Three separate inherited assumptions each cost a launch:
+  work split by filename suffix (`.tar`/`_stats.json` matched nothing in a
+  mixed bundle, so both worker groups got empty lists and the run "succeeded"
+  having copied nothing), a root-level `manifest.jsonl` demanded from a
+  multi-prefix source, and an encoding canary hard-coded to the manifest.
+  A partition that can drop work silently should not exist: split on SIZE,
+  which is total by construction, and assert the halves re-sum.
+- **A `_SUCCESS` you did not write proves nothing.** These datasets ship their
+  own upstream markers inside each prefix, so a recursive copy lands the marker
+  as soon as the small files do -- long before the shards. Gate on object count
+  against the source.
+- **For a copy, completion is a property of the filesystem, not the scheduler.**
+  `tpu check` reported `SUBMITTED` for an hour after Borg had the work unit as
+  `BORG_STATE_SUCCESS`. Gate on artifacts (object count + marker).
+- `gfile` has no `ListRecursively`; the recursive walk is `gfile.Walk`, with
+  `os.walk` semantics.
+- **A workstation cannot test the write half of a bigstore -> CNS copy** (corp
+  credential: `DestinationPermission: Wrong type CORP in restriction`). It can
+  test imports, flags, planning and every guard -- which is where the two bugs
+  above were caught in seconds. Read a local write failure as "cannot test
+  here", not "the copy is broken".
+
+### Borg vs. the GCP cluster
+
+Every stage-2 failure had one shape: code written for a cluster where data sits
+on NFS or in `gs://`, meeting Borg, where only CNS exists.
+
+- `gcloud` does not exist on a task; anything shelling out to it dies.
+- Every dataset root must resolve to CNS, including sidecars
+  (`region_descriptions.json`), COCO vis images, and the eval roots.
+- Upstream `_SUCCESS` can sit three levels down, beside the shards.
+- Colossus does not glob: `unexpected '*' at p 6`. Expand shard globs
+  explicitly, on CNS as well as on `gs://`.
+- **Fix at the chokepoint, not at each source.** OV1.5 shard roots are
+  assembled across several modules; patching resolution, then the glob
+  expander, each fixed one route and left the others. The durable fix went into
+  the **webdataset opener**, where every shard converges.
+- **When the error names no path, make it name one.** Three launches died in
+  fsspec with `No module named 'gcsfs'` and only fsspec frames. Four lines that
+  raise with the offending URL turned every later occurrence into a one-look
+  diagnosis.
+- **Enumerate the whole surface offline before launching.** Resolving every
+  dataset against CNS in one pass caught ten failures at once; the check is
+  fifteen lines and runs in a minute, against ~10 min per remote attempt.
+
+### v7-32 topology
+
+A v7-32 is 8 hosts x 4 chips over a 2x4x4 torus, and each chip exposes TWO
+cores -- so `jax.device_count()` is **64**, not 32. A chip count is not a
+device count and neither is a mesh size; batch sizes must divide the real
+number.
+
+- `global_array_to_host_local_array` requires each host's devices to form a
+  contiguous subcube, which a v7-32 does not satisfy; it raises rather than
+  falling back. The working form is `multihost_utils.process_allgather`
+  (`tiled=True` for an already-sharded array). **When a helper raises on a
+  topology, ask whether the surrounding code needs the sharded round-trip at
+  all** -- both call sites were moving a handful of values to a log line.
+- The generation KV cache must take its dtype from the embeddings; hard-coded
+  `bfloat16` against float32 params raises inside
+  `lax.dynamic_update_slice`. Invisible in stage 1 -- generation only runs when
+  eval or sampling is on.
+
+### Running the jobs
+
+- **`tpu queue` submits twice.** Its post-submit check misreads success and
+  retries; both submissions land, and two work units writing the same
+  checkpoint path kill each other with `Destination … already exists`.
+  De-duplicate within minutes, well before the first checkpoint interval.
+  Work-unit granularity is
+  `xmanager stop --experiment_id=<xid> --work_unit_id=<n>`; `tpu cancel` and a
+  bare `xmanager stop` both take the whole experiment. `borg … jobs` is NOT a
+  subcommand and silently finds nothing.
+- **A resume must not carry `--load_from`.** Use `--resume_xid` and let
+  autoresume find the newest complete checkpoint. Exception: a CODE CHANGE
+  needs a fresh xid *and* an explicit `--load_from`, because `--resume_xid`
+  restages the ORIGINAL run's snapshot -- three fixes once landed in git and
+  none reached the cluster.
+- **Queued is not failed.** Over-subscribed v7 quota leaves work units PENDING
+  for hours; a supervisor that treats "not running" as "dead" resubmits and
+  every resubmission adds colliding work units. `tpu preflight` reports
+  GLOBALLY obtainable chips, which says nothing about this alloc; the honest
+  answer is the work unit's own `GQM_RESOURCE_DEFICIT_INFO`.
+- **PROD is preemptible** (slice defrag killed a run at step 220). Resume must
+  be automatic, and bounded, so a real crash cannot loop.
+- **Verify a watcher against live output before trusting it.** Four supervisors
+  in a row misreported, each from an unverified command: `borg … jobs`, a
+  `tpu check` pattern with the columns in the wrong order (it prints
+  `XID STATUS NAME`), a status vocabulary missing `SUBMITTED`/`unknown`, and
+  `blaze run --cwd=`. Every one produced a plausible EMPTY result rather than
+  an error. Run the predicate against current output and assert the answer you
+  expect.
+- Preflight cannot verdict a CPU-only job (`Unknown accelerator arch 'cpu'`);
+  such jobs submit with `--skip-preflight`.
+- `tpu queue`'s parser is an allowlist; `--app.<flag>=<v>` forwards one named
+  flag verbatim to the packaged binary.
+
+### Metrics have to outlive the task
+
+`write_scalars` reaches only the datatable, and after a run ends the Borg task
+log is GC'd within minutes while `borg tasklog` is refused by a corp
+credential. Two stage-1 runs therefore left **no recoverable loss curve**.
+Training scalars now also go to stdout, mirrored to the checkpoint bucket --
+which is how the KV-cache traceback was recovered after its task was gone.
+
+The results spreadsheet cannot answer a stage-1 question: its
+`Train acc / Train loss` columns hold the *stage-2* endpoint, because a row
+records one number per stage boundary. WandB has per-step history for both.
+
+## Open Items
+
+1. **The full smoke (`g3_full_smoke`) is the gate for the 57-hour run.** It is
+   12 steps (10 stage-1 + 2 stage-2) with sampling, image logging, online eval
+   and final eval all on -- deliberately the parts that only break hours in.
+2. Stage-2's `final_eval_tasks` includes `mmbench` (fetched over HTTPS from
+   `opencompass.openxlab.space`) and `knn_full` (TFDS ImageNet under
+   `_KNN_TFDS_DATA_DIRS`, all four entries `gs://`). Neither is reachable from
+   a Borg task; the smoke does not cover them.
+3. Whether `tpu queue`'s double-submit or the PENDING/preemption cycle needs an
+   explicit supervisor for a 57-hour run.
