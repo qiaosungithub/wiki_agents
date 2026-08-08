@@ -603,17 +603,49 @@ of the time.
 
 ## Under `dataset.closeloop`, The Headline Scores ONE Decision Point
 
-A close-loop puzzle is an EPISODE, flattened into rows by
-`dataset/closeloop_dataset.py` so one row is one (puzzle, timestep) decision.
-Training draws that timestep uniformly over the episode's decision points
-(~18 at `n_execute: 8`); the TEST split fixes it, because an eval has to score
-the same rows every run. So **the reported `acc` describes 1/18 of the training
-distribution**, and the default choice is the easiest slice of it: at the first
-decision the player is still on S and the phase rotation `(phase - t) % P` is
-the IDENTITY, so the observation is bit-identical to the stored board, while
-every later frame is rotated.
+A close-loop puzzle is an EPISODE. **Since the v2 rewrite (`close-loop` branch,
+`1d76d36`..`572106d`) the default `dataset.closeloop_mode: persistent` gives one
+ROW one whole episode**, and the ACT latent `z` walks its decision points
+KEEPING its value across each world timestep — it is reset only when the episode
+is exhausted. Training therefore covers every decision point of every episode it
+touches, in order. The old flatten-to-independent-rows behaviour, in which every
+timestep started from a fresh random `z`, survives only as the controlled
+ablation arm `closeloop_mode: flat`.
 
-Two rules follow, and the first one has already been violated:
+**The TEST split is FLAT in both modes** — `eval_fn`, `_pad_batch` and the
+rollout all take 2-D rows — and it fixes its timestep, because an eval has to
+score the same rows every run. So **the reported `acc` still describes ONE
+decision point per episode**, and the default choice is the easiest one: at the
+first decision the player is still on S and the phase rotation `(phase - t) % P`
+is the IDENTITY, so the observation is bit-identical to the stored board, while
+every later frame is rotated. Under `flat` that one point is also 1/18 of the
+training distribution; under `persistent` training sees all ~18 and the eval
+scores one, which is a different mismatch but a mismatch either way.
+
+**An optimizer step now advances a row by one ACT step, not by one decision.**
+That is the headline cost of v2 and runs must be sized from it: an episode
+occupies `n_decisions x halt_max_steps` steps — measured over the 1000 usable
+rows of the staged P=2 split, 104 at the shortest route, **144.50 at the mean**
+(`n_decisions` 13 / 18.06 / 36 at `n_execute: 8`) and 288 at the longest. Against
+open-loop D=16's 16 steps per puzzle that is ~9x fewer puzzles per step.
+`dataset.closeloop_refresh_every` (default 16) reuses one device batch for K
+steps to amortise the loader; config load REFUSES `K >= min_decisions x D` (104
+at `n_execute 8, halt_max_steps 8`), because above it one row slot is handed two
+different episodes and the symptom is silent.
+
+Two consequences worth knowing before reading any close-loop number:
+
+- **`arch.train_halt_head` changes meaning here** and defaults OFF under
+  close-loop (it is True open-loop). The halt head now decides when a TIMESTEP is
+  settled, not when a puzzle is answered. Config load prints which way it
+  resolved; an explicit setting in the yaml is honoured.
+- **`configs/local_debug_closeloop_config.yml` needs `--timeout 5400`.**
+  `scripts/local_debug.sh` defaults to 300 s and the template needs ~30 min,
+  nearly all of it the rollout eval (~18 sequential forward passes per episode,
+  at two eval points, for online and EMA weights).
+
+Two rules follow about that single scored decision point, and the first one has
+already been violated:
 
 - **`acc ** d` is NOT an estimate of episode success.** It assumes every
   decision point is as hard as the one measured, and the others have not been
