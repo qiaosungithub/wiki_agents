@@ -327,8 +327,15 @@ no real external tracker unless current code proves one was created.
   Checkpoints go to `$CHECKPOINT_BUCKET`, never `workdir`;
   `main.py::_apply_borg_autoresume` rediscovers the newest complete checkpoint
   at startup. The env-var contract is owned by `../jobs.md`.
-- Runs reaching a conclusion go to the `EqR-reproduction` tab; see
-  `../research/result_logging.md`.
+- Runs reaching a conclusion go to the spreadsheet; see
+  `../research/result_logging.md` for which tab and how to place the row.
+- **Maze runs use `v7-32`.** The 16-chip half of that buys half the compute for
+  the same wall clock, and the family's published rows are all v7-32, so a
+  v7-16 row is not comparable to them. A recursive arch makes this expensive to
+  get wrong: one ACT step is `H_cycles * (L_cycles + 1) * L_layers` transformer
+  layers -- 84 at the 3/6/4 default -- and training unrolls the full
+  `halt_max_steps`, so a 30x30 maze example costs 1344 layer-applications and a
+  100k-step leg runs ~8 hours at v7-16's measured 3.53 steps/s.
 
 ## Reporting Its Metrics
 

@@ -9,7 +9,19 @@ never scrape the URL. See the `gsheets` skill.
 | Project | Spreadsheet | Tab |
 |---|---|---|
 | VLM (PaliGemma / JAX LLaVA) | `1FlcygQbGBTqHLJeiKdwxS0nP41SPMJrtX-kCJq8d7SQ` | the cleaned PaliGemma/JAX LLaVA tab |
-| `EqR` / `EqR-jax` | `17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0` | `EqR-reproduction` |
+| `EqR` / `EqR-jax` | `17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0` | `EqR-reproduction` (the reproduction ladder), then one tab per new line of work |
+
+**A NEW LINE OF WORK GETS A NEW TAB.** An existing tab is a ladder of variants
+against one baseline, and a reader navigates it by adjacency; appending a
+different corpus or a different question to the bottom breaks that even when
+every cell is right. Copy the header row so the columns keep their meaning, and
+name the tab for the work (`EqR-settingA-periodic`), not for a date. Rows that
+vary an EXISTING baseline still belong beside it — the split is per line of
+work, not per run.
+
+**Fill the chart column.** `http://flatboard/xid/<xid>` for anything that
+reached the metric sink; a row with an xm link and no chart makes every reader
+reconstruct the same URL by hand.
 
 **Resolve a tab by title, never by gid.** Both workbooks contain a tab with the
 same gid holding different projects, plus dated backup tabs of each other —
