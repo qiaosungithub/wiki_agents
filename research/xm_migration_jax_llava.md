@@ -755,3 +755,52 @@ The durable fix went into the **webdataset opener**, which every shard passes
 through no matter who built its path. A guard belongs where the paths converge;
 placing it upstream means finding, and remembering, every producer.
 
+## Stage-2 Is Training (2026-08-08)
+
+Running from `checkpoint_2400` after sixteen attempts. **0.357 steps/s
+sustained on v7-32**, acc 0.630 (stage-1 end) -> 0.675 at step 3600. 75000
+steps costs ~57 h of compute, plus however long it spends queued.
+
+### Two Self-Inflicted Failures Worth Not Repeating
+
+Neither was a code bug; both came from how I drove the tooling.
+
+**`tpu queue` submits twice.** Its post-submit check misreads success as
+failure and retries, and both submissions land. If both work units reach the
+training loop they write the same checkpoint path and one dies with
+`Destination .../checkpoint_2400 already exists` -- which killed two runs.
+Deduplicate within a few minutes of submitting, well before the first
+checkpoint interval. Work-unit granularity is
+`xmanager stop --experiment_id=<xid> --work_unit_id=<n>`; `tpu cancel` and a
+bare `xmanager stop` both take the whole experiment.
+
+**A resume must not carry `--load_from`.** Passing the stage-1 checkpoint on
+every restart makes each attempt begin at 2180 again, and it then collides with
+the checkpoint the previous attempt already wrote -- an unbreakable loop. Use
+`--resume_xid` and let the application's autoresume find the newest complete
+checkpoint. `jobs.md` says this; I forgot it mid-debugging. The exception is a
+code change, which needs a fresh xid *and* an explicit `--load_from`, because
+`--resume_xid` restages the original run's snapshot.
+
+### Queued Is Not Failed
+
+The alloc's v7 quota went to 752/656 -- over-subscribed by other users -- and
+work units sat PENDING for hours. A supervisor that treats "not running" as
+"dead" then resubmits, and every resubmission adds two more colliding work
+units. Classify before acting: read the work-unit state, treat
+`PENDING`/`STARTING` as healthy, and only resume when nothing is alive.
+
+Also note `tpu preflight` reports **globally obtainable** chips per cell, which
+says nothing about whether this alloc can have them. The honest answer is in
+the work unit's own scheduling message (`GQM_RESOURCE_DEFICIT_INFO`).
+
+### Verify A Watcher Against Live Output Before Trusting It
+
+Four supervisors in a row misreported, each from an unverified command:
+`borg ... jobs` (not a subcommand, so the de-dup never ran), a `tpu check`
+pattern with the columns in the wrong order, a status vocabulary missing
+`SUBMITTED`, and `blaze run --cwd=` (not a flag, so the state parse returned
+empty and a queued run was declared dead). Every one produced a plausible
+empty result rather than an error. **Run the predicate against current output
+and assert the answer you expect** before letting a watcher act on it.
+
