@@ -642,7 +642,16 @@ Two consequences worth knowing before reading any close-loop number:
 - **`configs/local_debug_closeloop_config.yml` needs `--timeout 5400`.**
   `scripts/local_debug.sh` defaults to 300 s and the template needs ~30 min,
   nearly all of it the rollout eval (~18 sequential forward passes per episode,
-  at two eval points, for online and EMA weights).
+  at two eval points, for online and EMA weights). The rollout is slow, not
+  broken: it completes with scoring ON at 5400 s. If the claim under test is
+  only "the pipeline runs", `evaluation.closeloop_scoring: false` finishes in
+  ~7 min; use scoring ON for any number you intend to quote.
+- **`state_token_acc` has a do-nothing floor of ~0.998 on the P=2 split**, so it
+  is not a headline number there. `arch.state_head` predicts the frame `k =
+  n_execute = 8` ticks ahead, and a P=2 rotation by 8 ticks is the IDENTITY —
+  measured, only 2 cells of 900 differ per row (k=1 or k=3 differ in ~6). A
+  model that predicts "no change" scores ~0.998. Score changed cells only, or
+  pick a `k` that is not a multiple of `P`, or measure on P=3.
 
 Two rules follow about that single scored decision point, and the first one has
 already been violated:
