@@ -442,6 +442,31 @@ specifics that keep biting.
   against the run's own logged curve after ANY metric fix, and expect peaks from
   before this change to be unrecoverable.
 
+  *`auto` IS SPELLED AT D16, so changing the DEPTH silently disables it.* It
+  resolves against `D16/ema/{walk_acc,solution_acc,acc}` — the depth is part of
+  every key, not just the metric name — so a run whose `arch.halt_max_steps` is
+  not 16 reports `D8/...` or `D32/...` and matches nothing. Retention then turns
+  itself off for the whole run behind one warning at the first eval, and the
+  peak is deleted by the ordinary ladder. Two independent changes reach this,
+  and a run making both is the likely case: a non-16 depth, and a regime whose
+  headline metric is refused (close-loop turns `solution_acc` AND `walk_acc`
+  off, leaving only `acc`). **Set `training.checkpoint_best_metric` explicitly
+  whenever the depth is not 16**, and read the first eval's warning rather than
+  trusting the default. A CPU smoke reproduces it in 30 seconds if the smoke
+  config carries the run's real `halt_max_steps` and `online_eval` — which is
+  the argument for a smoke template that runs the launched graph rather than a
+  convenient small one.
+
+  *Never point an eval at a LADDER checkpoint of a job that is still running.*
+  It is a race against that job's own `checkpoint_keep_last`, and the eval
+  always loses: packaging and scheduling take minutes, and two more checkpoint
+  intervals in that window delete the step the eval named. It fails as
+  `FileNotFoundError` on a path that existed when it was typed, which reads like
+  a typo rather than a race. The durable targets are the ones retention exempts
+  — a milestone (`checkpoint_milestone_every`) or a `checkpoint_best_*`, both
+  outside the pruned `step_<N>` set. A finished run is safe, but the habit is
+  worth keeping since the same command is usually reused against a live one.
+
   *Never sweep a name you do not recognise.* `checkpoint_best_<n>` — the
   single-metric name — is still on CNS and is some finished runs' ONLY surviving
   peak, so both the job and `tpu gc` match both shapes and neither ever deletes
@@ -575,6 +600,56 @@ of the time.
 - A test-only split still needs a `train/` directory: `just_evaluate` builds a
   train dataloader purely to read `vocab_size`/`seq_len` and never iterates it.
   One puzzle is enough, and keeps the split unusable for training.
+
+## Under `dataset.closeloop`, The Headline Scores ONE Decision Point
+
+A close-loop puzzle is an EPISODE, flattened into rows by
+`dataset/closeloop_dataset.py` so one row is one (puzzle, timestep) decision.
+Training draws that timestep uniformly over the episode's decision points
+(~18 at `n_execute: 8`); the TEST split fixes it, because an eval has to score
+the same rows every run. So **the reported `acc` describes 1/18 of the training
+distribution**, and the default choice is the easiest slice of it: at the first
+decision the player is still on S and the phase rotation `(phase - t) % P` is
+the IDENTITY, so the observation is bit-identical to the stored board, while
+every later frame is rotated.
+
+Two rules follow, and the first one has already been violated:
+
+- **`acc ** d` is NOT an estimate of episode success.** It assumes every
+  decision point is as hard as the one measured, and the others have not been
+  measured. Use `dataset.test_decision_index` to measure them — an INDEX into
+  the episode's own decision points (negative indexes from the end), not a
+  world time, because episodes differ in length (d 100..286 on the P=2 split)
+  and a fixed tick is a different fraction of the route on every row. It clamps
+  rather than dropping short episodes, so every stratum scores one population.
+- **Index `-1` is a structurally different frame, not merely a later one.** The
+  route runs out, so the ground truth paints a PARTIAL segment — measured 412
+  painted cells over 200 rows against 1600 at index 0. Report it as its own
+  category.
+
+**A saturated `acc` is the expected outcome here, not a strong result.** The
+first close-loop run reached 1.0000 at step 10000 of 120000 and a stratified
+sweep found 1.0000 at every decision point, so the per-decision task carries no
+signal for this arch and 110k steps polished a perfect number. The information
+is in the ROLLOUT (`evaluators/closeloop_eval.py`), where the model's own
+errors take it off the GT trajectory and into frames no training row contained;
+every frame in the periodic eval sits ON that trajectory. Budget the next run
+against the rollout metric, not against `acc`.
+
+**And `solution_acc` / `walk_acc` are both refused under close-loop**, by
+`eval_fn.maze_scoring`, for one reason that covers both output formats: a
+segment stops `n_predict` moves along and never reaches G, so "do the emitted
+cells/moves form a route to G" is false on the CORPUS'S OWN LABEL (measured
+64/64 GEOMETRY_VIOLATION). Reporting it would print a hard 0.0 for a whole run
+while `acc` climbed. `acc` and `token_acc` are the columns until the rollout
+metric lands; say so in the config header so the missing column is not read as
+a failure.
+
+**`token_acc` is not comparable across output formats.** A grid head's is over
+900 board cells of which ~884 are a copy of the observation; an AR head's is
+over `n_predict + 1` action tokens, every one a real prediction. Two runs of
+the same task can differ 53x in the denominator. `acc` ("was the whole segment
+right") is the comparable column.
 
 ## Eval Protocol: Report B=1 First
 
