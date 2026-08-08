@@ -9,15 +9,23 @@ never scrape the URL. See the `gsheets` skill.
 | Project | Spreadsheet | Tab |
 |---|---|---|
 | VLM (PaliGemma / JAX LLaVA) | `1FlcygQbGBTqHLJeiKdwxS0nP41SPMJrtX-kCJq8d7SQ` | the cleaned PaliGemma/JAX LLaVA tab |
-| `EqR` / `EqR-jax` | `17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0` | `EqR-reproduction` (the reproduction ladder), then one tab per new line of work |
+| `EqR` / `EqR-jax` | `17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0` | **`EqR-refactored`** — every new run. `EqR-reproduction` is the OLD tab, read-only history |
 
-**A NEW LINE OF WORK GETS A NEW TAB.** An existing tab is a ladder of variants
-against one baseline, and a reader navigates it by adjacency; appending a
-different corpus or a different question to the bottom breaks that even when
-every cell is right. Copy the header row so the columns keep their meaning, and
-name the tab for the work (`EqR-settingA-periodic`), not for a date. Rows that
-vary an EXISTING baseline still belong beside it — the split is per line of
-work, not per run.
+**New EqR runs go to `EqR-refactored`, never to `EqR-reproduction`.** The latter
+predates the refactor and is kept for history; a result appended there is filed
+under a build whose metrics have different names. Do not create a per-topic tab
+either — a new line of work opens a titled BLOCK at the bottom of
+`EqR-refactored`, the way every family already there does.
+
+**The two tabs disagree on columns I and J, in the direction that hurts.**
+`EqR-refactored` is `I = final train/token_acc`, `J = final train/acc`
+(whole-board exact); `EqR-reproduction` is `I = accuracy`, `J = exact_accuracy`
+— i.e. the per-token and whole-board numbers TRADE PLACES between the two. The
+refactored build also renamed the metrics themselves: `acc` is now whole-board
+exact and `token_acc` is per-token. Copying a row from one tab to the other
+without re-deriving the column map silently swaps a 99.2 with a 34.8. It also
+carries two columns the old tab lacks (S `final train/total_loss`, T `in-train
+eval: acc / token-acc @ step`).
 
 **Fill the chart column.** `http://flatboard/xid/<xid>` for anything that
 reached the metric sink; a row with an xm link and no chart makes every reader

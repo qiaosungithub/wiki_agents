@@ -327,8 +327,10 @@ no real external tracker unless current code proves one was created.
   Checkpoints go to `$CHECKPOINT_BUCKET`, never `workdir`;
   `main.py::_apply_borg_autoresume` rediscovers the newest complete checkpoint
   at startup. The env-var contract is owned by `../jobs.md`.
-- Runs reaching a conclusion go to the spreadsheet; see
-  `../research/result_logging.md` for which tab and how to place the row.
+- Runs reaching a conclusion go to the **`EqR-refactored`** tab — NOT
+  `EqR-reproduction`, which is the pre-refactor tab and is history now. The two
+  disagree on which column holds per-token versus whole-board accuracy, so read
+  `../research/result_logging.md` before writing a row.
 - **Maze runs use `v7-32`.** The 16-chip half of that buys half the compute for
   the same wall clock, and the family's published rows are all v7-32, so a
   v7-16 row is not comparable to them. A recursive arch makes this expensive to
@@ -712,8 +714,10 @@ answers a different question.
 Solution). Both arrive from the same periodic eval, so the protocol is the same
 and only the column name changes.
 
-The spreadsheet's `EqR-reproduction` tab is laid out this way: `Acc B=1 D=16`, `Acc B=1 D=64`, `Acc-any-correct (B=1)`, then a
-free-text `additional results` column for anything breadth-derived.
+The spreadsheet's `EqR-refactored` tab is laid out this way: `Acc B=1 D=16`, `Acc B=1 D=64`, `Acc-any-correct (B=1)`, then a
+free-text `additional results` column for anything breadth-derived. (The
+retired `EqR-reproduction` tab shares those four but differs later; see
+`../research/result_logging.md`.)
 
 ### A breadth eval can silently deliver less breadth than you asked for
 
