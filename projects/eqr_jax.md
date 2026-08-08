@@ -442,20 +442,20 @@ specifics that keep biting.
   against the run's own logged curve after ANY metric fix, and expect peaks from
   before this change to be unrecoverable.
 
-  *`auto` IS SPELLED AT D16, so changing the DEPTH silently disables it.* It
-  resolves against `D16/ema/{walk_acc,solution_acc,acc}` — the depth is part of
-  every key, not just the metric name — so a run whose `arch.halt_max_steps` is
-  not 16 reports `D8/...` or `D32/...` and matches nothing. Retention then turns
-  itself off for the whole run behind one warning at the first eval, and the
-  peak is deleted by the ordinary ladder. Two independent changes reach this,
-  and a run making both is the likely case: a non-16 depth, and a regime whose
-  headline metric is refused (close-loop turns `solution_acc` AND `walk_acc`
-  off, leaving only `acc`). **Set `training.checkpoint_best_metric` explicitly
-  whenever the depth is not 16**, and read the first eval's warning rather than
-  trusting the default. A CPU smoke reproduces it in 30 seconds if the smoke
-  config carries the run's real `halt_max_steps` and `online_eval` — which is
-  the argument for a smoke template that runs the launched graph rather than a
-  convenient small one.
+  *`auto` resolves by metric NAME, at the run's own baseline point.*
+  `_BEST_METRIC_PREFERENCE` holds bare names
+  (`closeloop/episode_success`, `walk_acc`, `solution_acc`, `acc`) and
+  resolution matches `<point>/ema/<name>` at the shallowest breadth-1 point the
+  run reports. It was hard-coded to `D16/...` and that was a trap worth
+  remembering: a run whose `arch.halt_max_steps` is not 16 reports `D8/ema/acc`,
+  matched nothing, and retention turned ITSELF off for the whole run behind one
+  warning at the first eval — after which the ladder deleted the peak,
+  irreversibly, triggered by a knob with nothing to do with retention. Two
+  independent changes reach that state and a close-loop run makes both: a
+  non-16 depth, and a regime whose headline metric is refused. The lesson that
+  outlives the fix — **a CPU smoke only catches this if it carries the run's
+  real `halt_max_steps` and `online_eval`**, which is the argument for a smoke
+  template that runs the LAUNCHED graph rather than a convenient small one.
 
   *Never point an eval at a LADDER checkpoint of a job that is still running.*
   It is a race against that job's own `checkpoint_keep_last`, and the eval
