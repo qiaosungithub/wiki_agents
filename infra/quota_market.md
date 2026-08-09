@@ -43,6 +43,44 @@ state, not a broken allocation. The one lever trading schedulability for
 immunity — forcing within-floor placement so you are never reclaimed — **is
 unavailable on dynamic pools.**
 
+## An Adjusted Ceiling Is A Pool Cap, Not A Cell Shortage
+
+A job can sit PENDING, or be preempted every few minutes, because the
+**dynamic root pool** is capped below its nominal size. The work unit's own
+message is the only place this is legible:
+
+```
+RESOURCE_EXHAUSTED: [accounting_user:deepmind-dynamic-xm]
+  dynamic root pool dynamic-ml-dedicated-flex-pool ... capped by the
+  adjusted ceiling due to power capping event or insufficient bonus capacity.
+  The current deficit of the dynamic root pool is (m0 d0 s(ghostfish:46)).
+```
+
+Read it structurally: the deficit is per **platform** (`ghostfish` = v6p) and
+names **no cell**. So neither changing cell nor changing group routes around
+it — measured, not assumed: g1/g5/g9 report identical obtainability because
+they share the one pool, and the same numbers appear in every cell.
+`go/borg-admission-control-ml#adjusted-ceilings-in-admission-control` documents
+the mechanism.
+
+**Obtainability does not measure this, and reading it as if it did inverts the
+answer.** While a v6p-64 job was being preempted every 15 minutes, preflight
+still reported 2123 obtainable chips in that cell. Obtainable says a slice can
+be *got*; the cap decides how long it can be *held*. The cheap proxy for the
+cap is the pool-wide PRICE — a capped pool clears high because demand exceeds
+the adjusted ceiling (17-29 credits/chip-hr while capped here) — and the
+authoritative answer is the deficit string from `deep_probe` on a live work
+unit.
+
+**Hold time is the number that decides usability, and it is only measurable
+from a real run.** Take the attempt timestamps and difference them; the
+`_startup` markers or per-attempt logs give this for free. At a 15.1-minute
+mean hold, a v6p-64 slice with 2x the raw compute of a v7-32 delivered a
+QUARTER of its net throughput, because each preemption discards ~half a
+checkpoint interval and shortening the interval trades that for save overhead
+(a 236 s save against a 15 min hold). Compute ratio is not throughput when the
+slice keeps being taken away.
+
 ## Price Caps (Limit Orders)
 
 A **limit order** is a maximum price per chip-hour that a workload will pay. It
