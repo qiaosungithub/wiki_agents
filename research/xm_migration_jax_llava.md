@@ -201,6 +201,22 @@ Same correction: rewrite first, then require a real CNS target. It stays
 fail-closed, and the rejection now reads "no CNS replica" rather than "zone has
 no bucket registered".
 
+**A hardcoded region allowlist in `_init_run` rejected tul outright** — three
+GCP regions named in an assert that predates the CNS replicas. The real
+question on Borg is "is there a data replica local to this zone", which
+`g3_env` already answers fail-closed. Behind it sat a second zone table that
+would not have fired until the FIRST CHECKPOINT ~40 min in: the dataloader's
+replica regex listed only `go-d`/`yucmhcg-d`, so a state written in `nm-d`
+could not have been resumed under strict mode. **Grep for every table keyed by
+zone or cell before moving metro** — they fail at different depths, and the
+shallow one hides the rest.
+
+**A deterministic crash must not be auto-resumed.** `CODE BUG: AssertionError`
+fails identically on the next attempt, because `--resume_xid` restages the same
+snapshot; the supervisor retried it and burned a schedule slot for nothing. A
+supervisor should classify: preemption and infra faults are resumable, a code
+bug is not.
+
 **A mirror is per metro.** The MMBench TSVs were copied to `is-d` only, so tul
 failed on them until `nm-d` and `li-d` got their own copies. Anything added to
 one replica has to be added to all three, or the next metro move finds it.
