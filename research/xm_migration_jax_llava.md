@@ -244,6 +244,22 @@ which is why they surfaced one at a time:
 the COCO gap before the launch. The resolution code was right in every case; the
 probe simply never asked, so the probe now covers all three.
 
+**A warm start must not survive the run's own progress.** `load_from` pinned
+the stage-1 checkpoint, and `resolve_borg_autoresume` treated ANY explicit
+`load_from` as "the user asked for this, do not redirect". So every Borg task
+restart began again at step 2180 and then died with
+`Destination checkpoint_2400 already exists` — the checkpoint the previous
+attempt had written. Eleven attempts, ~3 h of v6p-64, one loop.
+
+The wiki already said "a resume must not carry `--load_from`", but that rule
+was written for a HUMAN re-submitting. **Borg restarts a task for reasons
+nobody chose** — preemption, drain — and each restart re-reads the config, so
+the config itself has to be safe. The precedence is about whose checkpoint it
+is: no progress of our own → honour the warm start; progress exists → it
+supersedes a warm start from another run; a `load_from` inside our own
+checkpoint root → left alone. `tests/test_autoresume` covers all three, runs
+in seconds, and is the kind of check that repays itself the first time.
+
 **Preemption is normal and is not a failure.** PROD is preemptible: the run was
 preempted at ~2400 with its checkpoint intact and returned to PENDING. A
 supervisor must read PENDING/SUBMITTED/STARTING as healthy — and must NOT
