@@ -12,7 +12,7 @@ Branches `sqa.late_fusion_xm` (`jax_llava`) and `data_upload_xm`
 |---|---|
 | Data (cc12m + eval bundle + stage-2 SFT mix) | **Done**: three metros, verified per object |
 | Stage 1 (cc12m pretrain, 2180 steps) | **Reproduced** within ±0.009 of the reference curve; ends loss ~1.444 / acc ~0.630, 1.37 steps/s on v7-32 (~26 min) |
-| Stage 2 (SFT, 75000 steps) | **Trains** at 0.357 steps/s on v7-32; the full-coverage smoke still fails on eval/IO paths |
+| Stage 2 (SFT, 75000 steps) | **Trains** at 0.357 steps/s on v7-32; the full-coverage smoke **passes end to end** |
 | Long stage-2 run | Not launched: ~57 h of compute plus queue time |
 
 Reference: WandB `sqa24-massachusetts-institute-of-technology/jax-llava`, run
@@ -27,17 +27,20 @@ interval is the wrong trade on a preemptible slice: it buys 4 h and costs 3200
 steps per preemption. **v7-32 is the ceiling**: Borg registers v7 at 4/8/16/32
 only and preflight rejects v7-64 (`../tpu_reference.md`).
 
+**The full smoke passes** (XID 278211441): `g3_full_smoke` runs 12 steps (10
+stage-1 + 2 stage-2) over the **production** stage-2 mix and the production eval
+lists — 45 shard roots, all 17 benchmarks, sampling, image logging, and the
+stage boundary. Artifacts verified rather than inferred from the status: 7 viz
+PNGs, checkpoints 5/10/12, 383 eval result files, durable pretrained checkpoint.
+
 Open items:
 
-1. **The full smoke (`g3_full_smoke`) gates the 57-hour run**: 12 steps (10
-   stage-1 + 2 stage-2) with sampling, image logging, online eval and final eval
-   all on — deliberately the parts that only break hours in.
-2. Stage-2's `final_eval_tasks` includes `mmbench` (HTTPS from
-   `opencompass.openxlab.space`) and `knn_full` (TFDS ImageNet under
-   `_KNN_TFDS_DATA_DIRS`, all four entries `gs://`). Neither is reachable from a
-   Borg task, and the smoke does not cover them.
-3. Whether the double-submit and PENDING/preemption cycles below need an
+1. Launch the 57-hour stage-2 run from stage 1 (fresh xid, `--load_from` the
+   stage-1 `checkpoint_2180`).
+2. Whether the double-submit and PENDING/preemption cycles below need an
    explicit supervisor for a 57-hour run.
+3. `scienceqa_img` and `vizwiz` have no CNS replica — declared in `default.py`,
+   used by no config, never copied. Copy them before enabling either.
 
 ## The Data: Final Layout
 
@@ -128,6 +131,53 @@ and the chip-vs-device rule). Two JAX consequences that only show up here:
   Hard-coded `bfloat16` against float32 params raises inside
   `lax.dynamic_update_slice`, invisible in stage 1 because generation only runs
   when eval or sampling is on.
+
+## Traps: A Smoke Is Only As Wide As The Run It Gates
+
+The earlier smoke used cc12m for stage 2 and three benchmarks, so it passed
+while the real run would still have died: it never reached the twelve loaders
+or eleven of the seventeen evals. **A smoke narrower than the run it gates
+cannot gate it.** Widening it to the production mix and eval lists cost two
+launches and closed seven bugs.
+
+**`os.access` is POSIX and Colossus is not.** MMBench died with
+`PermissionError: result cache dir is not writable` on a directory gfile writes
+to happily — 40 min in, at the second-to-last final-eval task. `os.access`, the
+stdlib `glob`, and `os.path.isfile` all answer *no* for `/cns/` instead of
+raising, so each reads as a data or permission problem rather than as "wrong
+filesystem API". The stdlib `glob` is the nastiest: `[]` means "this benchmark
+has no shards".
+
+**When one member of a family has the bug, check the whole family.** The same
+six files (`eval_vlm_benchmarks`: gqa, seed_bench, cambrian_cvbench,
+vlms_are_blind, docvqa, realworldqa) were missed both when four other evals were
+converted to CNS-aware helpers and again here. All six sit AFTER the task that
+crashed, so none had ever run; fixing them by reading the code instead of one
+45-minute launch at a time was the difference between one relaunch and seven.
+
+**A cap is only a cap if something reads it.** The smoke's eval block set
+`max_eval_steps`, which nothing reads. Replacing it exposed a second layer of
+the same mistake: `debug_max_samples` covers seven evals, but the
+`eval_vlm_benchmarks` family takes `<benchmark>_num_samples`, defaulting to the
+whole set — so the widened smoke still scored 8016 and 5349 samples on two
+benchmarks. Two mechanisms; check each reader.
+
+**`knn_full` and `mmbench` needed no copy — the data was already there.** The
+143 GiB TFDS ImageNet tree is 1094 of the eval bundle's 1309 objects, and the
+two MMBench TSVs are 90 MB fetched once from a workstation. Both were
+unreachable only because the code resolved them through `gs://`, an NFS mount,
+or HTTPS. **Prove the filesystem premise before writing the fix**: a 15-line
+probe (`tools/g3_knn_tfds_probe`, no torch/JAX) confirmed google3's TF sees
+`/cns/`, lists 1024+64 shards and decodes a tfrecord, in seconds.
+
+**The config probe must model the runtime, not a stricter rule.**
+`tools/g3_config_probe` now checks every dataset root, every root of an ENABLED
+eval task, and the KNN data_dir — 45 + 17 + 1 locally in minutes, against 10-45
+min per remote attempt. Three ways it was wrong first: it expanded only
+`root[0]` (one of twelve sources proven); it condemned `gs://` by spelling,
+reporting 34 false failures, when the durable fix rewrites `gs://` -> CNS inside
+the webdataset opener and a `gs://` root is therefore correct; and it read the
+RAW config, still carrying the zone placeholder, instead of the resolved one.
 
 ## Traps: Running The Jobs
 
