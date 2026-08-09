@@ -231,6 +231,14 @@ logs, which a rotation would restart from zero.
 The job registry, its archived predecessor, config recovery from a snapshot, and
 cancel-versus-clear semantics are in `infra/tpu_cli.md`.
 
+**"Clean up the finished runs" means `tpu clear`, not deleting data.** The word
+is ambiguous and the two tools are unrelated: `tpu clear` tidies the BOARD,
+archiving finished and failed registry entries to `~/.tpu_jobs_legacy.json`
+(never deleting them, and config recovery still resolves archived ids), while
+`tpu gc` is the checkpoint sweeper on CNS. Reach for `clear` when `tpu check` is
+cluttered; reach for `gc` only when a cell is filling up. Allow one daemon cycle
+(~60s) for cleared entries to leave the board.
+
 ## Debugging A Job That Dies With No Log
 
 **Reproduce locally first.** The staged package is an ordinary build target, so
