@@ -13,7 +13,7 @@ Branches `sqa.late_fusion_xm` (`jax_llava`) and `data_upload_xm`
 | Data (cc12m + eval bundle + stage-2 SFT mix) | **Done**: three metros, verified per object |
 | Stage 1 (cc12m pretrain, 2180 steps) | **Reproduced** within ±0.009 of the reference curve; ends loss ~1.444 / acc ~0.630, 1.37 steps/s on v7-32 (~26 min) |
 | Stage 2 (SFT, 75000 steps) | **Trains** at 0.357 steps/s on v7-32; the full-coverage smoke **passes end to end** |
-| Long stage-2 run | Not launched: ~57 h of compute plus queue time |
+| Long stage-2 run | **Running**: XID 278259733, v6p-64 @ tul, from the stage-1 checkpoint |
 
 Reference: WandB `sqa24-massachusetts-institute-of-technology/jax-llava`, run
 `gtqntg5g` (`worthy-bird-70`), compared at every logged step; ours is marginally
@@ -33,13 +33,19 @@ lists — 45 shard roots, all 17 benchmarks, sampling, image logging, and the
 stage boundary. Artifacts verified rather than inferred from the status: 7 viz
 PNGs, checkpoints 5/10/12, 383 eval result files, durable pretrained checkpoint.
 
+**Production stage-2 is running**: **XID 278259733**, v6p-64 @ `yutulpz` (tul),
+started from the stage-1 `checkpoint_2180` mirrored into `nm-d`. It enters
+stage 2 directly at global step 2180 with a params-only restore, and **acc
+picks up continuous with the stage-1 endpoint** — 0.578 → 0.620 → 0.637 against
+stage-1's 0.630. v6p-64 was chosen over v7-32 for ~2x the per-step throughput;
+**v6p also exposes two cores per chip**, so `jax.device_count()` is 128 and
+bs256 still divides evenly. It was preempted around step 2400 with the
+checkpoint intact — normal, not a failure.
+
 Open items:
 
-1. Launch the 57-hour stage-2 run from stage 1 (fresh xid, `--load_from` the
-   stage-1 `checkpoint_2180`).
-2. Whether a 57-hour run needs an explicit supervisor for the PENDING /
-   preemption cycles below.
-3. `scienceqa_img` and `vizwiz` have no CNS replica — declared in `default.py`,
+1. Confirm the end-of-run benchmark numbers reproduce the reference.
+2. `scienceqa_img` and `vizwiz` have no CNS replica — declared in `default.py`,
    used by no config, never copied. Copy them before enabling either.
 
 ## The Data: Final Layout
@@ -220,6 +226,29 @@ bug is not.
 **A mirror is per metro.** The MMBench TSVs were copied to `is-d` only, so tul
 failed on them until `nm-d` and `li-d` got their own copies. Anything added to
 one replica has to be added to all three, or the next metro move finds it.
+
+## Traps: Three Launches, One Shape — Code That Only Ran In cbf
+
+Moving production from cbf to tul cost three launches, and every failure was
+code whose cbf path had never been exercised. They fail at DIFFERENT DEPTHS,
+which is why they surfaced one at a time:
+
+| Failure | Where it hid |
+|---|---|
+| `AssertionError`: a zone allowlist naming three GCP regions | `_init_run`, 4 min in |
+| `FileNotFoundError`: `COCO_val2014` absent from tul (40504 files, 6.2 GB) | stage-2 phase start |
+| (latent) dataloader replica regex listing only `go-d`/`yucmhcg-d` | would have fired at the FIRST CHECKPOINT, ~40 min in |
+
+**Grep for every table keyed by zone, cell, or bucket before moving metro**, and
+**diff the top level of both data roots** — one command, and it would have caught
+the COCO gap before the launch. The resolution code was right in every case; the
+probe simply never asked, so the probe now covers all three.
+
+**Preemption is normal and is not a failure.** PROD is preemptible: the run was
+preempted at ~2400 with its checkpoint intact and returned to PENDING. A
+supervisor must read PENDING/SUBMITTED/STARTING as healthy — and must NOT
+auto-resume a `CODE BUG`, which is deterministic and fails identically on the
+next attempt, burning a schedule slot and hiding the signal.
 
 ## Traps: Running The Jobs
 
