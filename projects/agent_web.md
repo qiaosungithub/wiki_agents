@@ -1,15 +1,19 @@
 # Agent Web And Jetski
 
-Read this only for the Gemini/Amply/Claude agent web checkout. Its current code,
-native docs, process manager, and live environment stay authoritative; the
-workstation CLIs are `local_agent_cli.md`.
+**This file describes `~/work/agent-web-gemini` (branch `gemini-amply`)** — the
+active Gemini/Amply/Claude agent web checkout, identifiable by its agent union
+`amply | claude | gemini` and the `JETSKI_LS_PORT` pin in its `run.sh`. The
+sibling `~/work/agent-web` is an older checkout of the same remote on `main`
+with no Amply and no Jetski wiring; nothing here is a claim about it. That
+checkout's current code, native docs, process manager, and live environment stay
+authoritative over this file; the workstation CLIs are `local_agent_cli.md`.
 
 ## Two Things That Look Like Bugs And Are Not
 
 | Looks broken | Actually |
 |---|---|
 | `CODEX_HOME`, `CODEX_NAME_HELPER`, `CODEX_WEB_BIN`, `CODEX_MODEL` and friends pointing at `~/.gemini` | **These are the *Gemini* slots**: Codex was replaced by Gemini without renaming the keys. There is no `codex` agent — the union is `amply \| claude \| gemini`, and tests or fixtures still naming one are stale. |
-| A failing test on `resolveClaudeResumeSettings`, the `account_status` / `codex_settings` ws messages, `removeClaudeSessionSettings`, or the `inheritedSnapshot` write | **This codebase carries features written but never called** — all of those were in that state at once — **so a failing test here is not proof of a regression.** Grep for a call site first: if the only hit is the definition, the feature never ran and its bugs (a `Math.max` over two fields nothing populated, say) were never observable. |
+| A failing test on a feature you cannot find a caller for | **This codebase carries features that are written but never called**, so a failing test here is not proof of a regression — and equally, a name on any old "dead" list may since have been wired. **Grep for a call site before you believe either story**: separate the definition from its callers, and for a websocket message require a sender *and* a handler on both sides (`*_get` in the browser store, its branch in the server's message switch, and the reply handled back in the store). If the only hit is the definition, the feature never ran and its bugs (a `Math.max` over two fields nothing populated, say) were never observable; if it has callers, treat the failure as a real regression. Test files are not call sites, and a leftover test helper with no callers is not a live feature. |
 
 ## What A Child Process Gets, And Must Not Inherit
 

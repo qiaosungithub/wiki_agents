@@ -14,20 +14,23 @@ the intersection of live obtainability, storage headroom, and a verified smoke,
 weighting *breadth of cells* because a metro with one cell is one stockout away
 from useless.
 
-| metro | v7 cells live | chips | storage cell | smoke | role |
-|---|---|---|---|---|---|
-| **`cbf`** | `yucbfiv`, `yucbful` (+`je`, `yucbfwv` idle) | 6804 | `is-d` 69.1 PiB sp50 | completed 12/12 | **primary** — four cells, the only redundancy anywhere |
-| **`tul`** | `yutulpz` | 2388 | `nm-d` 44.0 PiB sp50 | scheduled, 8 tasks | second NA metro; existing `jax_llava` work sits here |
-| **`lpp`** | `yulpptr` | 1552 | `li-d` 85.2 PiB sp50 | ran to step 6 | European leg; largest storage of the three |
+| metro | v7 cells live | storage cell | smoke | role |
+|---|---|---|---|---|
+| **`cbf`** | `yucbfiv`, `yucbful`, `yucbfwv`, `je`, `yucbfrl` | `is-d` 68.1 PiB sp50 | completed 12/12 | **primary** — the only metro with cell redundancy |
+| **`tul`** | `yutulpz` | `nm-d` 44.2 PiB sp50 | scheduled, 8 tasks | second NA metro; existing `jax_llava` work sits here |
+| **`lpp`** | `yulpptr` | `li-d` 85.3 PiB sp50 | ran to step 6 | European leg; largest storage of the three |
+
+Live chip and slice counts are deliberately not repeated here — the survey table
+below owns them, and they move daily.
 
 Rejected, with the reason, so this is not re-litigated:
 
 | Rejected | Why |
 |---|---|
-| `ske` (13724 chips), `kul`, `phx` | **Most chips of all, zero team storage.** Compute without co-located storage is the pruner-kill case. |
-| `grq` / `el` | The best storage anywhere (95.4 PiB, same cell as the chips), but obtainability swung 0 -> 937 across a day. A single cell that thin cannot be a primary. |
-| `sin` | Completed its smoke, but one cell, 9.7 PiB, and far from the others. |
-| `ckv`, `dfw` | Good storage, **zero obtainable** in every sample taken. |
+| `ske`, `kul`, `phx` | **Most chips of all, zero team storage.** Compute without co-located storage is the pruner-kill case. |
+| `grq` / `el` | The best storage anywhere (95.7 PiB, same cell as the chips), but obtainability swung 0 -> 937 across a day. A single cell that thin cannot be a primary. |
+| `sin` | Completed its smoke, but the thinnest storage of any candidate (under 10 PiB) and far from the others. |
+| `ckv`, `dfw` | Good storage; obtainability has since recovered from zero (2398 / 2885 on a later sample), so re-check rather than treating the rejection as settled. |
 
 **The launcher's `_CELL_BUCKETS` maps every v7 cell to a same-metro bucket**, so
 `--cell=<v7 cell>` alone picks the right storage; it prints the choice at
@@ -41,9 +44,9 @@ storage quota"*. A cell is one cluster, a metro holds several, and same-metro
 cross-cell reads are effectively free, so the metro is the unit that decides
 co-location; `../storage.md` owns the general statement. Asked narrowly, it
 once produced a plan built on "v7 exists only in `ske`, so a new flex
-registration there is the only way forward" — in fact v7 is in 17 cells across
-12 metros, 8 already hold PiB-scale quota, and `ske` is one of only four with
-nothing. **Move the compute, do not request the quota.**
+registration there is the only way forward" — in fact v7 spans 20 cells in 14
+metros, 10 of which already hold PiB-scale quota, and `ske` is one of only two
+with nothing at all. **Move the compute, do not request the quota.**
 
 **Obtainability, not the quota table, decides whether a job starts — and it
 inverts the storage ranking** (`../jobs.md` states this generally). Here it
@@ -72,6 +75,15 @@ floor**, the condition behind a 12-hour collapse recorded in
    parallelise with `xargs -P`, it is one RPC per cell.
 4. **Obtainable chips per cell** — `tpu preflight --tpu_type=v7-32 --group=<g>
    --json` returns a `cells_ok` list with an obtainable count each.
+
+   **4b. Free contiguous slices per cell** — `stubby call
+   master.<cell>.borg:9413 BorgMaster.ProbeSliceAvailability 'slices {
+   locus_type: "locus:DEPLOYMENT_TYPE_GHOSTFISH_LITE:2_4_4" } priority: 200'`,
+   summing `num_free_slices` over the pods. Reachable on an ordinary credential,
+   one RPC per cell; the shape uses UNDERSCORES (`2x4x4` is rejected as an
+   invalid locus). Do this one too — a metro can hold thousands of obtainable
+   chips and **one** placeable v7-32.
+
 5. **Confirm with a real job**, not just the numbers: submit the same smoke to
    each candidate metro. Checkpoints should land on CNS with
    `capacity_quota_user: deepmind-resources-colossus`, keeping the 500 GiB
@@ -79,20 +91,33 @@ floor**, the condition behind a 12-hour collapse recorded in
 
 ### Last survey, for shape only — re-run before relying on it
 
-Group `deepmind-resources-colossus`; storage is the largest same-metro cell,
-`obtainable` a single preflight sample.
+Group `deepmind-resources-colossus`; storage is the largest same-metro cell.
+`obtainable` is one sample of PROD availability for the team alloc, and `free
+v7-32` one sample of contiguous `2_4_4` slices (step 4b). Both are
+point-in-time and move daily — the storage column is the slow one. Smokes are
+not repeated per row: `cbf` and `sin` completed 12/12, `tul` was scheduled,
+`lpp` and `mrn` ran to step 6, and no other metro has been smoked.
 
-| metro | GCP region | v7 cells | largest same-metro storage | obtainable | smoke |
-|---|---|---|---|---|---|
-| `grq` | europe-west4 | `el` | **`el-d` 95.4 PiB / sp50** — same cell | 0 | — |
-| `lpp` | europe-north1 | `yulpptr` | `li-d` 85.2 PiB, `lu-d` 85.1 PiB / sp50 | 1488 | to step 6 |
-| `ckv` | *(none)* | `mb` | `mg-d` 77.9 PiB / sp10; `mb-d` 10.7 PiB / sp50 (same cell) | 0 | — |
-| `cbf` | us-central1 | `je`, `yucbfiv`, `yucbful`, `yucbfwv` | `is-d` 69.1 PiB / sp50 | 3864 | 12/12 |
-| `dfw` | us-south1 | `yudfwra` | `rs-d` 49.3 PiB / sp50 | 0 | — |
-| `tul` | us-central2 | `yutulpz` | `nm-d` 44.0 PiB / sp50 | 2388 | scheduled |
-| `sin` | asia-southeast1 | `sk`, `sn`, `so` | `si-d` 9.69 PiB / sp50 | 3792 | 12/12 |
-| `mrn` | *(none)* | `yumrnel` | `qo-d` 8.80 PiB / sp50 | 1104 | to step 6 |
-| `ske` | *(none)* | `yuskedq` | **none** | — | — |
-| `phx` | us-west8 | `yuphxrp` | **none** (only the cell's own 100 TiB, sp0) | — | — |
-| `lhr` | europe-west2 | `yulhrp` | **none** (only the cell's own 500 TiB) | — | — |
-| `kul` | *(none)* | `yukulwh` | **none** | — | — |
+| metro | GCP region | v7 cells (obtainable chips) | Σ obtainable | free v7-32 slices | largest same-metro team storage |
+|---|---|---|---:|---:|---|
+| `ske` | *(none)* | `yuskedq`(17646) | 17646 | 164 | **none** |
+| `kul` | *(none)* | `yukulwh`(14158) | 14158 | 341 | **none** |
+| `cbf` | us-central1 | `yucbful`(4024) `yucbfiv`(4003) `yucbfwv`(2314) `je`(2028) `yucbfrl`(84) | 12453 | 43 | `is-d` 68.1 PiB sp50, `jq-d` 18.9 PiB sp10 |
+| `phx` | us-west8 | `yuphxrp`(7344) | 7344 | 6 | **none team-wide** (only `yuphxrp-d` 500 TiB sp20) |
+| `sin` | asia-southeast1 | `sk`(4048) `so`(2530) `sn`(662) | 7240 | 121 | `si-d` 9.5 PiB sp50, `sm-d` 1.67 PiB sp50 |
+| `dfw` | us-south1 | `yudfwra`(2885) | 2885 | 11 | `rs-d` 49.3 PiB sp50, `rw-d` 4.94 PiB sp20 |
+| `lpp` | europe-north1 | `yulpptr`(2612) | 2612 | 34 | `li-d` 85.3 PiB sp50, `lu-d` 85.1 PiB sp50 |
+| `ckv` | *(none)* | `mb`(2398) | 2398 | 21 | `mg-d` 77.5 PiB sp10, `me-d` 26.9 PiB sp20 |
+| `tul` | us-central2 | `yutulpz`(2004) | 2004 | **1** | `nm-d` 44.2 PiB sp50, `oi-d` 28.4 PiB sp50 |
+| `mrn` | *(none)* | `yumrnel`(1168) | 1168 | 67 | `qo-d` 8.77 PiB sp50, `qr-d` 0.14 PiB sp0 |
+| `uos` | us-east7 | `gc`(960) | 960 | 14 | `gd-d` 21.5 PiB sp10, `ge-d` 17.8 PiB sp1 |
+| `grq` | europe-west4 | `el`(915) | 915 | 13 | `el-d` 95.7 PiB sp50, `ej-d` 13.3 PiB sp50 |
+| `lhr` | europe-west2 | `yulhrp`(154) | 154 | 3 | **none team-wide** (only `yulhrp-d` 500 TiB sp20) |
+| `atl` | us-east2 | `yo`(112) | 112 | 0 | `yo-d` 65.8 PiB sp500, `ym-d` 6.81 PiB sp50 |
+
+**A chip count cannot see fragmentation, so read the slice column beside it**:
+`tul` carries thousands of obtainable chips and, on this sample, exactly ONE
+placeable v7-32 — a metro can be rich in chips and unable to start your job,
+which is the failure `../jobs.md` describes as a green preflight followed by an
+allocator reject. `atl` is the mirror case worth watching rather than promoting:
+the deepest spindle commitment anywhere (sp500) with almost no chips.

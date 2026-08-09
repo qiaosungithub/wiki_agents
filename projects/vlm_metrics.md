@@ -1,9 +1,10 @@
 # VLM Benchmark Reporting
 
 Read this before a VLM result reaches the shared spreadsheet, or when a
-benchmark number looks wrong. `../research/result_logging.md` owns the general
-"settle the protocol first" rule and the write mechanics; verify column letters
-against the live sheet, since a layout note ages.
+benchmark number looks wrong. This file owns *which number* each benchmark name
+means; `../research/result_logging.md` owns the write mechanics, the "settle the
+protocol first" rule, and every column map — rebuild that map from the live
+header each time rather than from either file.
 
 ## One Benchmark Name, Several Numbers
 

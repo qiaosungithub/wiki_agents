@@ -14,7 +14,7 @@ internals `infra/tpu_cli.md`, prices `infra/quota_market.md`.
 | v5e Pod | Viperlite Pod | `VIPERLITE_POD` (62) | TPU v5e Pod | `viperlite_pod` | `vlp` |
 | v5p | Viperfish | `VIPERFISH` (59) | TPU v5p | `viperfish` | `vf` |
 | v6e | Ghostlite Pod | `GHOSTLITE_POD` (63) | TPU v6e | `ghostlite_pod` | `glp` |
-| v6p / v7x | Ghostfish | `GHOSTFISH` (92) | TPU v6p | `ghostfish` | `gf` |
+| v6p | Ghostfish | `GHOSTFISH` (92) | TPU v6p | `ghostfish` | `gf` |
 | v7 | Ghostfishlite | `GHOSTFISHLITE` (101) | – | `ghostfishlite` | – |
 
 | Trap | Rule |
@@ -23,14 +23,21 @@ internals `infra/tpu_cli.md`, prices `infra/quota_market.md`.
 | The literal `v6p` raises `Unknown ResourceType 'v6p'` at submit time | v6p must be `ghostfish` |
 | `ResourcePrices` and other Spanner tables key on the **numeric ids** | Use them when querying GQM directly (`infra/quota_market.md`) |
 | A generation reaches `tpu queue`/`tpu preflight` before this table mentions it | Verify rather than assume: `tpu preflight --tpu_type=<gen>-<n> --json` either returns a `cells_ok` list or names the type unknown |
+| `v7x` is an EXTERNAL name and does **not** mean v7 | Cloud vocabulary maps `V7X`→`TPU7X` onto `GHOSTFISH` (92) = **v6p**; internal v7 is `GHOSTFISHLITE` (101). Nothing in the launcher emits or accepts `v7x` |
 
 **v7's slice geometry is identical to v6p** (3-D torus, 4 chips/host):
 `platforms/accelerator_metadata/platforms/ghostfishlite.gcl` declares the same
 static sub-cubes as `ghostfish.gcl`, differing only in the locus name. Registered
 sizes are **4/8/16/32** (`v7-16` → `2x2x4`); 64+ exists only via dynamic slice
-creation through the OCS manager, so it is deliberately not claimed. v7 is often
-the cheapest option, repeatedly clearing at 0.00 (free pool) while v6p had zero
-availability.
+creation through the OCS manager, so it is deliberately not claimed.
+
+**v7 is usually the cheapest generation on this pool** — it has cleared at 0.00
+(free pool) in every sample taken, while v6p clears in the single credits/hr and
+moves round to round. Read that as a price difference, not a capacity one: v6p
+is obtainable in tens of thousands of chips at the same moment. Check the market
+before assuming which generation you can get — `tpu money`, or
+`prices.<pool>|101|PROD` in `~/.tpu_quota_cache_dir/market.json` (v7 is card code
+101, v6p 92).
 
 **A chip is not a device: v7 and v6p expose TWO cores per chip.** A v7-32 is 8
 hosts x 4 chips over a `2x4x4` torus, so `jax.device_count()` returns **64**,

@@ -49,9 +49,7 @@ discipline `../research/result_logging.md`.
 - **The maze grid is `30 x 30` holding a `29 x 29` perfect maze, padded — not
   cropped:** `_generate_perfect_maze` needs an odd size, so it takes
   `maze_n = n if n % 2 else n - 1` and writes `open_mask[:29, :29]`, leaving row
-  29 and column 29 wall on every sample. The older `maze_dataset` / `gen_dfs`
-  path that cropped `31 x 31` is dead code — same generator, different geometry
-  and solution-length window.
+  29 and column 29 wall on every sample.
 - **Registers are plain trainable tokens; the knob is `arch.num_registers`.** An
   `(N, hidden)` table in `params` prepends N tokens after `embed_scale`, so
   `register_init_std` is the std the trunk sees. It replaced a `puzzle_emb_*`
@@ -87,9 +85,9 @@ discipline `../research/result_logging.md`.
   absolute symlink, and Bazel will not glob a package containing one.
 - **Write the run into `configs/remote_run_config.yml` and launch without a
   config argument** (rule owned by `../jobs.md` §Submission Contract). EqR-jax
-  consequence: `configs/` holds ONLY templates — `local_debug`, `remote_run`, at
-  most three task templates — and a finished experiment's config comes back from
-  its snapshot with `sexy <xid>`. Launching by config name leaves a file behind.
+  consequence: `configs/` holds ONLY templates — `local_debug`, `remote_run`,
+  and per-task ones — and a finished experiment's config comes back from its
+  snapshot with `sexy <xid>`. Launching by config name leaves a file behind.
 - EqR-jax uses XManager service tiers (`PROD` / `BATCH`), not legacy
   `xm_priority`; resource selection and allocator constraints are `../jobs.md`.
 - Treat the active BUILD target and launcher as authoritative: entry point in
@@ -351,11 +349,26 @@ IRREVERSIBLE, which makes every rule here load-bearing.
   checkpoint a peak-reporting row needs: **this family peaks off the ladder** —
   120k of 150k on maze, 40-45k of 50k on sudoku. **Auto-resume still restores
   the NEWEST checkpoint, never the best.**
-- **Keep `checkpoint_interval_steps` a divisor of
-  `training.eval_interval_steps`** (5000 in every training config) so every
-  evaluated step has a checkpoint behind it. Report the peak for a family that
-  rises then collapses — a peak with no checkpoint can be neither re-evaluated
-  nor published.
+- **`checkpoint_interval_steps` must DIVIDE `eval_interval_steps`**, so every
+  evaluated step has a checkpoint behind it — the peak is promoted from the
+  checkpoint saved at that same step, and there is no substitute source. Report
+  the peak for a family that rises then collapses; a peak with no checkpoint can
+  be neither re-evaluated nor published. Nothing checks the relation at config
+  load: `promote_best_checkpoint` warns and skips, so a violated ratio costs the
+  peak silently, one eval at a time.
+
+  | relation | consequence |
+  |---|---|
+  | `ckpt` divides `eval` | every evaluated step is promotable |
+  | `ckpt` a multiple of `eval` | only every `ckpt/eval`-th eval can promote |
+  | otherwise | promotion is sporadic; read the warning, not the curve |
+
+  Both intervals default to the same value in `configs/default.py`, which
+  satisfies the relation; a config that overrides one must re-check the ratio.
+  Verify by reading the two keys in the config you are launching —
+  `grep -n '_interval_steps' configs/<name>_config.yml` — never by assuming the
+  last run's numbers, since `remote_run_config.yml` is overwritten by every
+  launch and the smoke templates run intervals of single digits.
 - **Track SEVERAL metrics: a retention policy driven by ONE inherits that
   metric's bugs.** The selected step is kept and the rest go on the ladder, so
   an over-reporting scorer does not merely mis-state a number, it keeps the
@@ -365,18 +378,22 @@ IRREVERSIBLE, which makes every rule here load-bearing.
   so a metric fix costs a re-score rather than the run. **Still re-rank the
   retained steps against the run's own logged curve after ANY metric fix**, and
   expect pre-change peaks to be unrecoverable.
-- **`"auto"` resolves by metric NAME against the FIRST REAL METRICS DICT, not
-  the config**, since which accuracy a run reports depends on its dataset and
-  head: `_BEST_METRIC_PREFERENCE` holds bare names (`closeloop/episode_success`,
-  `walk_acc`, `solution_acc`, `acc`) matched as `<point>/ema/<name>` at the
-  shallowest breadth-1 point, and finding nothing disables retention behind one
-  warning. While it was hard-coded to `D16/...`, a run whose
-  `arch.halt_max_steps` was not 16 reported `D8/ema/acc`, matched nothing, and
-  lost its peak to the ladder — triggered by a knob unrelated to retention, and
-  reachable two independent ways (a non-16 depth; a refused headline metric)
-  that a close-loop run hits at once. The lesson outlives the fix: **a CPU smoke
-  only catches this if it carries the run's real `halt_max_steps` and
-  `online_eval`** — smoke the LAUNCHED graph.
+- **`"auto"` resolves against the FIRST REAL METRICS DICT, not the config**,
+  since which accuracy a run reports depends on its dataset and its head.
+  `_BEST_METRIC_PREFERENCE` in `utils/ckpt_util.py` is the list, in headline
+  order; `resolve_best_metrics` in the same file is the resolution. **Read the
+  tuple in the checkout you are launching rather than trusting a copy** — its
+  spelling differs across branches, and the two spellings behave differently:
+
+  | spelling of an entry | how it matches |
+  |---|---|
+  | fully qualified (`D16/ema/acc`) | exact key; a run at another depth matches NOTHING |
+  | bare name (`acc`) | `<point>/ema/<name>`, shallowest breadth-1 point, so the depth comes from the run |
+
+  Finding nothing disables retention behind ONE warning at the first eval, after
+  which the ordinary ladder deletes the peak. **A CPU smoke only catches it if
+  it carries the run's real `halt_max_steps` and `online_eval`** — smoke the
+  LAUNCHED graph, and read the "tracking …" line the first eval prints.
 - **Never point an eval at a LADDER checkpoint of a job that is still running.**
   It races that job's `checkpoint_keep_last` and always loses — packaging and
   scheduling take minutes, in which two more checkpoint intervals delete the
@@ -385,11 +402,12 @@ IRREVERSIBLE, which makes every rule here load-bearing.
   (`checkpoint_milestone_every`) or a `checkpoint_best_*`. A finished run is
   safe, but keep the habit.
 - **Never sweep a name you do not recognise.** The older single-metric
-  `checkpoint_best_<n>` is still on CNS and is some finished runs' ONLY
-  surviving peak, so the job and `tpu gc` match both shapes and neither deletes
-  an unfamiliar one. When a retention rule cannot PROVE a copy is superseded
-  (unreadable sidecar, no metric named) it keeps it: a kept copy costs disk a
-  tool can report, a deleted one costs weights nobody can reproduce.
+  `checkpoint_best_<n>` is still on CNS, and for most runs that have one it
+  names a step no `step_<N>` on the ladder still holds, so the job and `tpu gc`
+  match both shapes and neither deletes an unfamiliar one. When a retention rule
+  cannot PROVE a copy is superseded (unreadable sidecar, no metric named) it
+  keeps it: a kept copy costs disk a tool can report, a deleted one costs
+  weights nobody can reproduce.
 
 ## Eval Protocol: Report B=1 First
 

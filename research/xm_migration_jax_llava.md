@@ -37,8 +37,8 @@ Open items:
 
 1. Launch the 57-hour stage-2 run from stage 1 (fresh xid, `--load_from` the
    stage-1 `checkpoint_2180`).
-2. Whether the double-submit and PENDING/preemption cycles below need an
-   explicit supervisor for a 57-hour run.
+2. Whether a 57-hour run needs an explicit supervisor for the PENDING /
+   preemption cycles below.
 3. `scienceqa_img` and `vizwiz` have no CNS replica — declared in `default.py`,
    used by no config, never copied. Copy them before enabling either.
 
@@ -183,7 +183,7 @@ RAW config, still carrying the zone placeholder, instead of the resolved one.
 
 | Rule | Evidence / detail |
 |---|---|
-| **`tpu queue` submits twice** | Its post-submit check misreads success and retries; both submissions land, and two work units writing the same checkpoint path kill each other with `Destination … already exists`. De-duplicate within minutes, well before the first checkpoint interval. |
+| **A resume used to submit twice** (fixed; the shape is the lesson) | The post-submit check grepped the launch log for `Launched experiment`, which XManager prints only when it CREATES an experiment — a `--resume_xid` launch goes through `get_experiment()` and prints `Added N work unit(s) to` instead. The check read that as a dead launch and re-ran the identical command, `--resume_xid` included, so a second work unit joined the same experiment and the two raced for one checkpoint path (`Destination … already exists`); registration sat under the same test, so neither reached `tpu check`. It survived because the retry's `tee` had no `-a` and overwrote the evidence. **A liveness check keyed to one exact string fails on the variant path it never saw** — accept every success line, and never let a retry overwrite the log it is diagnosing. |
 | **Stopping is per experiment unless you name the work unit** | `xmanager stop --experiment_id=<xid> --work_unit_id=<n>` is the granular form; `tpu cancel` and a bare `xmanager stop` take the whole experiment. `borg … jobs` is NOT a subcommand and silently finds nothing. |
 | **A resume must not carry `--load_from`** | Use `--resume_xid` and let autoresume find the newest complete checkpoint. Exception: a CODE CHANGE needs a fresh xid *and* an explicit `--load_from`, because `--resume_xid` restages the ORIGINAL run's snapshot — three fixes once landed in git and none reached the cluster. |
 | **Queued is not failed** | Over-subscribed v7 quota leaves work units PENDING for hours, and a supervisor reading "not running" as "dead" resubmits, every resubmission adding colliding work units. `tpu preflight` reports GLOBALLY obtainable chips, which says nothing about this alloc; the honest answer is the work unit's own `GQM_RESOURCE_DEFICIT_INFO`. |

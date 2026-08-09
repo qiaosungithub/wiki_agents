@@ -49,9 +49,14 @@ under it; only then is the completion marker logged. **Discovery keys on that
 final marker** — never a `Saving` line, never a sidecar path.
 
 - **JIT/HSDP saves global sharded arrays with all processes participating**;
-  never `process_allgather` the whole TrainState. The pmap path holds a
-  replicated local replica and may use a process-0 host write — re-check that
-  split if a checkout changes execution model.
+  never `process_allgather` the whole TrainState. **The pmap path writes replica
+  0 from process 0 only**: slice `x[0]`, `device_get` it on host 0, and save
+  through Orbax with `MultiprocessingOptions(active_processes={0})` — never
+  through Flax's multihost `save_checkpoint` wrapper, whose barriers the other
+  processes never reach; hold them at an explicit `sync_global_devices` instead.
+  `active_processes` in a checkout's `utils/ckpt_util.py` is the marker that
+  separates the two saves, so grep for it before porting checkpoint code either
+  way.
 - **Same-stage resume restores full state; a stage boundary may be a params-only
   restore** with a fresh optimizer, possibly needing shape adaptation before
   sharding. Assert the restored global step, never infer it, and **always save

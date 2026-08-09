@@ -39,7 +39,7 @@ coordinates must consume the same canonical box. PaliGemma loc text serializes
 | **Every stateful and legacy loader path must forward `dataset.coord_format`** | A config saying `qwen` is not enough if some iterator silently takes the default `loc_tokens` path |
 | **Keep the LLaVA-OV1.5 normalized-textual-bbox conversion hard-whitelisted** | So unrelated math arrays and graph-coordinate pairs stay untouched; rewrite questions, answers, and coordinate-format prose together |
 | **Dense PixMo answers can exceed the Stage-2 `max_txt_length=256` budget** | Generic truncation then cuts a multi-point answer between its y and x tokens. Still open: dense targets need a pair-aware truncation, sampling, or drop policy |
-| Multi-box exposure is sparse, mostly Sherlock/SVIT | For CVBench-like colored multi-region training the practical sources are ViP-LLaVA Visual7W/VG Relations, then SPHINX-V MDVP VCR and relationship subsets — **check their non-commercial/research licenses before mirroring** |
+| Multi-box exposure is sparse in the mixes we train on | Sourcing colored multi-region supervision (CVBench-like) means reaching outside them, and the candidates are research releases — **check the non-commercial/research license before mirroring one** |
 
 Audited schemas; per-config lists and evidence in `../archive/audits/`:
 

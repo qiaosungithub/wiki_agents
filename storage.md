@@ -326,7 +326,7 @@ the conclusion is what lasts.
 | Fan out with a thread pool, reusing one module-level pool | The client releases the GIL, so this is real concurrency worth roughly an order of magnitude; building a pool per call costs more than the reads |
 | Put the read inside a resident process | The in-process client only wins in a long-lived one: cold it matches shelling out, hot it is dozens of times faster and stays hot across a minute of idle. A bash loop re-execing a binary is a one-shot caller however long it runs |
 | If you must shell out, batch every path into one invocation | A shell utility pays about a second of startup before it does anything, plus first-connection setup |
-| Measure another cell before blaming locality | Distance is second-order; per-cell load dominates — a local cell measured three times slower than a remote one here |
+| Measure another cell before blaming locality | Distance is second-order; per-cell load dominates, and a local cell can measure slower than a remote one |
 | Always bound the wait | A log tail is a nicety; a status table that blocks on it is a regression |
 
 Two silent traps:

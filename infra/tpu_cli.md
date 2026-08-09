@@ -26,8 +26,10 @@ the worktree stays in place and the build is unaffected — only a tiny pointer
 file sits in the source tree. Do not unify them with one repo plus a symlink:
 git records a symlink as the link itself, so committing it backs up none of the
 files behind it. And **a source-control checkout is not a backup** — the checker
-half was originally unknown to the depot, so until its change submits the git
-repo is the only recovery path.
+half is still unknown to the depot, so until its change submits the git repo is
+the only recovery path. Verify with `g4 files
+//depot/google3/experimental/users/<user>/tpu_utils/...`: "no such file(s)"
+means the git repo is still the only copy.
 
 **Self-asserting test scripts** (exiting non-zero on failure instead of using
 the test framework) must be declared as test targets; declared as binaries they

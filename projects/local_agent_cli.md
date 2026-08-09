@@ -39,8 +39,9 @@ lines, so the pattern matches an *index*, not an HTTP status — once good for
 "93 rate-limit errors" on a host that had never been rate limited. Match the
 exception class: `RateLimitError`, `RESOURCE_EXHAUSTED`, `Quota exceeded`.
 
-**Two failure modes explain every crash so far, and neither comes from running
-many sessions at once:**
+**A crash is a property of the one message, not of the load** — running many
+sessions at once has not been a cause. Two mechanisms, each unsurvivable by a
+retry; find the exception class before assuming either:
 
 | Mode | Why a retry does not save it |
 |---|---|
