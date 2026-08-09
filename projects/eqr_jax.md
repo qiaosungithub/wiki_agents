@@ -29,7 +29,8 @@ discipline `../research/result_logging.md`.
   exactly zero in every `q_readout` mode. It also makes
   `arch.loss.q_halt_loss_weight` irrelevant, that weight being a no-op on the
   head itself (`atan2` is scale-invariant) and having only ever scaled the trunk
-  pull `q_head_sg` removes.
+  pull `q_head_sg` removes. **`q_head_sg: true` is the best-performing setting:
+  training the head independently of the trunk does not cost the trunk.**
 - **A dataset alias absent from `DATASET_PATHS` becomes a LITERAL path**,
   killing the job at startup with "Dataset split train in <alias> does not
   exist". Check the live mapping in `dataset/data_util.py` (`Maze-dynamic`,
