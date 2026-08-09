@@ -179,6 +179,32 @@ reporting 34 false failures, when the durable fix rewrites `gs://` -> CNS inside
 the webdataset opener and a `gs://` root is therefore correct; and it read the
 RAW config, still carrying the zone placeholder, instead of the resolved one.
 
+## Traps: A Second Metro Is A Different Code Path
+
+Moving the production run from cbf to tul (v6p obtainability 3596 vs 936)
+broke on resolution code that had never run, because **cbf was accidentally the
+easy case**.
+
+**`_rewrite_bucket_to_cns` probed a path that exists nowhere.** It strips a
+shard spec at `{`, leaving `.../laion_220k/shard-`, and the `.`-test meant to
+tell a file from a directory sees no dot in `shard-` and keeps it. So the
+rewrite returned None for 34 OV1.5 roots whose shards are present, and the
+locality guard read that as "no replica in this metro" and refused to start.
+It never fired in cbf: there the `gs://kmh-gcp-us-central1` bucket matches the
+zone's own bucket, the guard accepts the path, and the rewrite is never
+reached. tul has no bucket of its own, so every OV1.5 root took the rewrite
+path at once. **When a guard passes, check whether it passed for the reason you
+think** — a path can be accepted by the branch that never examines it.
+
+**The locality guard judged `gs://` by spelling, like the config probe did.**
+Same correction: rewrite first, then require a real CNS target. It stays
+fail-closed, and the rejection now reads "no CNS replica" rather than "zone has
+no bucket registered".
+
+**A mirror is per metro.** The MMBench TSVs were copied to `is-d` only, so tul
+failed on them until `nm-d` and `li-d` got their own copies. Anything added to
+one replica has to be added to all three, or the next metro move finds it.
+
 ## Traps: Running The Jobs
 
 | Rule | Evidence / detail |
