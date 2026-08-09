@@ -85,6 +85,13 @@ first. The decisions are here; the mechanism is in `infra/`.
   auto-retries that one rejection) — nor predict a market outcome, transient
   attribution rejects, or prompts. Ask for several candidates and prefer cells
   that historically work for you.
+- **Never read a full quota floor as a blocker, and never let preflight's
+  YELLOW about it stop a launch.** `used == quota, available 0` is the STEADY
+  STATE of these allocs, not a problem: the floor is a guarantee, not a limit,
+  and the job still queues and still runs. Preflight says YELLOW for it every
+  time; that line is informational. The only numbers that decide anything are
+  the per-cell obtainable counts and, once submitted, the work unit's own
+  `GQM_RESOURCE_DEFICIT_INFO`.
 - **A fully-consumed quota floor does not mean nothing will schedule.** The
   per-group view can read `used == quota, available 0` while tens of thousands
   of chips are obtainable: a floor is a guarantee, not a limit
@@ -93,6 +100,13 @@ first. The decisions are here; the mechanism is in `infra/`.
   uncorrelated with storage** — the cell with the largest co-located quota can
   have *zero* while middling cells run to completion — so re-check immediately
   before launching and pick a cell currently good on both axes.
+- **`tpu route` samples cells too — ask `tpu preflight --json` for the list.**
+  The router's table shows ONE cell per accelerator, and reading it as the
+  complete answer says an accelerator exists only where the sample landed:
+  `tpu route --power=v6p-64` reported v6p solely in `yuphxrp` (phx, no team
+  storage), while preflight's `cells_ok` listed nine cells including
+  `yutulpz` (tul) and `yucbfiv` (cbf) — both co-located with our data. That
+  near-cost a run its data locality.
 - **The market summary samples cells; it does not enumerate them.** Reading its
   price table as the complete list understates where an accelerator exists —
   enough to have sent one plan chasing quota in one metro when the chips were in
