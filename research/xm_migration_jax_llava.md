@@ -387,3 +387,26 @@ is how the KV-cache traceback was recovered after its task was gone.
 **The results spreadsheet cannot answer a stage-1 question**: its `Train acc /
 Train loss` columns hold the *stage-2* endpoint, since a row records one number
 per stage boundary. WandB has per-step history for both.
+
+### The Sheet Holds Two Baselines WandB Does Not
+
+Row 325 of `PaliGemma-baseline-cleaned-20260608` IS the reference
+(`worthy-bird-70` == `gtqntg5g`; every value matches). But it reports **CVBench
+56.67 and VLMs-Are-Blind 12.47, which are absent from the WandB summary** — so
+building the baseline from WandB alone writes off two comparable benchmarks as
+"no baseline". Both are now folded into `reference_gtqntg5g_final.json`, taking
+the tab's own metric conventions, which its notes state explicitly: *"CVBench
+uses official prompt plus direct-answer-letter suffix"* → `cambrian_cvbench_acc`
+(official, NOT micro); *"VLMs Are Blind task mean N (micro M)"* →
+`vlms_are_blind_task_mean` (NOT micro). Picking the wrong variant of either
+would land a plausible number in the right cell.
+
+**15 of 17 benchmarks therefore have a target.** Only `docvqa` and
+`realworldqa` are genuinely baseline-free — the tab files them as "extra
+benchmarks without columns".
+
+`llava_repro/build_sheet_row.py` renders a harvest into that tab's column order
+and prints it beside row 325. It **prints and never writes**: placement is a
+judgement call and a wrong row looks exactly like a right one. It re-derives the
+column map from the live sheet every run (header is row 2, not row 1) rather
+than hardcoding it, since code and spreadsheet drift independently.
