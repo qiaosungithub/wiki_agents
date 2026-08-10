@@ -13,7 +13,7 @@ Branches `sqa.late_fusion_xm` (`jax_llava`) and `data_upload_xm`
 | Data (cc12m + eval bundle + stage-2 SFT mix) | **Done**: three metros, verified per object |
 | Stage 1 (cc12m pretrain, 2180 steps) | **Reproduced** within ±0.009 of the reference curve; ends loss ~1.444 / acc ~0.630, 1.37 steps/s on v7-32 (~26 min) |
 | Stage 2 (SFT, 75000 steps) | **Trains** at 0.357 steps/s on v7-32; the full-coverage smoke **passes end to end** |
-| Long stage-2 run | **Running**: XID 278259733, v6p-64 @ tul, from the stage-1 checkpoint |
+| Long stage-2 run | **Running**: XID 278496995, v7-32 @ cbf, resumed at step 12800 on the FIXED mesh |
 
 Reference: WandB `sqa24-massachusetts-institute-of-technology/jax-llava`, run
 `gtqntg5g` (`worthy-bird-70`), compared at every logged step; ours is marginally
@@ -265,6 +265,46 @@ preempted at ~2400 with its checkpoint intact and returned to PENDING. A
 supervisor must read PENDING/SUBMITTED/STARTING as healthy — and must NOT
 auto-resume a `CODE BUG`, which is deterministic and fails identically on the
 next attempt, burning a schedule slot and hiding the signal.
+
+## The 7x Slowdown Was A Silent Mesh Fallback
+
+Stage-2 ran at **0.312 steps/s where the reference did 1.871** — same recipe,
+same 64 devices, same bs256/336/512. Config was identical; the difference was
+the mesh.
+
+`utils/pjit_util.get_mesh()` looks `device_kind` up in a `TOPOLOGIES` table and,
+on no match, falls back to a flat `(N,)` mesh intended for CPU/GPU debug. v7 was
+not in the table. Under `hsdp`/`hsdp_legacy_data` the model axis is
+`axis_names[-1]`, which on a 1-D mesh is the ONLY axis — so every parameter was
+sharded across all 64 devices, every matmul paid a full-mesh collective, and the
+data axis resolved to that same axis. **Nothing failed. A 1-D mesh trains and
+converges; it is merely several-fold slower**, which is why it survived a full
+production run.
+
+Fixed: v7 gets the v5-style 3-D shapes (its slice geometry is identical to
+v6p), so 64 devices → `(4,4,4)`. Measured **0.312 → 1.136 steps/s, 3.6x**, and
+the remaining 64380 steps went from 57.3 h to 15.7 h.
+
+Three things worth carrying:
+
+- **Match v7 as `tpu7`, not `v7`** — see `../tpu_reference.md`. The wrong key
+  would have looked like a fix and changed nothing.
+- **A fallback that preserves correctness is the hardest kind of bug.** Make it
+  loud: `get_mesh` now warns when a TPU kind is unknown, and
+  `tools/g3_mesh_probe` reports the mesh a real slice builds.
+- **Async dispatch misattributes profiling.** `p_train_step` returns
+  immediately, so the first op that touches its result — here
+  `metrics_tracker.update` — absorbs the entire device wait. Timing that call
+  said "metrics cost 2.78 s"; the step did. Time the WHOLE iteration too, so
+  the parts must reconcile against the total, and block explicitly before
+  attributing anything.
+
+A separate fix landed on the way: `MetricsTracker` was calling
+`jax.device_get` on 33 leaves EVERY step, which serialises the async pipeline.
+It was not this bottleneck (metrics come back already-reduced and replicated)
+but it is a real one at other shapes; the accumulation is now device-side with
+one transfer per log interval, value-equality checked by
+`tools/g3_metrics_tracker_probe`.
 
 ## Traps: Running The Jobs
 
