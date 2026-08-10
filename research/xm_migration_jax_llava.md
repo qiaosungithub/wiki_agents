@@ -599,3 +599,36 @@ supervisor decision — would have misread a healthy job. Corrected to `running`
 It did not verify the state left BEHIND. Cancellation residue caused
 automation to make a destructive decision minutes later, on stale information.
 **Drill the aftermath, not just the recovery action.**
+
+### The Log Mirror Dies Independently Of Training — Do Not Judge Liveness By It
+
+After two genuine stalls I added a detector keyed to the rank-log mtime. Hours
+later all eight rank logs froze at 11:29 and it looked like a third. It was not:
+
+| time | event |
+|---|---|
+| 11:29 | all 8 rank logs stop |
+| 12:18 | `checkpoint_26400` written — 49 min AFTER the logs froze |
+| 12:58 | `checkpoint_28800` written, exactly on the 2400-step cadence |
+
+The job was healthy the whole time; the CNS log mirror had stopped shipping.
+**The mtime detector would have cancelled a perfectly good run** — a false
+positive that destroys the thing it exists to protect, strictly worse than no
+detector.
+
+**A checkpoint cannot be produced without the training step actually
+executing**, so it is the only honest progress signal. The supervisor now keys
+on the newest checkpoint's mtime, threshold 90 min (two 2400-step intervals plus
+a ~4 min save).
+
+The two earlier stalls WERE real, and the distinction is exactly this test: in
+both cases no checkpoint appeared for the whole window before the cancel
+(22400 @07:13 then nothing until the 08:37 cancel; 25600 @10:10 then nothing
+until 11:04), while today two arrived on schedule. **Same symptom in the logs,
+opposite verdict from the artifacts.**
+
+Corollary for reading these runs: `Auto-resume: continuing from ...` and the
+per-step metric lines are `log_for_0` output, and WHICH rank file they land in
+tracks the Borg task ordering, not the JAX process index. Their absence from
+`rank_0_attempt*.log` means nothing — today they were in `rank_2`. Same trap as
+the metric harvester's "scan every rank".
