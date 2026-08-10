@@ -632,3 +632,28 @@ per-step metric lines are `log_for_0` output, and WHICH rank file they land in
 tracks the Borg task ordering, not the JAX process index. Their absence from
 `rank_0_attempt*.log` means nothing — today they were in `rank_2`. Same trap as
 the metric harvester's "scan every rank".
+
+### The Workstation Is A Single Point Of Failure For Everything Watching The Run
+
+At 17:13 the workstation rebooted (`uptime` showed 32 min when it was noticed at
+17:45). Consequences, in order of how long each took to understand:
+
+* **All four watchers died silently.** `check_watchers.sh` reported `0 running`
+  for every one. Nothing notified anybody -- the notifier is itself a local
+  process.
+* **`/tmp` was wiped**, taking every background blaze log and launch log with
+  it. A `nohup ... &` blaze run whose output goes to `/tmp` leaves no evidence
+  it ever ran.
+* **The queued work unit was torn down**: WU4 went from `PENDING` with 0 tasks
+  to `PENDING` with `BORG_STATE_CANCEL x8`.
+
+What SURVIVED, and it is the right list: every git commit (three repos), every
+checkpoint on CNS, and the `.tsv` monitor logs under `~/work/tpu_scripts/`
+because they are written to the home directory rather than `/tmp`.
+
+**The lesson is where state lives, not that a machine rebooted.** Anything a
+long run depends on has to be on CNS or in a committed repo; `/tmp` is scratch
+that can vanish mid-investigation, and a watcher process is only as durable as
+the box it runs on. Recovery was cheap precisely because the expensive things
+(31200 steps of training, every fix, every finding) were already durable —
+restarting meant one `--resume_xid` and one loop over four scripts.
