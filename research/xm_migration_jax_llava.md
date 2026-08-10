@@ -315,6 +315,24 @@ but it is a real one at other shapes; the accumulation is now device-side with
 one transfer per log interval, value-equality checked by
 `tools/g3_metrics_tracker_probe`.
 
+## Stage-2 Is Tracking The Reference Curve
+
+The strongest available evidence that the port is faithful, and it is a
+per-step comparison rather than an endpoint one:
+
+| step | reference acc / loss | ours |
+|---|---|---|
+| ~14000 | 0.7008 / 1.2353 | **0.7000 / 1.2412** (step 14100) |
+
+Within 0.001 acc and 0.006 loss on the same recipe, after the same 2180-step
+stage-1 start (acc 0.630) — on Borg/CNS instead of the GCP cluster, reading
+CNS replicas instead of `gs://`. Reference endpoint is acc 0.746 / loss 1.081
+at 77180.
+
+**Compare mid-run against WandB history, not against the final number.** The
+spreadsheet only records the stage boundary, so a run that is silently diverging
+looks fine until it ends; the per-step curve says so within an hour.
+
 ## Traps: Running The Jobs
 
 | Rule | Evidence / detail |
