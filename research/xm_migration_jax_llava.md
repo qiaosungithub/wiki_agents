@@ -480,3 +480,73 @@ perturb it. Every link in the chain checked out:
 looks wrong in the yaml, and it is only harmless because
 `resolve_borg_autoresume` prefers self-written progress. Do not "tidy" that
 precedence rule.
+
+## The Eval Harness Was Lying: Every Rank Scored Process 0's Answers
+
+The single most important finding of the migration, and it nearly produced the
+opposite conclusion from the truth.
+
+Online evals showed VQAv2 **16.84** against the reference's 67.63, TextVQA 5.37
+against 39.78 — a ~50-point collapse — while the TRAINING curve matched to a
+mean of -0.0003 acc. That combination is itself the diagnosis: the teacher-forced
+forward pass is what train acc measures and it was right, so the fault had to be
+in the autoregressive path the evals use.
+
+**Root cause.** `train.py::run_p_sample_step` returns the GLOBAL gathered batch
+(`local_B * 8` rows), but all eight eval files consume it host-locally via
+`zip(batch["aux"], out_strs, batch["is_pad"])`. `zip` stops at the shortest, so
+every rank consumed `out_strs[0:32]` — **always process 0's slice**. Rank 0 was
+correct by coincidence; ranks 1-7 scored process 0's answers against their own
+questions, i.e. at chance.
+
+**The probe that found it.** Per-rank accuracy, which separates instantly:
+
+| rank | acc | yes/no answered with a non-yes/no |
+|---|---|---|
+| 0 | **66.58** | 2/981 |
+| 1-7 | 9.2 - 10.5 | ~62% |
+
+`(66.58 + 7*9.6)/8 = 16.72` predicted vs **16.84** observed. Confirmed by rank
+r's answer at index i being byte-identical to rank 0's, 2680/2680, on every
+rank, despite different questions.
+
+**Why the obvious probe missed it.** Shifting the concatenated predictions
+against ground truth by +-1, 2, 4, 8, 16, 32 made accuracy WORSE at every
+offset, which reads as "alignment is fine". A constant shift cannot express
+"rank r reads rows 0..31 instead of 32r..32r+31". **When a global test says
+alignment is fine but the numbers say otherwise, split by the unit the work is
+distributed over.**
+
+**Verdict: the migration reproduces the reference.** All 9 corrected cells fall
+within 2.4σ; pooled residual -1.43 ± 0.46 points.
+
+**The fix** (`_process_local_rows`) inverts the placement by asking the sharding
+which global rows this process addresses, rather than assuming `PRI*B`. The
+naive offset is right on today's mesh and wrong on an interleaved one — a layout
+assumption of exactly the kind that caused the 1-D mesh bug. It RAISES on a
+row-count mismatch, because a misaligned batch is invisible downstream: it just
+scores at chance.
+
+**Consequence for this run:** `_stage2_final` calls the same function, so the
+17 final benchmarks will be wrong. Training and checkpoints are sound, so a
+**final-eval-only pass over the last checkpoint on fixed code** is sufficient —
+the 20 h of training does not need repeating.
+
+### A regression the eval fix does NOT repair
+
+prod-f's MME collapses because 164/297 predictions begin `"To determine"`, all
+7-8 words, cut off mid-phrase, **0/164 containing a yes/no**. The model has
+started emitting chain-of-thought preambles on yes/no prompts and the 8-token
+`shortqa` budget truncates them before the answer arrives. That is model-
+behaviour drift, not measurement. Raising the token budget would hide it rather
+than fix it.
+
+### Tests that only run where they cannot catch anything are worse than none
+
+The regression tests passed under a plain interpreter and failed 7/7 under
+blaze: in google3, JAX refuses any call made before `InitGoogle()`, which
+`absl.app.run()` triggers, so building a Mesh from a bare `__main__` block dies
+with *"Attempted call to JAX before absl.app.run() is called"*. **That failure
+reads as the FIX being broken rather than the harness being unportable** — the
+worst possible mode for a regression test. Wrapped the runner in `app.run()`;
+verified 7/7 pass with the fix present and 6/7 fail with the guard deleted.
