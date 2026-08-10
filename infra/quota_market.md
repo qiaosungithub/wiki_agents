@@ -120,6 +120,20 @@ reason can never fire.
 
 ### Setting one
 
+**Use `tools/limit_order.sh`; it is read-first and refuses group scope by
+default.** `status [accel]` prints the live clearing price beside every cap in
+force and marks each `BLOCKING` or `ok`, which answers "is a cap even the
+problem?" before anything is changed — the question that matters, because a
+cap that is not firing is not the reason your job is pending. `show-xid <xid>`
+resolves which group and accelerator a cap would attach to. Writes are dry-run
+unless `--apply`, and `set-group` additionally demands
+`--i-understand-group-scope`.
+
+**Permission, verified 2026-08-10:** the experiment level (`--xid`) is
+available — a real idempotent commit returned `Success`. Group level is
+unverified on purpose: testing it honestly means writing a cap that hits every
+member's jobs.
+
 **Always dry-run first.** The convenience CLI takes positional targets where a
 number is an experiment id, a couple of keywords mean "your recent / running
 experiments", and **anything else is a group name** — the one dangerous case. A

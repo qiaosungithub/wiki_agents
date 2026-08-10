@@ -25,6 +25,7 @@ and each has a `README.md` index.
 | `research/` | Running experiments; logging results. |
 | `reports/` | Writing and rendering paper reports. |
 | `infra/` | Allocator, market, and CLI internals, when `jobs.md` falls short. |
+| `tools/` | Executable helpers (price caps); prose elsewhere. |
 | `archive/` | History. Never routed to by default. |
 
 ## Topic Router
@@ -36,7 +37,7 @@ and each has a `README.md` index.
 | Queue, inspect, resume, debug a job | `jobs.md`, then the project guide |
 | A CPU-only batch job will not schedule | `jobs.md` §Requirements And Runtime |
 | Choose a cell; preflight before packaging | `jobs.md` §Choosing Where To Run |
-| A job will not schedule; capping spend | `infra/quota_market.md` |
+| A job will not schedule; capping spend | `infra/quota_market.md`, `tools/limit_order.sh` |
 | Change the `tpu` CLI or its daemon | `infra/tpu_cli.md` |
 | TPU codename, HBM, legal shape, equivalence | `tpu_reference.md` |
 | Place data or checkpoints; copy or upload | `storage.md`, then the project guide |
