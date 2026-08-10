@@ -318,16 +318,35 @@ one transfer per log interval, value-equality checked by
 ## Stage-2 Is Tracking The Reference Curve
 
 The strongest available evidence that the port is faithful, and it is a
-per-step comparison rather than an endpoint one:
+per-step comparison over the WHOLE trajectory rather than an endpoint one.
+`llava_repro/compare_curve.py` diffs every shared step against the reference's
+771-point history:
 
-| step | reference acc / loss | ours |
-|---|---|---|
-| ~14000 | 0.7008 / 1.2353 | **0.7000 / 1.2412** (step 14100) |
+| | value |
+|---|---|
+| shared steps compared (at step 20600) | **79** |
+| mean acc delta | **-0.00031** (sd 0.00018, max abs 0.0008) |
+| mean loss delta | **+0.00153** (sd 0.00053, max abs 0.0031) |
+| outside tolerance | **0/79** |
 
-Within 0.001 acc and 0.006 loss on the same recipe, after the same 2180-step
-stage-1 start (acc 0.630) — on Borg/CNS instead of the GCP cluster, reading
-CNS replicas instead of `gs://`. Reference endpoint is acc 0.746 / loss 1.081
-at 77180.
+Same recipe, same 2180-step stage-1 start (acc 0.630) — on Borg/CNS instead of
+the GCP cluster, reading CNS replicas instead of `gs://`. Reference endpoint is
+acc 0.746 / loss 1.081 at 77180.
+
+**The loss offset is systematic, and that is fine — because it is FLAT.**
+79/79 loss deltas are positive, which is not noise; a +0.0015 bias that size is
+what bf16 accumulation order on a different mesh looks like. The test that
+matters is whether it COMPOUNDS: first half +0.00147, second half +0.00158,
+slope +3.0e-8 per step, extrapolating to +0.0023 over the full 77180. A real
+divergence (wrong data mix, wrong LR schedule, a shard reading the wrong split)
+grows with training; a numerics offset stays put. **Report the trend, not just
+the magnitude** — a small delta that is quietly widening is the dangerous one,
+and a single matching point cannot tell the two apart.
+
+**Compare on the GLOBAL step counter.** Our log prints `[<global>]` and also
+`stage_step = global - 2180`; the reference's `_step` is global. Lining up
+`stage_step` against `_step` shifts every pair by 2180 and manufactures a
+divergence that is not there.
 
 **Compare mid-run against WandB history, not against the final number.** The
 spreadsheet only records the stage boundary, so a run that is silently diverging
