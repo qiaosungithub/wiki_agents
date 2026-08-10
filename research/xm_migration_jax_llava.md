@@ -282,8 +282,17 @@ converges; it is merely several-fold slower**, which is why it survived a full
 production run.
 
 Fixed: v7 gets the v5-style 3-D shapes (its slice geometry is identical to
-v6p), so 64 devices → `(4,4,4)`. Measured **0.312 → 1.136 steps/s, 3.6x**, and
-the remaining 64380 steps went from 57.3 h to 15.7 h.
+v6p), so 64 devices → `(4,4,4)`. Measured **0.312 → 1.136 steps/s, 3.6x**.
+Confirmed in production (XID 278496995): mesh `(4,4,4)`, resumed at step 12800
+rather than restarting, **0.878 steps/s true wall-clock including checkpoints
+and eval** — 83% of the reference's 1.056 overall pace, ETA ~20 h.
+
+**Checkpointing became the dominant overhead once training got fast.** A save
+is ~245 s and the interval is 800 steps: that was 9% of a 3.2 s/step run and
+is ~28% of a 0.88 s/step one. The right interval is a function of step time,
+not a constant — but widening it also widens what a preemption discards, so it
+is only worth revisiting on a slice that holds (this one has not been
+preempted).
 
 Three things worth carrying:
 
