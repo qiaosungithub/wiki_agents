@@ -57,11 +57,35 @@ RESOURCE_EXHAUSTED: [accounting_user:deepmind-dynamic-xm]
 ```
 
 Read it structurally: the deficit is per **platform** (`ghostfish` = v6p) and
-names **no cell**. So neither changing cell nor changing group routes around
-it — measured, not assumed: g1/g5/g9 report identical obtainability because
-they share the one pool, and the same numbers appear in every cell.
+names **no cell**. g1/g5/g9 report identical obtainability because they share
+the one pool.
 `go/borg-admission-control-ml#adjusted-ceilings-in-admission-control` documents
 the mechanism.
+
+**But do NOT generalise that into "changing cell or group cannot help" — a
+live-queue probe falsified it.** A pool-wide adjusted ceiling is only ONE of
+the verdicts that stops a v6p job, and the others ARE cell- and group-scoped.
+On 2026-08-10 the same 64-chip PROD ask, minutes apart, drew three different
+refusals and one success:
+
+| ask | verdict the work unit gave |
+|---|---|
+| g1, cell `yutulpz` | `resource-guarantee-reclaim` — held opportunistically, taken back by an allotment with a floor |
+| g9, cell `yutulpz` | `GQM_OVERSOLD_MARKET` — "**in cell yutulpz** the demand from admitted jobs exceeds the available cell supply" |
+| g1, cell `yucbfiv` | `GQM_RESOURCE_DEFICIT_INFO`, deficit **19** chips (tul's was 62) |
+| g1, cell `yucbfiv`, later | **granted** — full 128-device slice, trained, wrote checkpoints |
+
+So per-cell deficits differ, the allocator names the cell in its own text, and
+moving cell is exactly what obtained the slice. **Read the work unit's message
+with `deep_probe`/`why_probe` before concluding anything is pool-wide**; the
+obtainability table cannot distinguish these four cases and reads the same in
+all of them.
+
+**A quota FLOOR is not shared even when obtainability is.** Same probe: g1 held
+368 guaranteed v6p chips with 0 used while g9 held 4, all used — so a 64-chip
+ask in g9 is ~94% opportunistic (reclaimable) and the identical ask in g1 fits
+inside an idle guarantee. Identical obtainability numbers hide that difference
+entirely.
 
 **Obtainability does not measure this, and reading it as if it did inverts the
 answer.** While a v6p-64 job was being preempted every 15 minutes, preflight
@@ -73,13 +97,26 @@ authoritative answer is the deficit string from `deep_probe` on a live work
 unit.
 
 **Hold time is the number that decides usability, and it is only measurable
-from a real run.** Take the attempt timestamps and difference them; the
-`_startup` markers or per-attempt logs give this for free. At a 15.1-minute
-mean hold, a v6p-64 slice with 2x the raw compute of a v7-32 delivered a
-QUARTER of its net throughput, because each preemption discards ~half a
-checkpoint interval and shortening the interval trades that for save overhead
-(a 236 s save against a 15 min hold). Compute ratio is not throughput when the
-slice keeps being taken away.
+from a real run.** Compute ratio is not throughput when the slice keeps being
+taken away: a v6p-64 with 2x the raw compute of a v7-32 delivered a QUARTER of
+its net throughput, because each preemption discards ~half a checkpoint
+interval and shortening the interval trades that for save overhead (a 236 s
+save against a ~15 min hold).
+
+**Measure it from Borg's `started` epoch, and only count a slice as HELD once
+Borg says `RUN`.** Three traps, each of which produced a wrong number here:
+
+| Trap | What it fabricates |
+|---|---|
+| Differencing per-attempt log timestamps | Counts STARTUP as holding. 27 v6p attempts averaging "15.1 min" contained **zero training steps** — 13 died at ~3 KB during JAX/dataloader startup, the largest was killed mid-checkpoint-restore. The metric described time-to-teardown, not useful holding. |
+| Treating `PENDING` (or "the work unit exists") as holding | The allocator builds a 16-task gang and cancels it without ever reaching `RUN`. Counting that reports capacity the pool never delivered. |
+| Differencing your own poll samples | A gap in YOUR polling reads as one long hold. A 73-minute sampler outage manufactured a "74.6 min" episode that Borg's `started` (a later epoch) disproved. |
+
+`started` is stamped by Borg when the gang begins running and does not depend
+on anyone watching, so a restart during a blind window shows up afterwards as a
+CHANGED value. Key episodes on `(xid, started)`, not on sample adjacency.
+**And verify the run actually computed** — a written checkpoint is the only
+artifact that cannot exist without a step having executed.
 
 ## Price Caps (Limit Orders)
 
