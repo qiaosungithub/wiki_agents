@@ -410,3 +410,27 @@ and prints it beside row 325. It **prints and never writes**: placement is a
 judgement call and a wrong row looks exactly like a right one. It re-derives the
 column map from the live sheet every run (header is row 2, not row 1) rather
 than hardcoding it, since code and spreadsheet drift independently.
+
+### Two Ordering Traps In The Harvest
+
+Both are invisible until a run has been preempted enough times to matter, which
+is exactly when nobody re-checks the tool.
+
+* **`sorted()` on rank-log paths is lexicographic**, so
+  `rank_0_attempt10.log` sorts BEFORE `rank_0_attempt2.log`. A "last file wins"
+  harvest therefore returns an EARLY attempt's numbers after ten preemptions.
+  Fixed by keying on the training step the metric line was emitted at, which
+  states the actual intent (newest evaluation) and does not care how Borg
+  numbered the attempts. `test_harvest.py` pins it with no CNS access;
+  mutation-checked — the pre-fix code fails 3 of 7 tests, returning 11.0 where
+  59.03 is right.
+* **The harvest now reports WHICH step produced the numbers** and refuses to
+  present a short-checkpoint eval as the run's score. `result_logging.md` is
+  explicit that an eval of a short checkpoint is a different, pessimistic
+  result; the smoke's step-12 metrics are correctly flagged non-comparable
+  against the reference's 77180.
+
+Unrelated but the same shape: **`pgrep -f <script>.sh` matches its own shell**,
+because the pattern is in the argv of the `sh -c` running it. It reports one
+supervisor too many, which invites killing the only real one.
+`tpu_scripts/check_watchers.sh` matches the interpreter+script shape instead.
