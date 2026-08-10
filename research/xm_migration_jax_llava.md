@@ -333,6 +333,36 @@ at 77180.
 spreadsheet only records the stage boundary, so a run that is silently diverging
 looks fine until it ends; the per-step curve says so within an hour.
 
+### Scoring The Final Benchmarks: Harvest The RANK LOG, Not `metrics.json`
+
+`tpu_scripts/llava_repro/compare_final_metrics.py` diffs a finished run's 17
+final benchmarks against the reference (`reference_gtqntg5g_final.json`, pulled
+from WandB `gtqntg5g`). Three things it had to get right:
+
+* **`vqav2`, `textvqa` and `refcocog` write NO `metrics.json`** — only
+  `results_final.json`, which holds raw predictions. Their scores exist solely
+  as `key=value` pairs on the `logging_writer` line of the rank log. Harvesting
+  `eval_results/*.metrics.json`, the obvious approach, silently drops three of
+  the headline numbers.
+* **Scan EVERY rank log, not `rank_0`.** That filename tracks Borg task order,
+  not JAX process index: in the smoke run the final-metric block landed in
+  `rank_1_attempt1.log`.
+* **Four tasks have no baseline at all.** `docvqa`, `realworldqa`,
+  `cambrian_cvbench` and `vlms_are_blind` were added to `final_eval_tasks`
+  after the reference run finished, so they are reported `NO-REF` and
+  distinguished from a genuinely `MISSING` number (an eval that crashed) —
+  which is treated as a reproduction failure, same as a wrong value.
+
+Validated against the smoke run (XID 278211441): all 17 tasks harvested, 0
+unexpectedly absent. The supervisor runs it automatically when the run reaches
+`completed`, so the verdict is recorded whether or not anyone is watching.
+
+Units are NOT rescaled anywhere. Both sides are the same key namespace emitted
+by the same code, so they match by construction; a rescale is exactly the kind
+of fixup that would hide a real regression. (GQA reading `0.087` in the smoke is
+not a fraction/percent bug — it is 0.087%, 11 correct out of 12578, from a
+12-step model.)
+
 ## Traps: Running The Jobs
 
 | Rule | Evidence / detail |
