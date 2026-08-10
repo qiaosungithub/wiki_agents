@@ -434,3 +434,30 @@ Unrelated but the same shape: **`pgrep -f <script>.sh` matches its own shell**,
 because the pattern is in the argv of the `sh -c` running it. It reports one
 supervisor too many, which invites killing the only real one.
 `tpu_scripts/check_watchers.sh` matches the interpreter+script shape instead.
+
+## The Recovery Path, Drilled While Nothing Was Broken
+
+A recovery mechanism first exercised during the emergency is a guess, and this
+one has already failed in production once (XID 278259733: the warm-start
+`load_from` was re-applied on every Borg restart, so the job restarted at 12800
+and died on `checkpoint_N already exists`, eleven times). So it was drilled
+read-only against the LIVE run, mid-flight, touching nothing.
+
+`llava_repro/resume_drill.py` replicates `ckpt_util`'s two completeness
+witnesses through `fileutil` — it imports none of the job's code and cannot
+perturb it. Every link in the chain checked out:
+
+| Link | Verified |
+|---|---|
+| A complete checkpoint exists | 4 of them; `_pending_dataloader_state` correctly skipped as not `checkpoint_N` |
+| Each carries both witnesses | `commit_timestamp_nsecs` present AND 8 non-empty `dataloader_state` files |
+| The warm start is superseded | `load_from` still points at run **prod-e**'s `checkpoint_12800`; since that prefix is outside this run's checkpoint root, self-progress wins → resume from `checkpoint_18400`, NOT 12800. This is the precedence fix doing its job on the real config. |
+| A resume can repackage | `stagedir` recorded in `~/.tpu_jobs.json` — without it `tpu queue --resume_xid` REFUSES to package rather than silently shipping the current checkout |
+| The snapshot has the mesh fix | `"tpu7"` present in the stagedir's `pjit_util.py`, so a resume cannot regress to the 1-D mesh |
+| Preemption budget | `max_task_failures=-1`, unlimited |
+
+**The `load_from` line in the live config is the trap, still armed.** It reads
+`.../xid_278366344_...prod-e/checkpoints/checkpoint_12800`. Nothing about that
+looks wrong in the yaml, and it is only harmless because
+`resolve_borg_autoresume` prefers self-written progress. Do not "tidy" that
+precedence rule.
