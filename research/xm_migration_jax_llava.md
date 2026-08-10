@@ -550,3 +550,52 @@ with *"Attempted call to JAX before absl.app.run() is called"*. **That failure
 reads as the FIX being broken rather than the harness being unportable** — the
 worst possible mode for a regression test. Wrapped the runner in `app.run()`;
 verified 7/7 pass with the fix present and 6/7 fail with the guard deleted.
+
+## The Stall, And The Automation That Nearly Made It Worse
+
+Worth recording as a chain, because each link was individually reasonable.
+
+**1. The job wedged, and every health signal said it was fine.** At step 23000
+all eight ranks stopped logging immediately after a clean `checkpoint_22400`
+save — no traceback, no exit. Borg reported `8/8 BORG_STATE_RUN`; `tpu check`
+said the job was alive. Both were TRUE. The gang was stuck in a collective
+barrier, and a hung collective does not fail a task.
+
+**LIVENESS IS NOT PROGRESS.** The supervisor asked "is the job alive?" and got
+an honest yes for 72 minutes. The progress watcher recorded the step but nothing
+compared consecutive samples — two identical steps 30 min apart was the signal,
+and nothing was looking at it. The supervisor now also watches the log mtime,
+which cannot stay fresh while the gang is blocked (40-min threshold: a save
+blocks ~250 s and an online eval runs for minutes; two confirmations required).
+
+**2. Recovery worked exactly as drilled.** `tpu cancel --dry-run` first, then
+cancel, then `--resume_xid`. Auto-resume chose `checkpoint_22400`, NOT the
+warm-start `checkpoint_12800` still named in the config — the precedence rule
+doing its job in a real failure. Cost: ~600 steps. `deep_probe` confirmed a
+clean handoff (WU1 ABORT, WU2 RUNNING 8/8).
+
+**3. Then the supervisor tried to resume it a second time.** Restarted after
+the fix, it read a STALE `CANCELLED` line — the cancel was mine, the resume was
+already live — and launched another `--resume_xid` onto the same XID. Two work
+units racing for one checkpoint path is precisely what `--resume_xid` exists to
+prevent. Its own guard failed OPEN:
+
+    [resume] could not check XID ... for live work units
+      (AttributeError: 'XManagerExperiment' object has no attribute
+      'get_work_units'); proceeding.
+
+Killed the launcher chain before it submitted (`kill -9` was needed);
+`deep_probe` confirmed no third work unit. **A supervisor must never undo a
+cancel** — it is a deliberate human act, and if it was wrong the human resumes
+it. Now an explicit exit.
+
+**4. A cancel leaves a trap in the registry.** `~/.tpu_jobs.json` kept
+`status: CANCELLED` and `cancelled_at` after the successful resume, because the
+resume path does not clear them. Every later `tpu check` — and every
+supervisor decision — would have misread a healthy job. Corrected to `running`
+(with a backup).
+
+**The lesson that generalises:** the resume drill verified that recovery WORKS.
+It did not verify the state left BEHIND. Cancellation residue caused
+automation to make a destructive decision minutes later, on stale information.
+**Drill the aftermath, not just the recovery action.**
