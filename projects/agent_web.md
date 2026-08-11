@@ -36,6 +36,41 @@ request as agent-to-agent traffic and returns tool-oriented content the human
 message view does not render. Clear only variables whose semantics you have
 verified; do not strip the whole service environment as a generic fix.
 
+## Two Instances, Separated By Session Name Prefix
+
+**The collaborator site (`run-lyy.sh`, port 8889, `lyy.kaiming.me`, token
+`.lyy.token`, cwd `~/lyy-work`) shares every agent home and login with the main
+site; the only separation is the session display name.** An instance with
+`AGENT_WEB_SESSION_NAME_PREFIX="[lyy]"` lists only sessions whose name starts
+with the prefix, forces the prefix onto renames, and auto-names a new session
+`[lyy] <first user message>` after its first turn; the main `run.sh` hides that
+prefix via `AGENT_WEB_SESSION_NAME_HIDE`. Renaming a session across the prefix
+boundary hands it to the other site. This is cooperative list-level separation
+only — both instances run as the same Unix user with the same credentials, so a
+token IS full access to this machine. `tests/session-prefix.mjs` (zero
+inference) is the regression test.
+
+## Claude Binary Resolution
+
+**Never let the backend resolve `claude` from an inherited PATH.** A server
+started under a tmux whose PATH lacked `~/.npm-global/bin` answered every web
+"launch Claude" with `spawn claude ENOENT` for a day — millions of retry lines
+in `server.log` — while terminal sessions kept working, so the failure looked
+like anything but PATH. `run.sh` now pins `CLAUDE_WEB_BIN` to an absolute path
+and refuses to start without one; keep it that way.
+
+## A Web-Launched Agent Cannot Redeploy These Servers
+
+**An agent session launched from the web runs inside a bwrap jail (clod): a
+private PID namespace and private `/tmp` mean it can see neither the host's
+processes nor the tmux socket, and `crontab`, `systemd --user`, setuid
+binaries, and key-based `ssh localhost` are all unavailable.** It can edit
+files, commit, build, and reach shared-namespace ports over localhost — but it
+cannot kill or restart the very backend that is serving it. Redeploys go
+through `deploy-restart.sh` in a real terminal; the jailed agent verifies over
+HTTP afterwards. The network namespace IS shared, so port probes and `curl`
+from inside the jail tell the truth.
+
 ## Jetski Language Server Address
 
 **Never inherit `$ANTIGRAVITY_LS_ADDRESS`.** `agentapi` dials it with no
