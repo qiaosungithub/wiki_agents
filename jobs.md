@@ -121,6 +121,16 @@ first. The decisions are here; the mechanism is in `infra/`.
   ban: a storage-less cell is real capacity as long as something sweeps the
   quota. The platform reads a multi-cell allow-list only in its
   spatially-flexible mode, so set both together; pinning a cell bypasses both.
+- **A PROD floor is per (group, accelerator, cell) — a tier alone guarantees nothing.** A
+  RoboTwin DP smoke took FIVE launches to hold: `BATCH v6e-8` was preempted 4x by
+  higher-priority prod during the ~3-min cold-import; `PROD v6e-16` in `yucbfrl` was
+  guarantee-reclaimed twice because **group 1 has a ZERO v6e floor there** (`preflight`
+  still lists thousands of chips *obtainable* — obtainable is borrowed capacity a guarantee
+  holder can reclaim mid-compile, not a floor); `PROD v7-16 yutulpz` hit "cell oversold".
+  It only stuck on **`v7-16`, group 9, in `yulpptr`/`yutulpz`** — the exact (group,
+  accelerator, cell) where this account's STABLE jobs already run, co-located with the data
+  mirrors. **Diagnose capacity from your own fleet: launch where your long jobs already
+  survive, not where preflight says chips are obtainable.**
 
 ## Preemption, Restart, And Resume
 

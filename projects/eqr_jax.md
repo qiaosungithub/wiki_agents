@@ -144,6 +144,17 @@ construction that would work
 (`MultiprocessingOptions(primary_host=0, active_processes={0})`). Distance has a
 fix here; read amplification does not.
 
+**A host-local single-device model cannot be orbax-saved unchanged on a multi-host
+slice.** The DP-CNN baseline (`dp_train.py`) shards nothing — every host runs an
+identically-seeded replica — so its params are `SingleDeviceSharding` `jax.Array`s, and
+`ocp.StandardCheckpointer.save` REFUSES them when `jax.process_count() > 1`
+(`ValueError: Cannot serialize host local jax.Array ... in multi-host setting`).
+`active_processes={0}` skips the write *barrier* but NOT this check. It trained clean to
+step 90 then crashed at the step_100 save — invisible to any single-process local run or
+hermetic-binary smoke, only on a real ≥2-host Borg slice. Fix: `jax.device_get` the payload
+to host numpy before save, and restore into a numpy target symmetrically. Any replicated
+(non-sharded) model checkpointing from a multi-host slice needs this.
+
 ## Loader, Sampler State, And Run Length
 
 - **`training.total_steps` is the only run-length input** and the train loader
