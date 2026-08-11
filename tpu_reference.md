@@ -79,6 +79,12 @@ differs even where HBM matches** — v6p carries 256 GiB/chip, v7 only
 ~128 GiB/chip (512 GB machines, 481/464 GiB usable) — so a large host-side cache
 or heavy input pipeline can fit v6p and OOM the host on v7 despite identical HBM.
 
+**Peak capability is not obtainable throughput.** These ratios hold only while
+you keep the slice. Measured over 18.7 h, v6p-64's median hold was 2.3 min --
+shorter than one checkpoint interval -- so it finished less work than v6e or
+v5p despite 4.34x the per-chip compute. Before choosing a family for a long
+preemptible run, read `research/accelerator_choice.md`.
+
 ## Converting Between Generations
 
 Per chip, `v7 = v6p ≈ 2x v6e ≈ 4.34x v5p ≈ 7.23x v4`, so

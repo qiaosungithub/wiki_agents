@@ -40,6 +40,7 @@ and each has a `README.md` index.
 | A job will not schedule; capping spend | `infra/quota_market.md`, `tools/limit_order.sh` |
 | Change the `tpu` CLI or its daemon | `infra/tpu_cli.md` |
 | TPU codename, HBM, legal shape, equivalence | `tpu_reference.md` |
+| **Choose an accelerator family**; a preemptible slice will not hold | `research/accelerator_choice.md` |
 | Place data or checkpoints; copy or upload | `storage.md`, then the project guide |
 | Pick a cell/metro for a v7 run | `research/v7_storage_placement.md` |
 | Read a distributed path interactively | `storage.md` §Distributed Reads |
