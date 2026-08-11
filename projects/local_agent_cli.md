@@ -70,3 +70,18 @@ and points nowhere near the cause: check `readlink /proc/<ux-server-pid>/cwd`,
 then restart the server. **Workers are reparented to init and survive the UX
 server dying**, so a run that looks lost usually needs the server back, not
 `amp start`.
+
+**Never start a second UX server to "fix" an unreachable one — find the one
+already running first** (`ss -ltnp | grep amply`, wildcard 0.0.0.0 binds are
+servers, 127.0.0.1 are workers). Every server boot rewrites
+`~/.amply/dashboard_url`, so with two alive the file tracks whichever booted
+last; when that one dies, every client follows the file to a corpse while a
+healthy server keeps serving unlisted. This machine once ran THREE at a time
+that way, splitting live sessions between them. `amp` now heals this itself:
+it re-pings once (a load blip is not an outage), then adopts a live server by
+repointing the file, and only launches when nothing is adoptable. Two footguns
+with prior incidents: **`~/.amply/bin/ux_launch.py` used to exec a real server
+on ANY invocation — an agent ran `ux_launch.py --help` for usage text and
+started server #3** (now gated behind `AMPLY_UX_LAUNCH=really-launch`); and a
+TUI/window keeps the base URL it read at startup, so after any server change,
+windows spewing `Connection refused` just need quitting and reopening.
