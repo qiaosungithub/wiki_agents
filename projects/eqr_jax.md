@@ -448,6 +448,24 @@ Leaving `max_eval_steps` unset walks the entire split every interval — a few
 hundred times the work on sudoku. Verify sizing in the config: a differing
 product measured a different population, whichever way the number moved.
 
+**An eval batch is only correct against a DEVICE COUNT, and a chip count is not
+one.** `check_eval_batch_layout` refuses a per-process batch that `pmap` cannot
+lay out, at STARTUP: it needs `global_batch / process_count % local_devices ==
+0`. A v6p/v7 chip carries TWO cores, so a `v7-32` is **64 devices over 8 hosts**
+and the natural-looking `500` gives `500/8 = 62`, `62 % 8 != 0` — it raises
+before step 1. An eval batch inherited from another run's config carries that
+run's slice shape with it, and nothing in the yaml records which slice it was
+sized for.
+
+**Prefer over-feeding to a batch that divides the split**, because on a
+1000-row maze split the two constraints are incompatible: no divisor of 1000 is
+a multiple of 64 (125, 200, 250, 500 all fail). `512 x 2 = 1024` is the maze
+answer — `TEST_POPULATIONS` caps the walk at the split's first 1000 rows
+whatever the batch shape, `_iter_test` pads the tail and `drop_unscorable`
+removes the padding, so the SCORED population is unchanged and the cost is
+compute on pad rows. The comparability rule above is about the *scored* rows,
+not the batch product, whenever a `TEST_POPULATIONS` entry binds.
+
 ### Breadth, in the same job
 
 **Set `evaluation.final_eval: true` with a non-empty `evaluation.sweep`.** It
