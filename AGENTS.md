@@ -21,6 +21,7 @@ and each has a `README.md` index.
 | `jobs.md` | Queue, inspect, resume, debug a cluster job. |
 | `storage.md` | Where data lives, reading it fast, cleaning up safely. |
 | `tpu_reference.md` | Accelerator names, memory, legal shapes, ratios. |
+| `gcp_gpu_ssh.md` | SSH to the GCP GPU VMs (viscam-cloud); OS Login vs metadata keys. |
 | `projects/` | Per-checkout semantics and boundaries. |
 | `research/` | Running experiments; logging results. |
 | `reports/` | Writing and rendering paper reports. |
@@ -40,6 +41,7 @@ and each has a `README.md` index.
 | A job will not schedule; capping spend | `infra/quota_market.md`, `tools/limit_order.sh` |
 | Change the `tpu` CLI or its daemon | `infra/tpu_cli.md` |
 | TPU codename, HBM, legal shape, equivalence | `tpu_reference.md` |
+| SSH to a GCP GPU VM; `Permission denied`; OS Login vs metadata keys | `gcp_gpu_ssh.md` |
 | **Choose an accelerator family**; a preemptible slice will not hold | `research/accelerator_choice.md` |
 | Place data or checkpoints; copy or upload | `storage.md`, then the project guide |
 | Pick a cell/metro for a v7 run | `research/v7_storage_placement.md` |
