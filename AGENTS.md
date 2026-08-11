@@ -47,6 +47,11 @@ and each has a `README.md` index.
 | Resume skips work, or a 0-byte file counts as done | `storage.md` §Existence Is Not Completeness |
 | Reclaim local disk, or prune checkpoints | `storage.md` §Local Disk Cleanup, §Checkpoints Are The Default Reason A Cell Fills Up |
 | Manage a long experiment; tracker evidence | `research/experiment_loop.md` |
+| Build or verify a multi-GB artifact on distributed storage | `storage.md` §Building A Multi-Gigabyte Artifact |
+| A big write is silently truncated or keeps restarting | `storage.md` §Two Writers On One Output Path |
+| A data-movement job: workstation or cluster? | `jobs.md` §Where The Storage CLI Exists |
+| A job says `RUN` but produces nothing | `jobs.md` §`state: RUN` Is Not Evidence |
+| Write a checker, or a verification keeps saying OK | `engineering.md` §A Test That Cannot Fail |
 | **Log a result to the spreadsheet**; find a chart | `research/result_logging.md` |
 | Write or render a paper report | `reports/README.md` |
 | `EqR` / `EqR-jax` | `projects/eqr_jax.md` |

@@ -273,6 +273,85 @@ only unrecoverable state.
 dry-run by default, `--go` to delete, `--no-size` to skip the slow `du` pass. Fix
 retention in the writer too, or the backlog rebuilds.
 
+## Building A Multi-Gigabyte Artifact On Distributed Storage
+
+**Assemble large payloads with SERVER-SIDE concatenation, in resumable units,
+and never let two writers share an output path.** Producing three 20M-row
+corpora (27-37 GB per array) turned every one of these into a lost night.
+
+**The unit must fit the preemption window, and the whole must be resumable.**
+`jobs.md` states the sizing rule for a work unit; an *output file* needs the
+same treatment. A 2.5-hour single-task merge wrote all 27,200,000,128 bytes --
+the final byte -- and was preempted twice, each time restarting from zero. Cut
+the merge into contiguous PARTS written by separate tasks (each ~10 min, run
+concurrently), then concatenate. A part costs one retry, not the corpus.
+
+**The destination's SIZE is a resume ledger.** With a fixed header and parts of
+known length, `header + sum(len(part[:k]))` identifies "the first k parts
+landed" and nothing else can produce that number. Resume by reading the size.
+A size *between* two boundaries is a torn append: cut back to the last boundary
+and continue. A size *below* the boundary you expect is not a torn append at
+all -- an append cannot shrink a file -- so it means **another writer**; refuse
+and investigate rather than continuing onto rubble.
+
+**Verify the storage layer's primitives yourself; the obvious assumption is
+often wrong.** Two that cost hours:
+
+| Assumption | Reality |
+|---|---|
+| "`append src dst` copies" | It is **move-and-concatenate**: `src` is DELETED. On a retried assembly it eats the very parts that make a retry cheap. Append a throwaway duplicate instead. |
+| "distributed storage has no cheap truncate" | It does, and it is a metadata operation. Believing otherwise turned every torn append into a full restart, and one tier made **net zero progress across three attempts** because of it. |
+
+**Server-side beats streaming by enough to change where the job runs.** Measured
+on the same 1.19 GB file: `append`/`cp` performed inside the storage layer ran
+at 50-600 MB/s using ~14 s of local CPU, against ~12 MB/s for a read-and-write
+loop carrying every byte through the process, and ~262 MB/s for the in-container
+path client. So the "big copy" job is a controller, not a pipe --
+`jobs.md` §Where The Storage CLI Exists owns the placement consequence.
+
+**Mirrors must compare CONTENT, not size.** A size-only check accepts a
+destination whose bytes are wrong, and the realistic corruption -- a second
+writer rewriting a file -- changes content long before length. Checksum every
+file server-side after the copy and **publish the completion marker only if
+they all match**. Use size alone for the *skip* decision on a resumed mirror,
+though: checksumming both sides to decide whether to copy costs a full read of
+each, ~10 min per 27 GB file, to decide not to copy it.
+
+**Verify a finished artifact by reading it BACK, and gate publication on that.**
+The producer asserts what it believes it wrote. Re-read the split: headers
+agreeing with each other and with every metadata file, payload exactly
+`header + rows*width`, one distinct key per row, index-array lengths, and a
+**stratified content sample -- random rows plus both rows either side of every
+part boundary**, which is where a mis-ordered or duplicated append shows. Sample
+by ranged reads (`-input_startpos`), not a forward scan: a forward pipe pays the
+whole prefix, so row 19,000,000 costs 26 GB *per row*. Batch adjacent sampled
+rows into one call, since each CLI invocation costs ~2 s of startup.
+
+Then make that verification the **precondition for mirroring**. A marker is not
+evidence: the payload destroyed here was exactly the right size at the moment it
+was being overwritten, so mirroring on marker-presence would have replicated the
+damage into two more metros and stamped each copy verified.
+
+## Two Writers On One Output Path
+
+**Before writing a large artifact, kill everything that writes that path -- not
+just the thing you started.** A finished 27 GB payload was silently truncated to
+104 MB because a *previous* generation of the pipeline was still alive and
+rewriting it from byte 0. The same cause, from a cron keepalive that kept
+restarting a supervisor whose work had finished hours earlier, then wedged a
+second tier: four failures at the identical offset, which looked exactly like a
+flaky storage layer under concurrency.
+
+- **Enumerate live jobs by name at the cluster layer**, and treat a launcher log
+  as unreliable evidence — a wiped `/tmp` takes the mapping from job id to
+  purpose with it.
+- **Retire a keepalive when its work is done.** Guarding it with a marker file
+  in `/tmp` is not enough on a box that wipes `/tmp`; delete the entry.
+- **The arithmetic identifies the culprit.** Sizes that grow from zero after a
+  failed append are not partial appends onto a large prefix. Comparing the
+  observed size against the expected boundary distinguishes "my write tore" from
+  "someone else is writing", and the two have opposite fixes.
+
 ## Copying From A Bucket Someone Else Pays For
 
 **When the source bucket belongs to an external GCP project, a cross-region read

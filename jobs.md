@@ -190,6 +190,58 @@ marker file written last** (its absence means the write was interrupted), and
 resume from the highest surviving step. Enumerating the prefix beats parsing
 logs, which a rotation would restart from zero.
 
+## Where The Storage CLI Exists, And Where It Does Not
+
+**The storage command-line tool is on the workstation and NOT inside a job
+container**, which decides where a data-movement job should run.
+
+A container ships the path-library client and nothing else, so shelling out to
+the CLI there does not fail loudly — it **hangs until the timeout with no
+output**, in state `RUN`, with nothing in the termination records because
+nothing terminated. Two assembly jobs burned half an hour each that way.
+
+The consequence is not merely "handle both backends". Server-side
+concatenation and cross-cell copy exist only on the workstation path; in a
+container the same operation degrades to carrying every byte through the task.
+Measured on one 1.19 GB file: **50-600 MB/s server-side using ~14 s of local
+CPU, against ~262 MB/s in-container**. Against an 18-40 minute preemption
+window, a 27-37 GB copy therefore **cannot finish on the cluster and finishes
+comfortably from a workstation**, which is not preemptible and is only acting as
+a controller. Probe which backend is live at runtime and branch; keep a local
+branch too, or the code is untestable off distributed storage — the place the
+last several bugs in ours survived.
+
+## `state: RUN` Is Not Evidence That Anything Runs
+
+**Check the VM-group states, not the job state.** A job reports `state: "RUN"`
+while every one of its groups sits in `ASSIGN`/`PENDING`, and it will sit there
+for hours:
+
+```
+borg --borg=<cell> findjobs --name_re="<user>_group_<XID>\..*" \
+  | grep -oE "VMGROUP_STATE_[A-Z]+"
+```
+
+**No `VMGROUP_STATE_RUN` means nothing is running**, whatever the job says.
+
+The scheduling ceiling this exposes is much lower than the advertised quota:
+`450 tasks x 2 GiB` and `300 x 1.5 GiB` both sat unscheduled for hours on the
+shared CPU pool, while `150 x 1.5 GiB` (~225 GiB) reached RUN in 30 seconds.
+Size a fan-out against what actually schedules, and confirm it with the command
+above before waiting on it.
+
+Related launcher hygiene, each of which cost a real launch:
+
+- **An XID is not a job.** Confirm at the cluster layer after launching; a
+  launcher can print a normal-looking XID for something that never scheduled.
+- **Truncate a launcher log before scraping it.** Scraping the last "Launched
+  experiment" line picks up a killed earlier attempt's id, so the confirmation
+  then checks a job that does not exist.
+- **Stop takes the experiment flag**, not a positional or an abbreviated one.
+- **A jobs-board entry outlives the experiment.** A queue entry can show
+  `PENDING` for 21 hours after the experiment itself reports "not found";
+  archive stale entries off the board rather than treating them as live work.
+
 ## Identity, Paths, And Local Disk On A Worker
 
 - **A cluster job is a different security principal from you.** Nothing you read
