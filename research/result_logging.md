@@ -97,6 +97,7 @@ different** — match the conventions of the block you write into.
 | **Shared context goes in the block's header row, once** | Repeating a protocol per row is how these tabs decay: cells here reached 1,900 characters with one paragraph copied across seven rows. |
 | **Color is a defined signal; never invent or repurpose one** | Applying one loosely destroys it for every row that used it correctly. Project semantics, and the full table of which colour is already taken: `../projects/vlm_metrics.md`. Check that table before applying a colour; a colour that looks free usually is not. |
 | **Clear inherited formatting, then apply intentionally** | Inserting a row copies the neighbor's, including backgrounds encoding a condition your run does not meet. |
+| **The CLI splits cell text on `,` and `|`** | A comma starts a new COLUMN and a pipe a new ROW, so an unescaped prose note silently scatters itself across the metric columns and the row below — overwriting real data that reads back as plausible. Escape commas (`\,`) and keep pipes out of the text. Read the whole written range back, not just the cell you aimed at. |
 | **Keep the metric columns visible** | Long text in an early column defeats the side-by-side comparison the layout exists for. |
 | **Read colors back, not just values** | Render the tab (export PNG) after a structural change. |
 
