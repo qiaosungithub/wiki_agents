@@ -95,7 +95,7 @@ different** — match the conventions of the block you write into.
 | **Settings stay short** | A whole baseline configuration fits in roughly 15–75 characters. |
 | **Notes carry only what changes interpretation** | Protocol, sample count, what differs from the comparison row, any caveat on trusting the number — one clause each. |
 | **Shared context goes in the block's header row, once** | Repeating a protocol per row is how these tabs decay: cells here reached 1,900 characters with one paragraph copied across seven rows. |
-| **Color is a defined signal; never invent or repurpose one** | Applying one loosely destroys it for every row that used it correctly. Project semantics: `../projects/vlm_metrics.md`. |
+| **Color is a defined signal; never invent or repurpose one** | Applying one loosely destroys it for every row that used it correctly. Project semantics, and the full table of which colour is already taken: `../projects/vlm_metrics.md`. Check that table before applying a colour; a colour that looks free usually is not. |
 | **Clear inherited formatting, then apply intentionally** | Inserting a row copies the neighbor's, including backgrounds encoding a condition your run does not meet. |
 | **Keep the metric columns visible** | Long text in an early column defeats the side-by-side comparison the layout exists for. |
 | **Read colors back, not just values** | Render the tab (export PNG) after a structural change. |

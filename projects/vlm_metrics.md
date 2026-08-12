@@ -29,3 +29,29 @@ while **red on a label means a verified encoder misconfiguration.** Two
 different signals, and inserting a row inherits both, so clear inherited
 backgrounds before reapplying either. A result produced under a superseded
 protocol is marked protocol-invalid instead, never scored against a floor.
+
+## The Colour Table Of The VLM Tab
+
+**This file is the canonical owner of what a background colour means on the
+VLM tab**; `../research/result_logging.md` owns the write mechanics and the
+"clear inherited formatting first" rule. **Read this table before applying any
+colour, and never take a free one without adding it here** — a colour applied
+loosely destroys it for every row that used it correctly.
+
+| Colour | Scope | Meaning |
+|---|---|---|
+| `#F4CCCC` light red | one metric cell | value strictly below that benchmark's own trivial floor |
+| `#F4CCCC` light red | a label cell | verified encoder misconfiguration |
+| `#D9D2E9` purple | one metric cell | a **different protocol** for the same benchmark (e.g. MMVP scored on the 300-item variant instead of the official 150-pair) |
+| `#CCEFCC` green | the `Note` cell | freeze configuration matches original LLaVA stage-2 ("FREEZE OK") |
+| `#FFE2A5` amber | the `Note` cell | freeze **ablation**: deliberately not the reference freeze config |
+| `#D0E2F3` light blue | the `WandB / run` cell only | the job was run through xm/XManager |
+| `#C6DBF9` blue, `#E0EAF4` pale blue, `#FFF2BF` yellow | whole row | structure: header row, block header, and the trivial-floor reference row |
+
+**Scope the job-level signals to the identity column and the value-level
+signals to the metric cell**, so two true statements never contend for one
+background: red says something about a number, blue says something about the
+run that produced it, and `WandB / run` is the cell that already identifies the
+run. Verify a colour by reading it back — exporting the workbook to xlsx and
+resolving each cell's `fillId` against `styles.xml` shows every colour actually
+in use, which is how you check a colour is free before claiming it.
