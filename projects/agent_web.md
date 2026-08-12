@@ -50,6 +50,29 @@ only — both instances run as the same Unix user with the same credentials, so 
 token IS full access to this machine. `tests/session-prefix.mjs` (zero
 inference) is the regression test.
 
+## DNS For A New Subdomain
+
+**Every new `*.kaiming.me` hostname needs its own proxied CNAME to
+`<tunnel-id>.cfargotunnel.com` in the domain owner's Cloudflare dashboard —
+this machine has no `~/.cloudflared/cert.pem`, so `cloudflared tunnel create` /
+`route dns` cannot run here** (the certs that once created gemini/chat lived on
+the old NFS deployment host). A `cloudflared tunnel login` link dies with its
+process after ~10 minutes ("Failed to fetch resource"), so it only works with
+the operator standing by; the dashboard record has no such deadline. Prefer a
+`path:` ingress rule on an existing hostname over a new subdomain — a path
+route needs no DNS change at all, only a tunnel restart.
+
+## Verifying A Web Instance Without Spending Inference
+
+**A fresh Claude runner emits NO `init` event until its first user turn — a
+probe that opens a session and waits for `init` times out against a perfectly
+healthy server.** The correct zero-inference health check is: ws `open` (a
+broken spawn answers with `agent_exited code=spawn-error` in the replay within
+seconds), then `attach since:0`, confirm several seconds of silence, then
+`close` and expect `runner_closed`/`gone` — which only subscribers receive, so
+the `attach` is not optional. Confirm separately that `server.log` gained no
+`spawn-error` lines.
+
 ## Claude Binary Resolution
 
 **Never let the backend resolve `claude` from an inherited PATH.** A server

@@ -42,9 +42,15 @@ internals — read those only when the rules here do not explain what you see.
 
 ## Requirements And Runtime
 
-- **A job meant to consume guaranteed capacity must set the PROD service tier
-  explicitly.** Do not substitute a legacy priority field or accept a lower
-  tier; omitting the tier defaults to PROD.
+- **Every TRAINING job must pass `--tier=PROD` explicitly. `BATCH` is for
+  eval-only jobs.** BATCH is best-effort and is preempted by any PROD demand the
+  instant a slot is contested, so a long training run on BATCH makes no durable
+  progress on a busy group — an overnight Setting-B-v3 close-loop run launched
+  without `--tier` was preempted in waves for hours, one arm never surviving the
+  ~35 min it needed to write its first checkpoint, while the PROD `p3_*` sweep
+  sharing the group ran uninterrupted. Do NOT rely on the launcher's default:
+  confirm the tier the job actually got (`tpu check` shows `-` for non-PROD),
+  and only ever run evals on BATCH.
 - **Priority <= 25 charges the person; above it charges the group.** The free
   tiers simply do not touch the team's GCU allocation. `BATCH` reads like the
   cheap option and is the opposite: a *paying* best-effort tier billing the
