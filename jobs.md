@@ -5,6 +5,41 @@ Queue, inspect, resume, and debug a job on the internal XManager/Borg stack.
 accelerator naming and shapes, `infra/` the market, allocator, and CLI
 internals — read those only when the rules here do not explain what you see.
 
+## The Launch Workflow
+
+Run this every launch. Each step names the section that explains it; this is the
+skeleton, the detail is below. Placement (steps 2–4) is cheap and settled
+*before* packaging, because packaging costs minutes and an allocator rejects in
+seconds.
+
+1. **Prepare the submission** (§Submission Contract). Semantics in versioned
+   config; on a shared checkout, edit the config in a COPY and launch from it;
+   `--tier=PROD` for training, `BATCH` only for eval.
+2. **Pick the group** (§Choosing Where To Run). Default **g9** for TPU (it holds
+   the floor), **g8** for CPU-only. `tpu quota` tells you WHICH GROUP holds a
+   floor for the accelerator — nothing about cells.
+3. **Find cells that can actually take the slice** (§Choosing Where To Run),
+   three tightening probes:
+   - `tpu preflight --tpu_type=<t> --group=<g> --json` → the `cells_ok` list with
+     a per-cell **obtainable** count (the only cell-level view; `tpu quota` has
+     none). Obtainable means "can be *got*", not "can be *held*".
+   - `stubby call master.<cell>.borg:9413 BorgMaster.ProbeSliceAvailability` for
+     **free contiguous slices** — a cell can hold thousands of obtainable chips
+     and *one* placeable slice (shape uses UNDERSCORES; `research/v7_storage_placement.md`).
+   - Intersect with a cell where you hold a **floor** and your **data is
+     co-located** (§Choosing Where To Run; `storage.md`). Same obtainable number
+     is an idle guarantee in one (group,cell) and borrowed-reclaimable in another.
+4. **Preflight, then verify the snapshot** (§Choosing Where To Run,
+   §Submission Contract). Green is necessary, not sufficient; CPU-only jobs use
+   `--skip-preflight`. `diff` the packaged config against what you meant to run.
+5. **Submit, then confirm it is REAL** (§`state: RUN`). An XID is not a job and
+   `state: RUN` is not evidence — confirm a `VMGROUP_STATE_RUN` at the cluster
+   layer before you start waiting.
+6. **If it sits PENDING, read the work unit's own verdict before reacting**
+   (§When A Pending Job Should Move) — do NOT reflexively resubmit or wait. The
+   verdict, not the obtainable table, tells you whether to move cell, move
+   group, or leave it queued.
+
 ## Submission Contract
 
 - **Submit through the wrapper**: `source ~/work/tpu_cmd/tpu_wrapper.sh &&
@@ -44,17 +79,22 @@ internals — read those only when the rules here do not explain what you see.
 
 - **Every TRAINING job must pass `--tier=PROD` explicitly. `BATCH` is for
   eval-only jobs.** BATCH is best-effort and is preempted by any PROD demand the
-  instant a slot is contested, so a long training run on BATCH makes no durable
-  progress on a busy group — an overnight Setting-B-v3 close-loop run launched
-  without `--tier` was preempted in waves for hours, one arm never surviving the
-  ~35 min it needed to write its first checkpoint, while the PROD `p3_*` sweep
-  sharing the group ran uninterrupted. Do NOT rely on the launcher's default:
-  confirm the tier the job actually got (`tpu check` shows `-` for non-PROD),
-  and only ever run evals on BATCH.
+  instant a slot is contested. The launcher default IS PROD for every group
+  (g5 injects it; others inherit XManager's `_DEFAULT_SERVICE_TIER=PROD`), so
+  pass `--tier=PROD` for a clean audit trail, not to change behavior. `tpu
+  check`'s TIER column echoes the REQUESTED string from the local registry, not
+  Borg truth: a `-` means "untagged, so it ran the PROD default", NOT
+  "non-PROD" — read the work unit/allocator for ground truth. Only ever run
+  evals on BATCH.
 - **Priority <= 25 charges the person; above it charges the group.** The free
   tiers simply do not touch the team's GCU allocation. `BATCH` reads like the
   cheap option and is the opposite: a *paying* best-effort tier billing the
   group.
+- **Set the tier with `--tier`, never `--priority`** (that wrapper flag is dead —
+  parsed, never read). Prefer the named tiers: a raw numeric `--tier=N` changes
+  who pays (`<= 25` bills you personally) and shrinks the per-cell task cap. A
+  bigger number does not win contention either — schedulability is set by the
+  quota floor/market, not the number (`infra/quota_market.md`).
 - **A CPU-only batch job does not belong in an accelerator group.** In GQM, CPU
   and RAM are *ancillary* to accelerator usage, so a job asking for neither is
   scheduled last, always — structural, and waiting never fixes it (a priority-0
@@ -74,6 +114,24 @@ internals — read those only when the rules here do not explain what you see.
 Packaging costs minutes; an allocator rejects in seconds — settle placement
 first. The decisions are here; the mechanism is in `infra/`.
 
+- **Pick the group first, and default to the one that actually holds your floor.**
+  A PROD floor is per (group, accelerator, cell) (last bullet), so the group is
+  not cosmetic — it decides whether a slice sits inside an idle guarantee or is
+  borrowed and reclaimable. For this account:
+
+  | Group | Alloc (short) | Use for |
+  |---|---|---|
+  | **9** | `fr-dna-grand-challenge-team-resource` | **TPU training — the default.** Holds essentially all of this account's real v6p / v7 / v4 floor; where the stable jobs already run. |
+  | **8** | `brain-vasp-shared-user-xm` | **CPU-only jobs**, with `--skip-preflight`. No TPU floor at all — its `tpu quota` table is empty, so size a CPU fan-out by what actually schedules (§`state: RUN`), never by quota. |
+  | 5 | `vqfree-xm` | Free pool; auto-injects PROD (§Requirements). |
+  | 1, 7 | `*-resources-prod-shared` | Shared prod; thin-to-zero floors — a fallback when g9 is contended, not a default. |
+  | 2, 3, 4 | `*viscam*` / `*interns*` | viscam / intern allocations. |
+
+  Full alloc strings are in `~/work/tpu_cmd/tpu_wrapper.sh::get_alloc_by_group_id`
+  (the single source of truth). "Default g9" is a starting point, not a law: if
+  g9's floor for the accelerator you want is already fully used, or your data
+  lives in a metro g9 has no floor in, fall back by the (group, accelerator,
+  cell) rule below.
 - **Convert power classes before you launch.** A chip count is not a size
   (`tpu_reference.md`); `tpu route --power=` turns a power class into a concrete
   allocation, type, and cell.
@@ -91,34 +149,33 @@ first. The decisions are here; the mechanism is in `infra/`.
   auto-retries that one rejection) — nor predict a market outcome, transient
   attribution rejects, or prompts. Ask for several candidates and prefer cells
   that historically work for you.
-- **Never read a full quota floor as a blocker, and never let preflight's
-  YELLOW about it stop a launch.** `used == quota, available 0` is the STEADY
-  STATE of these allocs, not a problem: the floor is a guarantee, not a limit,
-  and the job still queues and still runs. Preflight says YELLOW for it every
-  time; that line is informational. The only numbers that decide anything are
-  the per-cell obtainable counts and, once submitted, the work unit's own
-  `GQM_RESOURCE_DEFICIT_INFO`.
-- **A fully-consumed quota floor does not mean nothing will schedule.** The
-  per-group view can read `used == quota, available 0` while tens of thousands
-  of chips are obtainable: a floor is a guarantee, not a limit
-  (`infra/quota_market.md`). The number that decides whether a job starts is the
-  per-cell obtainable count in preflight's `--json`. It is **volatile and
-  uncorrelated with storage** — the cell with the largest co-located quota can
-  have *zero* while middling cells run to completion — so re-check immediately
+- **`tpu quota` answers one question — which group holds a floor — and nothing
+  about cells or schedulability.** It prints Quota / Used / Available /
+  Obtainable aggregated per GROUP, with **no cell column**. Quota is the
+  guaranteed floor (a contract, not a ceiling); Available = Quota−Used reads ~0
+  almost always (the steady state in the next bullet); only Obtainable carries
+  live signal, and even that is group-aggregated. So use `tpu quota` to pick the
+  GROUP (who holds a floor for this accelerator), never to choose a cell or make
+  a go/no-go — the number that decides a launch is the per-CELL obtainable from
+  `tpu preflight --json`.
+- **A full or fully-consumed quota floor is NOT a blocker — it is the steady
+  state.** `used == quota, available 0` is normal for these allocs (a floor is a
+  guarantee, not a limit); the job still queues and runs, and preflight's YELLOW
+  about it is informational. The number that decides whether a job starts is the
+  **per-cell obtainable** count in `tpu preflight --json` (and, once submitted,
+  the work unit's own `GQM_RESOURCE_DEFICIT_INFO`). It is volatile and
+  uncorrelated with storage — the cell with the largest co-located quota can
+  read *zero* while middling cells run to completion — so re-check immediately
   before launching and pick a cell currently good on both axes.
-- **`tpu route` samples cells too — ask `tpu preflight --json` for the list.**
-  The router's table shows ONE cell per accelerator, and reading it as the
-  complete answer says an accelerator exists only where the sample landed:
-  `tpu route --power=v6p-64` reported v6p solely in `yuphxrp` (phx, no team
-  storage), while preflight's `cells_ok` listed nine cells including
-  `yutulpz` (tul) and `yucbfiv` (cbf) — both co-located with our data. That
-  near-cost a run its data locality.
-- **The market summary samples cells; it does not enumerate them.** Reading its
-  price table as the complete list understates where an accelerator exists —
-  enough to have sent one plan chasing quota in one metro when the chips were in
-  a dozen. For *where can this run at all*, read the router's market cache
-  (`infra/quota_market.md`), then intersect with storage placement
-  (`storage.md`).
+- **`tpu route` and the market summary only SAMPLE cells — never read either as
+  the complete list.** Both show roughly one cell per accelerator, so treating
+  them as exhaustive says an accelerator exists only where the sample landed
+  (once `tpu route --power=v6p-64` reported v6p solely in `yuphxrp`, phx with no
+  team storage, while preflight's `cells_ok` listed nine cells including two
+  co-located with our data — nearly costing a run its locality). For *where can
+  this run at all*, ask `tpu preflight --json` for the full `cells_ok`, or read
+  the router's market cache (`infra/quota_market.md`), then intersect with
+  storage placement (`storage.md`).
 - **Prefer cells whose metro holds storage you can actually write** — the
   scheduler ranks on capacity and price and knows nothing about your data, so
   the cell with the most free chips is often the one with no team storage, where
@@ -137,6 +194,39 @@ first. The decisions are here; the mechanism is in `infra/`.
   accelerator, cell) where this account's STABLE jobs already run, co-located with the data
   mirrors. **Diagnose capacity from your own fleet: launch where your long jobs already
   survive, not where preflight says chips are obtainable.**
+
+## When A Pending Job Should Move
+
+**Queued is not failed, and PENDING for hours can be normal** (an oversold pool
+leaves work units PENDING for hours). Do NOT reflexively resubmit — every
+resubmission stacks another work unit contending the same slice. Instead, **read
+the work unit's own verdict** (`deep_probe` / `why_probe` on the live unit, or
+its `GQM_RESOURCE_DEFICIT_INFO`) and act on THAT. The obtainable table cannot
+tell these cases apart — it reads the same in all of them.
+
+| Work unit verdict | What it means | Move? |
+|---|---|---|
+| `GQM_OVERSOLD_MARKET` "in cell X…" | that CELL is oversold | **Change cell** — the verdict names it; another cell may take it |
+| `GQM_RESOURCE_DEFICIT_INFO`, deficit N (names a cell) | short N chips in that cell | **Change cell** — pick one with a smaller/zero deficit |
+| `resource-guarantee-reclaim` | you held borrowed capacity; a floor holder took it back | **Change to a (group,cell) where YOU hold a floor**, don't re-fight for borrowed chips |
+| `dynamic root pool … capped by adjusted ceiling` (deficit names NO cell; g1/g5/g9 read identical) | pool-wide limit | **Cell won't help.** Change tier, change accelerator generation, or wait for the price to fall |
+
+**Two false-pending causes to rule out first**, because neither is a capacity
+problem and neither is fixed by moving cell:
+
+- **A price cap (limit order) triggered.** A pending job is pulled from the queue
+  *before* any capacity check when the pool price exceeds the cap — free chips do
+  not help, and the cap is pool-wide so moving cell does nothing. It is often a
+  teammate's group-wide cap silently applying to you. Check
+  `tools/limit_order.sh status` for `BLOCKING` first (`infra/quota_market.md`).
+- **It never actually reached the scheduler.** An XID with no work unit, or no
+  XID at all, is a launcher-side failure, not a queue — read it as a local
+  problem (§Launcher-Side Failures).
+
+**When the verdict is ambiguous, stop reading tables and queue a real probe.**
+A short submit with the real workload answers "can I get this slice here" at 100%;
+the capacity table was ~12% accurate against the live queue
+(`research/accelerator_choice.md`).
 
 ## Preemption, Restart, And Resume
 
@@ -216,16 +306,14 @@ the CLI there does not fail loudly — it **hangs until the timeout with no
 output**, in state `RUN`, with nothing in the termination records because
 nothing terminated. Two assembly jobs burned half an hour each that way.
 
-The consequence is not merely "handle both backends". Server-side
-concatenation and cross-cell copy exist only on the workstation path; in a
-container the same operation degrades to carrying every byte through the task.
-Measured on one 1.19 GB file: **50-600 MB/s server-side using ~14 s of local
-CPU, against ~262 MB/s in-container**. Against an 18-40 minute preemption
-window, a 27-37 GB copy therefore **cannot finish on the cluster and finishes
-comfortably from a workstation**, which is not preemptible and is only acting as
-a controller. Probe which backend is live at runtime and branch; keep a local
-branch too, or the code is untestable off distributed storage — the place the
-last several bugs in ours survived.
+The consequence is not merely "handle both backends". Server-side concatenation
+and cross-cell copy exist only on the workstation path; in a container the same
+operation degrades to carrying every byte through the task — slow enough that a
+tens-of-GB copy cannot finish inside a preemption window on the cluster but
+finishes comfortably from a workstation (not preemptible, acting only as a
+controller). Probe which backend is live at runtime and branch; keep a local
+branch too, or the code is untestable off distributed storage — where the last
+several bugs in ours survived.
 
 ## `state: RUN` Is Not Evidence That Anything Runs
 
@@ -240,9 +328,9 @@ borg --borg=<cell> findjobs --name_re="<user>_group_<XID>\..*" \
 
 **No `VMGROUP_STATE_RUN` means nothing is running**, whatever the job says.
 
-The scheduling ceiling this exposes is much lower than the advertised quota:
-`450 tasks x 2 GiB` and `300 x 1.5 GiB` both sat unscheduled for hours on the
-shared CPU pool, while `150 x 1.5 GiB` (~225 GiB) reached RUN in 30 seconds.
+The scheduling ceiling this exposes is much lower than the advertised quota: on
+the shared CPU pool, large fan-outs (order several hundred GiB of total RAM) sat
+unscheduled for hours while a job a fraction that size reached RUN in seconds.
 Size a fan-out against what actually schedules, and confirm it with the command
 above before waiting on it.
 
@@ -400,12 +488,6 @@ scalars in a table service and plots them in a dashboard service, both keyed by
 experiment id. `research/result_logging.md` owns the URL forms, how to verify a
 run actually wrote metrics, and the settings that are easy to get wrong
 (explicit opt-in, rank-0 only, periodic flush).
-
-- **An empty chart page means no data was written, not a broken link.** There is
-  no 404 for a missing table, so a blank page is a writer problem to diagnose in
-  the job, not a URL to retype.
-- A job that never calls a metric writer produces no table at all; writing is
-  one dependency plus one constructor call.
 
 Current wrapper code, allocator configuration, work-unit state, and logs outrank
 this guide whenever implementation details change.

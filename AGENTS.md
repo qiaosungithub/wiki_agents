@@ -70,6 +70,16 @@ ones expensive enough to state twice.
 paper reports (`reports/README.md`). Lead with the outcome; stay concise and
 plain.
 
+**Delegating work — default to a NEW amply session, not a sub-agent** — When
+the user asks to "open a session", "hand this off", or otherwise delegate a task,
+the default is a brand-new top-level amply run (equivalent to `amp new <name>`),
+NOT `spawn_*` sub-agents. Launch it as a chat-only run with an empty task and a
+descriptive title via `/tmp/launch_chatonly_run.py "<workdir>" "<title>"` (POSTs
+`/api/run/new`), then inject the task/handoff over the chat channel
+(`POST $DB/chat/send?run_id=<RID>`). Reserve `spawn_*` sub-agents for the
+monitor's own short read-only fan-out. Only skip the new-session default if the
+user explicitly asks for a sub-agent.
+
 **Never destroy the user's work** — Do not revert, overwrite, or clean a dirty
 worktree as collateral. Before deleting anything shared, identify the
 filesystem, owner, active references, and recovery path; use a manifest for bulk
