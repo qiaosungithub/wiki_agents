@@ -68,11 +68,10 @@ neighbours.
   both metro `cmh`), and only `metro` maps to a GCP region, so the cost rule keys
   on it too.
 - **Do not measure cross-metro latency from a workstation**: its own RTT
-  dominates — three cells across two metros all returned ~1.5 s from here.
-  Measure from a job inside a metro, or reason from the hierarchy.
-- **A real cross-metro copy is fast enough not to fear**: a same-metro CNS-to-CNS
-  copy of 199 GiB ran at 1338 MiB/s, ~8.6x a bigstore-to-CNS copy. What kills a
-  job is a training loop crossing a metro boundary for hours, not copy time.
+  dominates. Measure from a job inside a metro, or reason from the hierarchy.
+- **A real cross-metro copy is fast enough not to fear** (CNS-to-CNS runs at
+  ~GiB/s). What kills a job is a training loop crossing a metro boundary for
+  hours, not copy time.
 
 ## Charge The Group, Not Your 500 GiB Personal Ceiling
 
@@ -247,27 +246,15 @@ the quota.
 ## Checkpoints Are The Default Reason A Cell Fills Up
 
 **A checkpoint writer with no retention policy will eventually take down every
-write in the cell**: 1850 checkpoints exhausted a 500 GiB personal ceiling here
-and poisoned the log mirror of every job that ran there afterwards.
-
-**The trap is an API distinction.** In orbax, retention (`max_to_keep`) belongs
-to `CheckpointManager`; a plain `StandardCheckpointer` has **no retention at all**
-and nothing in the API says so. A 150k-step run saving every 2500 steps leaves 60
-directories, of which two are ever read again. So **grep for the reader, not the
-setter**: a `checkpoint_interval_steps` setting proves checkpoints are written,
-not that any are deleted.
+write in the cell**. In orbax, retention (`max_to_keep`) can help but cleaning will still be needed.
 
 **Keep, per run:** the **newest** checkpoint (auto-resume restores from it), a
 **second** in case the newest is a torn write, and a coarse ladder (every
 25k-50k steps) for re-evaluating a finished run. Everything between is dead
 weight.
 
-**Never delete the newest checkpoint, and do not try to decide whether a run is
-still alive**: a torn write and an in-flight write are indistinguishable from the
-filesystem, both being a `step_<N>/` directory missing the completeness marker.
-Keeping the newest unconditionally costs one directory per run and makes a
-sweeper safe to point at a cell with live jobs; guessing costs a running job its
-only unrecoverable state.
+**Never delete the newest checkpoint, no need to decide whether a run is
+still alive**.
 
 `tpu gc` (`~/work/tpu_cmd/scripts/ckpt_gc.py`) applies exactly these rules,
 dry-run by default, `--go` to delete, `--no-size` to skip the slow `du` pass. Fix
@@ -302,12 +289,12 @@ often wrong.** Two that cost hours:
 | "`append src dst` copies" | It is **move-and-concatenate**: `src` is DELETED. On a retried assembly it eats the very parts that make a retry cheap. Append a throwaway duplicate instead. |
 | "distributed storage has no cheap truncate" | It does, and it is a metadata operation. Believing otherwise turned every torn append into a full restart, and one tier made **net zero progress across three attempts** because of it. |
 
-**Server-side beats streaming by enough to change where the job runs.** Measured
-on the same 1.19 GB file: `append`/`cp` performed inside the storage layer ran
-at 50-600 MB/s using ~14 s of local CPU, against ~12 MB/s for a read-and-write
-loop carrying every byte through the process, and ~262 MB/s for the in-container
-path client. So the "big copy" job is a controller, not a pipe --
-`jobs.md` §Where The Storage CLI Exists owns the placement consequence.
+**Server-side beats streaming by enough to change where the job runs** —
+`append`/`cp` inside the storage layer is roughly two orders of magnitude faster
+than a read-and-write loop carrying every byte through the process, and it costs
+seconds of local CPU. So the "big copy" job is a controller, not a pipe;
+`jobs.md` §Where The Storage CLI Exists owns the placement consequence and the
+measured throughput numbers.
 
 **Mirrors must compare CONTENT, not size.** A size-only check accepts a
 destination whose bytes are wrong, and the realistic corruption -- a second
@@ -334,23 +321,18 @@ damage into two more metros and stamped each copy verified.
 
 ## Two Writers On One Output Path
 
-**Before writing a large artifact, kill everything that writes that path -- not
-just the thing you started.** A finished 27 GB payload was silently truncated to
-104 MB because a *previous* generation of the pipeline was still alive and
-rewriting it from byte 0. The same cause, from a cron keepalive that kept
-restarting a supervisor whose work had finished hours earlier, then wedged a
-second tier: four failures at the identical offset, which looked exactly like a
-flaky storage layer under concurrency.
-
-- **Enumerate live jobs by name at the cluster layer**, and treat a launcher log
-  as unreliable evidence — a wiped `/tmp` takes the mapping from job id to
-  purpose with it.
-- **Retire a keepalive when its work is done.** Guarding it with a marker file
-  in `/tmp` is not enough on a box that wipes `/tmp`; delete the entry.
-- **The arithmetic identifies the culprit.** Sizes that grow from zero after a
-  failed append are not partial appends onto a large prefix. Comparing the
-  observed size against the expected boundary distinguishes "my write tore" from
-  "someone else is writing", and the two have opposite fixes.
+**Before writing a large artifact, kill everything that writes that path — not
+just the thing you started.** A finished payload silently truncated to a fraction
+of its size because a *previous* generation of the pipeline was still alive and
+rewriting it from byte 0 — four failures at the identical offset that looked
+exactly like a flaky storage layer under concurrency. Enumerate live writers by
+name at the cluster layer (a launcher log is unreliable — a wiped `/tmp` loses
+the job-id-to-purpose mapping), and **retire a keepalive when its work is done**
+(a `/tmp` marker file is not enough on a box that wipes `/tmp`; delete the
+entry). The arithmetic names the culprit: a size that grew from zero, or sits
+*below* the boundary you expect, is not a torn append onto a large prefix — an
+append cannot shrink a file, so it means another writer, and the two have
+opposite fixes.
 
 ## Copying From A Bucket Someone Else Pays For
 
@@ -387,7 +369,6 @@ several times the throughput of the external read.
 | **The guard belongs in the program**, not in the submit command or a reviewer's memory | A launch flag can be dropped by the packaging path and an operator cannot re-check it on a restart. An unknown or unreadable cell must exit non-zero before any read, the same as a wrong one |
 | **Verify the region mapping from source**, not from memory or an assistant's answer | `production/borg/cloud_iam/slicer_regions/slicer_metros.pi` maps metro to GCP region; `mach_locality -k metro <cell>` resolves a cell to its metro. Not every metro has a GCP region at all — the launcher's default checkpoint root is one of these, so accepting the default is a silent cross-region transfer |
 | **Assert the bucket's region by querying it, not by reading its name** | A stat of the bucket root returns its location and moves no object bytes, so it is safe *before* the region is proven and is the only in-job proof. A name is a weaker claim that happens to be true: keep it as the fallback for unreachable metadata, and make the program say which of the two it used |
-| **Exercise the guard's failing branch, not just its passing one** | The happy path proves the comparison finds equality, not that inequality stops anything. Give each assert a test hook that substitutes a wrong value, and make the hook incapable of relaxing the guard — it discards the real answer, so it can only abort |
 | **The default bigstore client sends no usable credential**, so the server records the caller as anonymous and a correctly-ACLed bucket returns 403 | The fix is the flag that reads as "anonymous" but means "send no credential, so the ambient LOAS identity is used". Set it in-process, or an access test reports a false negative and the real identity is never presented |
 | **"No such user in cell X" can also mean the bill goes somewhere else entirely** | When a directory carries a `quota_accounting{capacity_quota_user: '<group>'}` block, everything beneath it is charged to that GROUP, and `fileutil quota <you> <cell>` then reports no record for you no matter how many TB sit there. Seen on a cell holding ~70 GB of corpora with the personal record absent. So read the DIRECTORY's accounting (`fileutil stat`) before concluding either "nothing here" or "I am over quota" — the personal figure and the directory's owner answer different questions |
 | **A missing CNS quota record is not a write block, and not headroom either** | "No such user" means *no usage recorded yet*, not *no ceiling*: unknown users fall through to a shared default bucket, so a never-written-to cell already has the standard per-user limit in force and the record becomes visible on the first write. Treat an absent record as the default ceiling, never as unlimited. It does suggest no spindle commitment and so no performance floor — measure throughput during the first large copy and give the job its own floor, armed only after startup, so a collapse stops it instead of grinding for hours |
@@ -426,9 +407,9 @@ recursive scans. Local root pressure breaks agent CLIs, cloud tooling, and job
 dispatch, so check caches, temporary directories, and large files under the
 affected home, without crossing filesystem boundaries unnecessarily.
 
-For a database whose write-ahead log has grown large: find the process holding it
-open, run an integrity check and a checkpoint, confirm frames were actually
-checkpointed, only then truncate, then re-verify integrity and free space.
+For a database whose write-ahead log has grown large, checkpoint it through its
+own engine (find the holder, integrity-check, checkpoint, verify frames flushed,
+then truncate) — never truncate the WAL by hand.
 
 **Never delete a live database as routine cleanup, never kill unrelated sessions
 to release a lock, and never hand-delete job state or temporary files while jobs
