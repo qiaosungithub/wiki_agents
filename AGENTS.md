@@ -75,18 +75,13 @@ worktree as collateral. Before deleting anything shared, identify the
 filesystem, owner, active references, and recovery path; use a manifest for bulk
 deletion (`engineering.md` §External Writes Are Transactions).
 
-**Committing** — Push whenever you like; do not ask for routine work. Push
-**immediately** at any sign of edit-tool file corruption (partial writes, rename
-failures, duplicated blocks, syntax errors after a "successful" edit), before
-the next edit compounds it. In a shared worktree, `git commit -- <pathspec>`
-ignores the index and will steal a peer's hunk (`engineering.md` §Sharing One
-Worktree).
+**Committing** — git push is your friend. You can push regularly, but need to be
+careful which branch to push.
 
-**Jobs** — Submit through `tpu queue`; never call `xm launch` / `xmanager
-launch` directly (`jobs.md` §Submission Contract).
+**Jobs** — Submit through `tpu queue`; never call `xm launch` / `xmanager launch` directly (`jobs.md` §Submission Contract).
 
-**A chip count is not a size** — Per chip, `v7 = v6p ≈ 2x v6e ≈ 4.34x v5p ≈
-7.23x v4`, so matching a `v6p-16` needs a **`v6e-32`**. Asking for `v6e-16`
+**A chip count is not a size** — Per chip, `v7 = v6p ≈ 2x v6e ≈ 4x v5p ≈
+8x v4`, so matching a `v6p-16` needs a **`v6e-32`**. Asking for `v6e-16`
 silently buys HALF the compute, and the run is then compared as if the hardware
 were equal. `tpu route --power=` does the arithmetic (`tpu_reference.md`).
 

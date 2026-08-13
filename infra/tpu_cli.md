@@ -35,6 +35,28 @@ means the git repo is still the only copy.
 the test framework) must be declared as test targets; declared as binaries they
 silently never run and the test command reports that no tests were found.
 
+## One Tool, Two Operators
+
+**`npu` is `tpu` with a different registry, not a fork.** A collaborator
+(lyy) works on this workstation under the same Unix account, so ownership is
+expressed by four environment variables that every consumer reads with the old
+hardcoded path as its default: `TPU_JOBS_FILE`, `TPU_JOBS_LEGACY_FILE`,
+`TPU_CHECK_CACHE_FILE`, `TPU_JOB_NAME_PREFIX`. Unset, the tool behaves exactly
+as it did before they existed — the way to verify a change here is to diff the
+full `tpu check` output against the pre-change script, not to eyeball it.
+
+The `npu` function sets them with `local -x`, never a bare `export`: a plain
+export would leak into every later `tpu` in that shell and silently file the
+owner's next job into the collaborator's registry.
+
+**A second registry needs a second daemon.** The board renders from
+`$TPU_CHECK_CACHE_FILE`; with nobody writing it, every job on that board reads
+`SUBMITTED` forever while looking perfectly alive (`run-npu-daemon.sh`).
+
+**It is bookkeeping, not a boundary** — same Unix user, same XManager account,
+same quota. The `lyy-` experiment-title prefix exists because the XM UI is the
+one view that cannot see the registry split.
+
 ## The Cache Daemon
 
 The status commands read a cache file, so they are instant; all latency lives in

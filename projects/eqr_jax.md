@@ -47,6 +47,20 @@ discipline `../research/result_logging.md`.
   reads, Setting-A ones shipping a `shards/` tree as large as the payload (now
   skipped, with `seeds.npy` and `provenance.json`, by `_UNUSED_BY_TRAINING`).
   Read `Staged N MB`.
+- **A per-metro mirror can be POLLUTED with generation intermediates, and
+  `_UNUSED_BY_TRAINING` does not cover them all.** The settingB-v3 adv corpus
+  mirrors diverged: `nm-d` (tul) and `li-d` (lpp) were clean 69G (arrays only),
+  but `is-d` (cbf metro: `je` + every `yucbf*`) still carried a 78G `parts/`
+  tree plus `shards/` and `fillin*.txt` — 227G total. `_UNUSED_BY_TRAINING`
+  skips `shards/` but NOT `parts/`, so a TRAINING run (which stages the full
+  split, `staging={}`) on a cbf cell copied `parts/` + inputs + labels past the
+  92 GiB RAM disk and died `OSError: [Errno 28] No space left on device` in
+  `sync_dataset_to_local`, at step 0, on every retry — while the identical
+  config trained fine on `yutulpz`. The launcher classifies it "Job terminated
+  in state FAILURE" (NOT "CODE BUG"), so read the attempt log for the ENOSPC
+  before suspecting the arm you changed. Fix: launch on a clean mirror, or add
+  `parts` to `_UNUSED_BY_TRAINING`, or delete the stray intermediates so a
+  mirror matches `nm-d`/`li-d`.
 - **The maze grid is `30 x 30` holding a `29 x 29` perfect maze, padded — not
   cropped:** `_generate_perfect_maze` needs an odd size, so it takes
   `maze_n = n if n % 2 else n - 1` and writes `open_mask[:29, :29]`, leaving row
