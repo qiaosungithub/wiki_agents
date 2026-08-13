@@ -35,6 +35,28 @@ means the git repo is still the only copy.
 the test framework) must be declared as test targets; declared as binaries they
 silently never run and the test command reports that no tests were found.
 
+## A Frozen Board Outlives Its Cause
+
+**A long-lived daemon whose cwd is on the CitC FUSE mount dies silently when
+that mount is recreated.** Its python children then fail at `os.getcwd()` with
+`OSError: [Errno 107] Transport endpoint is not connected`, every checker
+produces empty output, and the "only overwrite the cache when the new output
+is non-empty" guard — which is correct — keeps the last good board forever.
+
+**The symptom is not an error, it is plausibility**: `tpu check` renders every
+job as `SUBMITTED`, the cache-miss fallback, so the board looks like a queue
+that has not started rather than a board that stopped updating. The process is
+alive, the loop is turning, and the log is scrolling the whole time.
+
+**Diagnose by timestamp, not by liveness**: `ls -la ~/.tpu_check_cache.txt`
+against `date`. A `.tmp` file that is newer than the cache AND zero bytes is
+the signature. `tmux capture-pane -t tpu-daemon -p | tail` shows the real
+error; the daemon's own stderr never reaches the board.
+
+**Restart with an explicit start directory outside the mount**, or the new
+process inherits the dead handle from its parent:
+`tmux respawn-pane -k -c "$HOME" -t tpu-daemon '<the while-true loop>'`.
+
 ## One Tool, Two Operators
 
 **`npu` is `tpu` with a different registry, not a fork.** A collaborator
