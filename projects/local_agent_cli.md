@@ -53,6 +53,49 @@ host's LOAS credential cannot reach superroot, so every call fails and dumps a
 permission wall into the log. Noise rather than a cause of crashes, but it is
 why run logs reach hundreds of MB.
 
+## Amply Workers Segfault Overnight
+
+**A run that reads `Stopped` was usually not stopped — its worker segfaulted.**
+29 did between 02:15 and 05:26 on 2026-08-14; the same burst hit on 08-12 and
+08-06, always inside 02:00–05:30 and never during the day. It is
+indistinguishable in `/api/runs` from a run the operator paused, because
+`/api/run/stop` is a PAUSE that also leaves `status: ongoing` with a dead
+process.
+
+**Do not go hunting for a resource limit.** `/proc/vmstat` reported
+`oom_kill 0`, systemd-oomd logged no kills, and `unauthenticated: invalid
+credentials` in syslog is constant background noise at 200–400/hour, day and
+night — it correlates with everything and explains nothing. A mass die-off
+whose last heartbeats all land inside the same five seconds is a REBOOT: check
+`/proc/uptime` before anything else (that is what 2026-08-10 17:09 was).
+
+The stack, from a core — `zstd -d` the dump, then
+`gdb -batch -ex 'bt -45' <binary> <core>`:
+
+```
+#178 absl::MakeStatusRepImpl<...>                              <- SIGSEGV here
+#180 util::MakeStatus
+#181 rpc2::NetClientChannel::AbortNonRestartableRPCsWithError
+#183 rpc2::NetClientChannel::ShutdownOnError_Locked
+#184 rpc2::NetClientChannel::HandleRead
+#189 eventmanager::EventManager2::Worker::Run
+```
+
+An RPC connection drops and building the `absl::Status` that aborts the
+in-flight RPCs faults. `FailureSignalHandler` then re-faults on every attempt,
+~90 frames deep, until the kernel prints `signal: DefaultEventMan[…]
+overflowed sigaltstack`. **That kernel line, and the "stack trace" systemd
+records, name only the crash handler** — `bt` shows nothing but
+`FailureSignalHandler`. The real frames are the OUTERMOST ones, so read
+`bt -45`.
+
+Nothing outside amply prevents it. `amp watchdog` is the mitigation: it
+restarts `ongoing` runs whose worker is dead **and** whose last heartbeat sits
+within seconds of an `amply` coredump in `/var/lib/systemd/coredump`
+(heartbeat 02:49:17, core 02:49:18). That correlation is the whole design —
+the coredump is the only thing separating a crash from a pause, and a watchdog
+without it overrides the operator every 60 seconds.
+
 ## Restarting The Amply UX Server
 
 **`amply` and `amply-launch` are `blaze run`, so they work only inside a google3
