@@ -74,6 +74,16 @@ seconds.
   do not affect a queued or running job.
 - **Verify registration after submit** rather than assuming the launch
   transaction completed.
+- **Launch a large batch in PARALLEL, not serially.** Each `tpu queue` reruns
+  the Blaze build + package (~1-1.5 min) even when only the config changed, so a
+  serial sweep of N arms costs ~N x that in wall clock (19 arms measured ~30 min,
+  almost all packaging). Fan the launches out — background each with `setsid`
+  and a bounded concurrency (e.g. 5 at a time) — to collapse the batch to one
+  packaging window (~6-8 min). Each launch still needs its OWN config copy: with
+  a shared `/tmp` template the concurrent writers race on `remote_run_config.yml`
+  and package each other's arm, so give each arm its own copy dir (or serialize
+  only the write+queue call, not the build). Record every XID to a file as it is
+  submitted; parallel launcher output interleaves and is otherwise unreadable.
 
 ## Requirements And Runtime
 
