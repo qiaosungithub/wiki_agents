@@ -79,6 +79,36 @@ owner's next job into the collaborator's registry.
 same quota. The `lyy-` experiment-title prefix exists because the XM UI is the
 one view that cannot see the registry split.
 
+**Splitting the registry splits what each operator WRITES, not what they see
+or can touch.** Every consumer that reaches past the registry has to be scoped
+by hand, and each of these shipped broken because the registry split looked
+like it had covered them:
+
+- **The board unions two sources with different scopes.** `check` merges the
+  per-operator registry with the `infra_check` cache, and that cache is
+  per-ACCOUNT: it lists every experiment the Unix user owns, whoever launched
+  it. Unioned blind, the collaborator's board showed all 33 of the owner's
+  runs. A scoped board keeps a job only if the operator's own registry records
+  it **or** its name carries their prefix — the second clause covers a job
+  launched outside the registry, and the prefix survives the cache's name
+  truncation because it sits at the front.
+- **`cancel` is destructive and was unguarded.** It passed any XID straight to
+  `xmanager stop`; one mistyped digit stopped the other operator's job. A
+  scoped operator may cancel exactly what their own board shows, and a mixed
+  batch is refused whole rather than half-executed.
+- **Auto-recovery managed the *other* operator's process.** The quota/money
+  cache is legitimately shared, but the daemon writing it belongs to the
+  account owner. A stale cache plus one `npu quota` ran
+  `tmux kill-session -t tpu-daemon` and killed it — the frozen board that
+  recovery exists to repair, caused by the repair.
+
+**The owner stays unscoped on purpose.** Whoever pays for the quota needs to
+see and stop everything running on it; the partial view belongs to the guest.
+
+`scripts/test_operator_scope.sh` pins all of it, with `xmanager` and `tmux`
+shadowed by shell functions so it touches nothing real. A guard nobody can
+break on purpose is a guard nobody notices deleting.
+
 ## The Cache Daemon
 
 The status commands read a cache file, so they are instant; all latency lives in
