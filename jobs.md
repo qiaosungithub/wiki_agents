@@ -113,6 +113,18 @@ seconds.
   own LDAP, no request, no approval — and it bills nothing. **Its ceiling is per
   user** (order 1000 GCU, 1 TiB RAM), so two 900-task jobs evict *each other*;
   run them serially.
+- **But the shared CPU pool can be empty for days, and then a CPU-only job never
+  schedules at all.** When it is dry, ride the team's PROD accelerator alloc
+  instead: a CPU-only *controller* (a server-side data copy is the archetype —
+  a few cores driving storage-layer copies, `§Where The Storage CLI Exists`)
+  costs the accelerator group almost nothing yet schedules immediately where the
+  shared pool has zero. Submit to the same `(group, PROD)` your long jobs already
+  run on, pin a cell in the data's metro, add `--skip-preflight` (CPU-only
+  cannot be preflighted), and confirm `VMGROUP_STATE_RUN`. The shared-pool
+  advice is for genuinely-free best-effort batch; it is **not** a prohibition on
+  PROD for CPU-only. Diagnose from your own fleet: two submits differing ONLY in
+  group — shared pool sits unscheduled for a day, PROD alloc reaches RUN in ~1
+  minute.
 - Container-style packaging requires the pool to have a mapped cloud project;
   native allocators without one need Bazel packaging.
 - **In JAX jobs, parse flags before distributed initialization**, and never
@@ -355,6 +367,27 @@ Related launcher hygiene, each of which cost a real launch:
 - **A jobs-board entry outlives the experiment.** A queue entry can show
   `PENDING` for 21 hours after the experiment itself reports "not found";
   archive stale entries off the board rather than treating them as live work.
+- **A killed launcher tool-call does not stop the launch.** A detached/`setsid`
+  submit keeps running after the shell that started it is killed; relaunching
+  "because the first one died" then double-submits. Confirm what actually
+  launched (the launcher's results file + `tpu check`) before any relaunch.
+- **A worker can be alive-but-wedged: board `running`, logs frozen, no
+  restart.** Distinct from the unscheduled case above (there the groups never
+  reached RUN). Here the task *did* schedule and start, then hung mid-startup —
+  the classic form is frozen at `Downloading dataset ...` (staging the ~69G
+  Maze mirror to the worker's `/tmp`). The board keeps showing `running` with
+  `1 active` WU because the Borg task is alive; the training process inside is
+  stuck, so **no new log lines and no `attemptN+1`** (Borg only restarts a task
+  that *dies* — a hung-but-alive task never trips the watchdog, so it burns the
+  PROD slot indefinitely). Diagnosis: compare the newest log mtime to wall
+  clock — a download that normally finishes in ~5 min but shows **>30 min of
+  zero log growth across all ranks** is wedged, not slow. Rule out a data
+  problem before blaming the worker: if a *sibling* job downloaded the same
+  source path fine (check its `step_*` ckpts advancing), the source is good and
+  it's these specific workers. Fix: `tpu cancel <xid>` then relaunch the same
+  validated config — a fresh launch re-rolls worker placement and usually
+  clears it. Always re-verify a relaunched job actually passes download into
+  `step>0` — the same bug can re-roll onto another bad node.
 
 ## Identity, Paths, And Local Disk On A Worker
 
@@ -427,6 +460,24 @@ the exact artifact the cluster will run builds and runs on the workstation, and
 import-time failures surface in seconds. Do this before any launch that changes
 imports or dependencies.
 
+**Reproduce in the RENAMED stagedir, not in place — the launcher rsyncs only the
+CWD into `.../eqr_run_<ts>/` and builds `//<stagedir>:main`, which destroys the
+google3 module path the code had at authoring time.** So a hardcoded absolute
+import (`from google3.<original.pkg.path> import sibling`) or a cross-package
+BUILD `dep`/`data` label points at something ABSENT from the staged binary, and
+the worker dies at import time before `main()` — no marker, behind the log wall.
+It builds and runs in your workspace only because the original package still
+physically exists there, which is exactly what MASKS the bug. The fix is the
+EqR-jax `eqr_run_*` idiom: the entry point does
+`sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))` and imports
+siblings by BARE name; the sibling `.py` ride along as a BUILD `data` glob
+(`strict_deps = False`), carried as relative SYMLINKS to the one source of truth
+so two copies cannot drift (`rsync -aL` materializes them as real files). A
+package-relative import (`from . import x`) does NOT work — a `py_binary` main
+runs as `__main__` with no parent package. **Verify by building
+`//<a-renamed-throwaway-dir>:main` with the sibling package ABSENT and running
+`--help`**; testing in place proves nothing.
+
 **Recognize a pre-`main()` death by its shape**: an empty status message, no
 application log anywhere including any the app mirrors, and no surviving job
 handle. Seeing all three at once *is* the diagnosis — do not re-launch to
@@ -446,6 +497,23 @@ Getting logs, most reliable first:
 | **Application-level log mirroring to durable storage**, teed from program start and flushed on error lines | Outlives task, work unit, and experiment, but only covers failures after the program starts. Under Borg it is often the *only* log, so protect it (`engineering.md`: handlers steal streams). |
 | The log-tailing CLI | Works sometimes. |
 | The log-search CLI | May be blocked by workstation permissions. |
+
+**When restricted-LOAS walls off EVERY worker-log service, make the application
+write its own diagnostics to CNS.** From a workstation credential, `borg
+tasklog`, `analog --remote`, and the F1/`get_job` path can all return
+`PERMISSION_DENIED` (and `borg tasklog` itself SIGABRTs on it) — do not keep
+retrying them once one fails that way. The reliable substitute is application
+diagnostics on the destination filesystem, readable with `fileutil`: a numbered
+startup marker written as the FIRST action in `main()`, one marker per stage,
+and a `try/except` that dumps the traceback to CNS. This is the concrete form of
+`storage.md` §"write a copy's evidence to the destination, not to a log". A
+marker written before the first guard also splits the two look-alike deaths
+apart: **`VMGROUP_STATE_RUN` then an empty status, zero output, no readable log
+is NOT necessarily a pre-`main()` death** — it may be an ordinary failure you
+simply cannot see. If the startup marker landed, the process reached `main()`
+and the cause is downstream; if no marker exists anywhere, the death is before
+logging existed (or an over-quota cell refused the first write — rule that out
+per `storage.md`).
 
 **Two failure modes survive a green build and a local smoke test** because both
 only fire remotely: **standard-library file APIs against a distributed path**

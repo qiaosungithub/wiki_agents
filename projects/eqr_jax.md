@@ -16,6 +16,7 @@ discipline `../research/result_logging.md`.
 | Experiment Tracking · Metric Names, Divisors, And Denominators | reading or logging its numbers |
 | Checkpoint Retention: Keep The Peak | the step a result depends on must survive |
 | Eval Protocol · Maze Scoring · Close-Loop | deciding which accuracy is the headline |
+| RoboTwin DP Baseline | training / ablating the Diffusion-Policy baseline; the 5 ablation tasks |
 
 ## Data And Model Invariants
 
@@ -692,3 +693,102 @@ episodes.
   with scoring ON at 5400 s. If the claim under test is only "the pipeline
   runs", `evaluation.closeloop_scoring: false` finishes in ~7 min; use scoring
   ON for any number you quote.
+
+## RoboTwin DP Baseline
+
+The RoboTwin 2.0 Diffusion-Policy (DP-CNN) baseline lives on branch
+`dp_dataloader_rewrite` (`dp_train.py`, `dataset/robotwin_dataset.py`,
+`configs/remote_run_dp_config.yml` + `configs/dp_default.py`). It is a
+single-device REPLICATED model (every host runs an identical seeded replica, one
+chip does the work), so it is HOST/DATA-bound, not TPU-bound — a small
+single-host slice runs it at the same speed as a big one. `../storage.md` and
+`../jobs.md` own launching; the DP-specific facts are here.
+
+**The 5 ablation tasks are FIXED — always use these five, never re-pick.** Running
+all 50 `clean_50` tasks costs ~26 h of accelerator time (~32 min/task); these 5
+were chosen once to span the
+benchmark's skill families with NO family repeated (RoboTwin 2.0 has no official
+skill taxonomy — the 50 tasks are a flat "dual-arm" list, so this grouping is
+derived and code-verified against `envs/*.py`). Diversity axes: skill family ×
+arm × object type × horizon × difficulty.
+
+| Task | Skill family (unique) | Arm | Object | Horizon (steps) | DP-Easy |
+|---|---|---|---|---:|---:|
+| `open_microwave` | articulated open (revolute door) | single | articulated | 537 (longest) | ? |
+| `handover_block` | dual-arm handover | dual | rigid | 283 | 10% |
+| `stack_blocks_three` | stacking (precise, long) | single | rigid | 481 | ? |
+| `dump_bin_bigbin` | pour / granular (only non-rigid) | dual | granular | 265 | 49% |
+| `beat_block_hammer` | tool-use (strike) | single | rigid+tool | 113 (shortest) | 42% |
+
+Why this set: five DISJOINT skills (articulated / handover / stacking / pour /
+tool-use) — deliberately NO plain pick-and-place, which is 15 of the 50 tasks and
+would waste a diversity slot. Arm mix 3 single / 2 dual; object types cover
+articulated + rigid + granular (RoboTwin 2.0 has NO deformable tasks —
+`dump_bin_bigbin`'s granular pour is the closest non-rigid case); horizon 113→537;
+known DP-Easy 10/42/49% is a real low→mid spread (not saturated >95% like
+`grab_roller`, not dead-0 like `blocks_ranking_rgb`), so an ablation has signal.
+
+**Dataloader is eager-decode-to-RAM (`dataset.eager_images: true`,
+`num_workers: 0`).** A `clean_50` task is tiny (~3855 rows, 173 MB JPEG on disk,
+888 MB/camera decoded); the loader decodes the whole split into RAM once (~2.6 s)
+then serves every frame by O(1) index. This beat the worker-pool path outright:
+MEASURED single-process 2.65 → 12.1 batches/s local (the `num_workers=16` spawn
+pool only reached 5.0 — it is IPC-bound, pickling ~88 MB of decoded uint8 per
+batch back to the parent, not CPU-bound). End-to-end on a v7-8 the run holds
+**~10.4 steps/s** (was ~3.1 host-bound), so one task is ~29 min of training +
+~4 min startup. Leave eager OFF only for a corpus too large to hold in host RAM.
+
+**v7 minimum slice is 8 chips**, even though `tpu preflight v7-4` reports GREEN —
+the allocator's min-slice rule blocks v7-4 with no work unit created. Use `v7-8`
+for a single-host-class DP probe (2 hosts × 4 chips; the model runs on 1
+chip/host). yumrnel g9 PROD is the proven-hold cell; its co-located bucket is
+`/cns/qo-d`.
+
+**DP logging matches the EqR `train.py` progress line** on purpose:
+`[step/total pct%] loss=, lr=, steps_per_second=`, throughput as
+`steps_per_second` over the log interval (NOT s/step). Do NOT wrap the train loop
+in `prefetch_to_device`: its background thread runs the loader cursor ahead of the
+trainer, so the checkpoint's `dataloader_state` sidecar records a cursor that far
+ahead and a resume then SKIPS those batches — not bit-identical, breaking the O(1)
+resume contract. The async loss de-sync (defer `float(loss)` to log boundaries)
+already overlaps host work with device compute without touching resume.
+
+### Close-loop eval on the A100 (SAPIEN)
+
+**The GPU-side close-loop evaluator is a SEPARATE manual step, not auto-triggered.**
+Training publishes each checkpoint to the GCS rendezvous bucket
+(`gs://qiaos-robotwin-eval-us-east4/runs/<xid>/checkpoints/step_<n>/`, state +
+`extra.json` with the normalizer + `dataloader_state`) — a Borg task cannot open
+an IPv4 socket to the VM and the VM cannot read CNS, so GCS is the only
+rendezvous. But nothing runs the eval automatically: it is a worker on the A100
+VM `deepflow-1a100-80gb-jh-baseline` (34.186.64.63, us-east4-c, project
+`viscam-cloud`), code at `~/work/robotwin_eval_bridge`.
+
+- **SSH from a restricted agent shell CANNOT `gcert`** (no ssh-agent socket), but
+  the metadata key works: `ssh -i ~/.ssh/google_compute_engine -o
+  ProxyCommand="/usr/bin/corp-ssh-helper --proxy-mode=grue %h %p" qiaos@34.186.64.63`.
+  Network gate and auth gate fail separately (`../gcp_gpu_ssh.md`).
+- **Run:** `~/work/jax_venv/bin/python eval_worker.py --task <T> --xid <X>
+  --rollouts 50 --on-backlog latest --interval 0`. It auto-spawns `sim_server.py`
+  in `rt_venv` (numpy-1.x, SAPIEN). ONE worker maps ONE `--task` to ALL its
+  XIDs, so a fleet of different-task XIDs needs **one invocation per (task,xid)**.
+  Drive them serially from a `setsid` script (N=1 concurrency is optimal; N>=2
+  drops throughput ~30%). Use a FRESH `--state` file or a re-eval is skipped.
+- **Speed ~60 s/rollout** (400-step episode; ~32 s on an early success), so 50
+  rollouts ~= 50 min/task. Uses EMA weights + the checkpoint's own normalizer
+  (self-sufficient). wandb on the VM is NOT logged in — training is `mode:
+  offline` anyway, so eval runs `WANDB_MODE=offline` (local run dirs) or
+  `--no-wandb`; online needs the API key on the VM.
+- Reference: click_bell (prior run 279324385) step_17400 scored **0.50 (25/50)**;
+  the task's scripted expert hit 20/20 on the same seeds, so the harness is sound
+  and 0.50 is the model's real score.
+
+### Per-Task Cost And Where Results Go
+
+**Per-task training cost varies ~4.3x** because total_steps = floor(n_windows/128)
+*600 and n_windows spans 5572 (beat_block_hammer) to 23902 (open_microwave). For
+an EQUAL-COST ablation across the 5, cap with `training.max_steps` instead of
+fixed `num_epochs`. Results are logged to the **`RoboTwin-DP` tab** of the EqR
+workbook (`17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0`) — one row per task,
+training metrics + close-loop `success_rate` (50 rollouts, final EMA ckpt); read
+the tab for current numbers, not this file.
