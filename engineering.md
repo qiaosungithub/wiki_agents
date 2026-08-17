@@ -152,6 +152,19 @@ as collateral. Before deleting shared or local data, identify the filesystem,
 the owner, active references, and the recovery path; use a manifest for bulk or
 shared deletion.
 
+**Never kill by pattern.** `pkill -f` / `killall` signal every process whose
+command line contains the string — including the shell running the command,
+which on a workstation is a pane of the operator's tmux. On 2026-08-17 a
+`pkill -f 'AGENT_WEB_PORT=8891'` aimed at one throwaway test server matched
+its own invocation, and the operator's entire tmux server went down in the
+same moment: every daemon, every agent session, every attached terminal. The
+cleanup of a five-minute experiment cost more than the experiment. Resolve to
+PIDs first (`ss -ltnp` for a port, `pgrep -a` / `/proc/<pid>/cmdline` to read
+back what each one actually is), confirm each is what you think, then signal
+those PIDs. `fuser -k` on a port is the same trap wearing a different hat:
+check who holds it before killing it, and never assume a port number is
+unused — 8891 in this incident was a real service someone else had added.
+
 ## A Tool Call Only Fires As A Structured Call, Never As Prose
 
 **An action you "wrote out" but did not issue as a real, structured tool call
