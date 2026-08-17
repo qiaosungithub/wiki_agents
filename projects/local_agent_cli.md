@@ -96,6 +96,35 @@ within seconds of an `amply` coredump in `/var/lib/systemd/coredump`
 the coredump is the only thing separating a crash from a pause, and a watchdog
 without it overrides the operator every 60 seconds.
 
+## A Turn That WROTE A Tool Call Instead Of Making One
+
+Second way a session stops going anywhere, and it looks identical from
+outside: the worker is up, the run is `Running`, and nothing happens. The
+model wrote its tool call out as XML-ish markup in the message text
+(`invoke` / `parameter` tags) and issued no actual call, so the turn ended
+with nothing executed.
+
+**It is the model, not amply.** Amply drives tools through structured
+`tool_calls`; `invoke name=` appears **nowhere** in the amply tree and nowhere
+in `~/.amply/AGENTS.md`, so nothing teaches or parses that syntax, and the
+transport cannot turn a real tool_use block into text. The affected messages
+carry `tool_calls: []` with the markup sitting in `content`. It is also not
+context exhaustion — measured across 43 live runs, sessions at 617k/510k/505k
+prompt tokens had zero, while the worst offender sat at 195k.
+
+**What amply does wrong is not noticing.** The malformed text is stored
+verbatim, so it becomes an in-context example the model then copies: after the
+first slip at turn 51, one session did it in **96 of 187 turns**. And nothing
+retries — in 95 of those 96 cases the run simply sat there until an external
+poke arrived, a **median of 24.7 minutes later** (every gap >5min). That is
+what most `已静置(idle)` alerts on the monitors actually are.
+
+`amp watchdog` nudges those sessions: last message is from the chatbot, has
+empty `tool_calls`, carries the markup, and the run is live but not working.
+The nudge deliberately DESCRIBES the mistake instead of quoting it — quoting
+the markup back would add another example of the thing to copy. Same reason
+`tests/test_watchdog.py` builds its fixture from fragments.
+
 ## Restarting The Amply UX Server
 
 **`amply` and `amply-launch` are `blaze run`, so they work only inside a google3
