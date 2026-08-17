@@ -100,9 +100,10 @@ and never record mirror status in memory — re-verify live before scheduling.
 ## Evaluation Benchmarks
 
 - Zone-local eval roots are
-  `gs://kmh-gcp-${ZONE}/data/vlm_eval_benchmarks/{docvqa,realworldqa}`. Apply
-  the replica validation rule to each root before scheduling final eval. Mirror
-  only DocVQA validation and RealWorldQA test; DocVQA test has hidden gold and
+  `gs://kmh-gcp-${ZONE}/data/vlm_eval_benchmarks/{docvqa,realworldqa,mmstar}`. Apply
+  the replica validation rule to each root before scheduling final eval. For
+  DocVQA and RealWorldQA, mirror only DocVQA validation and RealWorldQA test;
+  DocVQA test has hidden gold and
   its official download terms still apply despite any convenience mirror's
   dataset-card license.
 - The default Stage-3 final eval in both `beifen-Paligemma` and
@@ -112,6 +113,21 @@ and never record mirror status in memory — re-verify live before scheduling.
   partial WDS roots are errors. The baseline JIT/HSDP path keeps these WDS
   loaders at `num_workers=0` so its synchronized exact-count schedule remains
   globally deterministic.
+- MMStar is a 1,500-row final eval in PaliGemma-baseline Stage 3 and jax_llava
+  Stage 2. Keep its input budget at 512 tokens, decode budget at 8 tokens, and
+  loader workers at zero. `one-benchmark-suite` owns its prompt, exact-count
+  schedule, official prefix-only scorer, and category/axis metrics;
+  `one-dataset-suite` owns artifact construction and the shared commit
+  contract. Training repos must call the benchmark adapter rather than copy
+  either implementation.
+- The existing MMStar artifact uses a pre-publisher thin manifest. Read
+  compatibility is limited to its exact committed marker fingerprint while
+  revision, split, count, payload SHA/MD5, and object metadata still validate.
+  This exception is not a license attestation: upstream redistribution terms
+  remain unreviewed, so do not publish a new mirror or publisher spec. Training
+  checkouts pin both internal suites in `requirements-eval.txt`; because their
+  package versions stay stable across commits, verify the installed direct-URL
+  commit rather than trusting the version string.
 - DocVQA uses the question plus `Answer the question using a single word or
   phrase.`, generates at most 32 tokens, and reports case-insensitive ANLS as
   the primary 0--100 metric (best accepted answer, character Levenshtein,
