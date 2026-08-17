@@ -152,6 +152,38 @@ as collateral. Before deleting shared or local data, identify the filesystem,
 the owner, active references, and the recovery path; use a manifest for bulk or
 shared deletion.
 
+## A Tool Call Only Fires As A Structured Call, Never As Prose
+
+**An action you "wrote out" but did not issue as a real, structured tool call
+simply did not happen** — the message was never sent, the command never ran, the
+job never launched — and it fails SILENTLY: no error, no output, just a
+downstream party waiting on a thing that never came. The trap is writing the
+call OUT — as tag-style markup, a fenced `bash` snippet, or a "calling
+send_message…" sentence — into your REPLY TEXT instead of emitting it
+through the tool channel. Reasons this recurs: composing a long narrative reply
+and pasting the call inline; a call "interrupted" mid-turn by an incoming
+notification so you re-narrate it rather than re-issue it; copying an example of
+a call verbatim into prose.
+
+- **If a turn's job is to DO something (send a message, run a command, edit a
+  file), the turn's payload must be actual tool calls — not a description of
+  them.** Prose is for talking to the human; it moves no state.
+- **Confirm side-effecting calls landed before you claim them.** After a
+  send/launch/write, read it back through the tool channel (the sent message is
+  in the thread; the row is in the table; nmsg advanced). Do not report "sent"
+  or "approved" from intent alone.
+- **A call you wrote as text is poison in your own history.** It stays in the
+  transcript and reads as an example to copy: one session that slipped once
+  went on to do it in 96 of its next 187 turns, stalling each time until
+  something poked it — a median of 24.7 minutes idle per occurrence. If you
+  catch yourself having done it, re-issue the call immediately as a real one,
+  and do not quote the bad output back while explaining. That only adds
+  another example.
+- **Highest stakes for safety-critical and cross-agent actions.** A dropped
+  `send_message` leaves a peer blocked or a decision unmade; a dropped resume /
+  `kill -CONT` can leave someone's process frozen. Treat an un-confirmed
+  side-effecting call as NOT DONE.
+
 ## Communicating A Result
 
 - **Define overloaded terms before using them.** *Step*, *update*, *iteration*,
