@@ -93,6 +93,16 @@ check that can crash a run has negative value.
   a cron keepalive that `setsid`s the worker, make the keepalive idempotent
   (one instance per unit), and **delete the entry when the work is done**: a
   keepalive outliving its purpose becomes a second writer (`storage.md`).
+- **A watcher that emits no alarm may be dead, not calm.** A `cron`+`setsid`
+  entry that runs a script *by path* needs the execute bit; rewriting that
+  script — an editor that recreates the file silently drops the bit — makes
+  cron/`setsid` fail without a trace, because they swallow the error. The
+  watcher never ticks, and everything it should have paged goes unseen for as
+  long as the quiet lasts. After deploying **or editing** any keepalive or
+  watcher, prove it actually ran — its own log advanced, or a self-test
+  notification travelled the full chain end to end — before trusting silence:
+  absence of pages is not evidence of health, it is equally the signature of a
+  monitor that died on the launch pad.
 - **Point `TMPDIR` at real disk before any long local job.** The default can be
   a small shared tmpfs, and at 100% full it deletes other processes' scratch and
   breaks job packaging with a no-space error *after* enough normal output to look
