@@ -137,6 +137,16 @@ threshold.**
   rebuilding all of them together. A hint printed into a detached tmux pane is
   not a fix, and the staleness auto-recovery restarts the session — never the
   problem.
+- **The command re-renders the cache; it does not print it.** `tpu check` parses
+  the daemon's cached table and rebuilds its own, so a column the daemon
+  computes and writes can still be invisible if the command's parser drops it.
+  The running table's per-cell placement (`REGION`, e.g. `europe (lpp)`) lived in
+  the cache for a long time while the command showed only `XID|STATUS|NAME|…|WHY`
+  — the fix was in the parser, not the daemon. Before concluding "the tool does
+  not collect X", run the daemon binary directly and diff its columns against
+  what the command prints; the section layouts differ (running carries an extra
+  `REGION|DETAILS` pair the 6-column pending/done rows do not), so a parser must
+  gate per-section on the column count rather than a fixed index.
 
 ## Job Bookkeeping
 
