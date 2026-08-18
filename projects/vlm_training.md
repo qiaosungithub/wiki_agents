@@ -67,6 +67,34 @@ final marker** — never a `Saving` line, never a sidecar path.
   never read a remote bucket. Roots, mirror validation, exact-count rules, and
   scoring for the Stage-3 final eval (DocVQA, RealWorldQA) are in `vlm_data.md`.
 
+## Distributed Eval And Mesh: The Silent-Correctness Traps
+
+Two migration bugs each kept a run *converging and reporting healthy* while the
+result was wrong — the worst shape, because nothing fails.
+
+- **A distributed eval must place each rank's rows by asking the sharding which
+  global rows it owns — never assume `PROC_INDEX * B`.** The generation step
+  returns the GLOBAL gathered batch (`local_B * num_proc` rows) but a host-local
+  `zip(batch["aux"], out_strs, batch["is_pad"])` stops at the shortest, so every
+  rank silently scored `out_strs[0:local_B]` — always **process 0's answers**.
+  Rank 0 is right by coincidence; ranks 1..N score at chance, and the pooled
+  number collapses (VQAv2 read 16.84 vs 67.63) *while train acc — teacher-forced,
+  so unaffected — still matches to -0.0003*. That exact combination (eval
+  collapses, training curve perfect) IS the diagnosis: the bug is in the
+  autoregressive path, not the model. The probe that separates it is **per-rank
+  accuracy**; a global offset-shift test cannot express "rank r read rows 0..B-1"
+  and reads as "alignment fine". Invert the placement from the sharding and RAISE
+  on a row-count mismatch — a misaligned batch is invisible downstream.
+- **An unknown accelerator in the mesh table must fail loud, not fall back to a
+  flat 1-D mesh.** `get_mesh()` looked `device_kind` up in a `TOPOLOGIES` table
+  and, on no match, silently built a `(N,)` mesh meant for CPU/GPU debug; v7 was
+  missing, so every param sharded across all devices and every matmul paid a
+  full-mesh collective — **7x slower, but correct, so it survived a full
+  production run**. A fallback that preserves correctness is the hardest bug to
+  see; make `get_mesh` warn on an unknown kind and probe the mesh a real slice
+  builds. (Register v7 by its `device_kind` — `tpu7`, not `v7`; the wrong key
+  looks like a fix and changes nothing. `../tpu_reference.md`.)
+
 ## Telemetry Goes To The Checkpoint Bucket, Never `workdir`
 
 **`$CHECKPOINT_BUCKET` is the only location outliving the task**; `workdir` on a

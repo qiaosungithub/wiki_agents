@@ -1,9 +1,12 @@
-# Migrating `jax_llava` To XM/Borg Infra
+# Migrating `jax_llava` To XM/Borg Infra (COMPLETED — archived)
 
-Living progress file for "run `jax_llava` on xm infra and reproduce the
-result": current state, the decisions that still bind, the traps worth carrying
-forward. **Fold into `../projects/vlm_training.md` once the migration lands.**
-Branches `sqa.late_fusion_xm` (`jax_llava`) and `data_upload_xm`
+**Status: landed. `jax_llava` runs on XM/Borg and reproduces the reference
+(all corrected benchmark cells within 2.4σ, pooled residual -1.43 ± 0.46
+points).** This is the forensic record of that migration, kept for provenance;
+the durable rules it produced live in `../../projects/vlm_training.md`,
+`../../projects/vlm_metrics.md`, and `../../jobs.md`. Re-verify anything here
+against current code before acting on it — job ids and live state are stale by
+design. Branches were `sqa.late_fusion_xm` (`jax_llava`) and `data_upload_xm`
 (`paligemma-data-upload`).
 
 ## Where This Stands
@@ -25,7 +28,7 @@ longer sequences, 12-source mix, periodic sampling) — that is the 57 h.
 **Checkpointing is 11% of it** (236 s every 800 steps), and widening the
 interval is the wrong trade on a preemptible slice: it buys 4 h and costs 3200
 steps per preemption. **v7-32 is the ceiling**: Borg registers v7 at 4/8/16/32
-only and preflight rejects v7-64 (`../tpu_reference.md`).
+only and preflight rejects v7-64 (`../../tpu_reference.md`).
 
 **The full smoke passes** (XID 278211441): `g3_full_smoke` runs 12 steps (10
 stage-1 + 2 stage-2) over the **production** stage-2 mix and the production eval
@@ -69,7 +72,7 @@ ported to the CNS-to-CNS copier). Not a partial copy.
 
 **Design as if egress is always billed, then make it $0 by staying in one
 region.** The operator pays egress from his own external GCP project, so a
-cross-region read is a real bill (`../storage.md` owns the general rule):
+cross-region read is a real bill (`../../storage.md` owns the general rule):
 
 ```
 hop 1   gs://kmh-gcp-us-east5  ->  /cns/go-d       same region (cmh), $0
@@ -86,7 +89,7 @@ bigstore read.
 replicas**: `00000.tar` is 943 MB in us-east5, 1584 MB in us-central1 and
 1683 MB in us-central2, because kmh re-crawled with img2dataset at 62-66%
 success. This is why the layout above crawls once and fans out;
-`../storage.md` owns the general rule.
+`../../storage.md` owns the general rule.
 
 **Never accept the launcher's default CNS root** (`/cns/yutulpz-d/...`): pin
 `--cell` and the CNS path together every time, since `xm_launcher.py` maps cell
@@ -94,7 +97,7 @@ to a same-metro bucket and a mismatch has already caused a pruner kill. Metro to
 GCP region, verified from google3 source rather than an assistant's answer:
 `cbf`=us-central1, `cmh`=us-east5, `tul`=us-central2, `lpp`=europe-north1 — and
 `tul` maps to no GCP region for egress purposes. Which metros to keep data in:
-`v7_storage_placement.md`.
+`../../research/v7_storage_placement.md`.
 
 ## Traps: Copiers
 
@@ -104,7 +107,7 @@ GCP region, verified from google3 source rather than an assistant's answer:
 | **A partition that can drop work silently should not exist** | Split on SIZE, which is total by construction, and assert the halves re-sum. |
 | **A `_SUCCESS` you did not write proves nothing** | These datasets ship upstream markers inside each prefix, so a recursive copy lands the marker as soon as the small files do — long before the shards. |
 | **For a copy, completion is a property of the filesystem, not the scheduler** | `tpu check` said `SUBMITTED` for an hour after Borg had the work unit as `BORG_STATE_SUCCESS`. Gate on artifacts: object count against the source, plus your own marker. |
-| **A copy does not inherit the destination directory's encoding; a directory the job creates does not inherit group accounting** | Name the encoding per file and READ IT BACK — a 3-shard smoke landed `r=3.2` where `rs=9.4` was configured, 4.6 TiB instead of 2.2 TiB at full scale. Set `quota_accounting` recursively on the home root, which fixes existing files and everything written later. `../storage.md` owns both. |
+| **A copy does not inherit the destination directory's encoding; a directory the job creates does not inherit group accounting** | Name the encoding per file and READ IT BACK — a 3-shard smoke landed `r=3.2` where `rs=9.4` was configured, 4.6 TiB instead of 2.2 TiB at full scale. Set `quota_accounting` recursively on the home root, which fixes existing files and everything written later. `../../storage.md` owns both. |
 | **A workstation cannot test the write half of a bigstore -> CNS copy** | Corp credential: `DestinationPermission: Wrong type CORP in restriction`. It still tests imports, flags, planning and every guard — where the bugs above were caught in seconds. Read a local write failure as "cannot test here", not "the copy is broken". |
 | `gfile` has no `ListRecursively` | The recursive walk is `gfile.Walk`, with `os.walk` semantics. |
 
@@ -124,7 +127,7 @@ on NFS or in `gs://`, meeting Borg, where only CNS exists.
 
 ## Traps: v7-32 Topology
 
-A v7-32 exposes **64 devices, not 32** (`../tpu_reference.md` owns the geometry
+A v7-32 exposes **64 devices, not 32** (`../../tpu_reference.md` owns the geometry
 and the chip-vs-device rule). Two JAX consequences that only show up here:
 
 - `global_array_to_host_local_array` requires each host's devices to form a
@@ -296,7 +299,7 @@ preempted).
 
 Three things worth carrying:
 
-- **Match v7 as `tpu7`, not `v7`** — see `../tpu_reference.md`. The wrong key
+- **Match v7 as `tpu7`, not `v7`** — see `../../tpu_reference.md`. The wrong key
   would have looked like a fix and changed nothing.
 - **A fallback that preserves correctness is the hardest kind of bug.** Make it
   loud: `get_mesh` now warns when a TPU kind is unknown, and
@@ -444,7 +447,7 @@ is exactly when nobody re-checks the tool.
   mutation-checked — the pre-fix code fails 3 of 7 tests, returning 11.0 where
   59.03 is right.
 * **The harvest now reports WHICH step produced the numbers** and refuses to
-  present a short-checkpoint eval as the run's score. `result_logging.md` is
+  present a short-checkpoint eval as the run's score. `../../research/result_logging.md` is
   explicit that an eval of a short checkpoint is a different, pessimistic
   result; the smoke's step-12 metrics are correctly flagged non-comparable
   against the reference's 77180.

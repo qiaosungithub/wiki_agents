@@ -6,6 +6,24 @@ produced with WeasyPrint, which runs no page JavaScript**, so never depend on
 client-side MathJax/KaTeX — use already-rendered static markup/SVG, MathML known
 to work in the renderer, or print-safe HTML text.
 
+## Use The CLIPA Synthesis Browser Shell as reference
+
+**Unless the user explicitly asks for another design, every new report uses the
+browser-first shell in
+`../../readings/vision-related/tutorials/clipa_followups_synthesis_report.html`.**
+Copy its complete inline CSS rather than substituting another `readings` style
+or extracting a new design system.
+
+The shell is a gradient `.header` with a monospace `.kicker`, large `h1`,
+`.subtitle`, pill metadata, and plain `.nav` links. The body is a centered
+two-column `main`: an `article.content` of warm-paper `.card` sections plus a
+290-pixel sticky `.toc` placed after the article. Inside cards, reuse its
+`.lead`, `.grid > .box`, `.note`, `.warn`, `.lesson`, `.formula`,
+`table.metric`, `.diagram`, `.caption`, and `.tag` components. Preserve the
+980-pixel single-column responsive breakpoint, rounded borders, shadows,
+sans-serif typography, colors, and inline-CSS packaging. Bilingual reports are
+separate HTML files with matching section IDs and reciprocal links in `.nav`.
+
 ## Encode Line Structure Explicitly
 
 **Do not rely on literal source newlines inside an ordinary
