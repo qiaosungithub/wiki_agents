@@ -17,11 +17,21 @@ from useless.
 | metro | v7 cells live | storage cell | smoke | role |
 |---|---|---|---|---|
 | **`cbf`** | `yucbfiv`, `yucbful`, `yucbfwv`, `je`, `yucbfrl` | `is-d` 68.1 PiB sp50 | completed 12/12 | **primary** — the only metro with cell redundancy |
-| **`tul`** | `yutulpz` | `nm-d` 44.2 PiB sp50 | scheduled, 8 tasks | second NA metro; existing `jax_llava` work sits here |
+| **`tul`** | `yutulpz`, `nl`, `nk` | **`oi-d` 29.6 PiB** (nm-d's quota is FULL — see below) | scheduled, 8 tasks | second NA metro; existing `jax_llava` work sits here |
 | **`lpp`** | `yulpptr` | `li-d` 85.3 PiB sp50 | ran to step 6 | European leg; largest storage of the three |
 
 Live chip and slice counts are deliberately not repeated here — the survey table
 below owns them, and they move daily.
+
+**`tul` writes to `oi-d`, NOT `nm-d`.** A metro can hold several storage cells,
+and `nm-d`'s group quota (`deepmind-resources-colossus`) filled to its ceiling
+(47.9P/48.2P), poisoning every write with `over Colossus bytes HDD quota`. The
+fix was NOT to abandon `tul` but to point its bucket at `oi-d`, the same-metro
+sibling with headroom — a lossless swap, because same-metro cross-cell reads are
+free. **When a metro's storage cell fills, check for a second cell in the same
+metro before rejecting the compute** (`../storage.md` §An Over-Quota Cell). Verify
+with `fileutil quota deepmind-resources-colossus <cell>` (the bill is charged to
+the GROUP, so query the group, not your username) and a write probe.
 
 Rejected, with the reason, so this is not re-litigated:
 

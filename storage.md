@@ -235,8 +235,17 @@ shows the encoding responsible (`r=3.2` ⇒ multiply payload by ~2.9).
    against a personal 500 GiB. Use the `chstat` form above, but **verify the
    group is registered in that cell first** (`flex.par list_ceiling`): accounting
    to an unregistered group is *worse* than leaving it alone.
-3. **Move the data to a cell where the group has a ceiling**, when the current
-   cell has no registration at all. Some accelerator cells have no team storage
+3. **Switch to a same-metro sibling cell** — the first move when the GROUP quota
+   (not just yours) is full, so deleting your own files cannot help. A metro
+   often holds several storage cells (e.g. `tul` has both `nm-d` and `oi-d`);
+   pointing the bucket at a sibling with headroom is **lossless**, because
+   same-metro cross-cell reads are free and the compute does not move. This beats
+   abandoning the compute cell. `fileutil quota deepmind-resources-colossus
+   <cell>` on each candidate finds one with room; `research/v7_storage_placement.md`
+   records the metro→cell map. Only after exhausting same-metro options do you
+   move the DATA to another metro (a Type-1 cross-region copy, expensive).
+4. **Move the data to a cell where the group has a ceiling**, when the current
+   metro has no registration at all. Some accelerator cells have no team storage
    whatsoever; `research/v7_storage_placement.md` records which.
 
 **The poisoned handle is sticky — retrying never succeeds — and release is not
