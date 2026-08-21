@@ -149,6 +149,26 @@ add a new compute cell you must mirror the data and add both entries**:
 | `dataset/data_util.py::_local_data_root` | dataset mirror matching `$BORG_CELL` / `$CLOUD_ZONE` from `_MIRRORS`; an unlisted cell keeps the old default rather than inventing a path | `$EQR_DATA_ROOT` |
 | `tpu_cmd/xm_launcher.py::_local_bucket` | checkpoint bucket matching `--cell` from `_CELL_BUCKETS` | `--bucket` |
 
+**There are now FOUR full data metros plus one partial** (was three). A run
+reads the mirror in its own metro; the five mirror dicts in `data_util.py`
+(`_MIRRORS`, `_OFFLINE_MIRRORS`, `_SETTINGA_MIRRORS`, `_SETTINGB_MIRRORS`,
+`_SETTINGB_V3_MIRRORS`) all carry the same cell→root mapping and must be kept in
+sync when a cell is added:
+
+| metro | data cell | v-family | completeness |
+|---|---|---|---|
+| cbf | `is-d` | v7 | full (generation source) |
+| tul | `nm-d` (data) / `oi-d` (ckpt) | v7 | full |
+| lpp | `li-d` | v7 | full |
+| **dfw** | **`rs-d`** | **v4** | **full** (all datasets; added for cheap v4) |
+| las | `dl-d` | v4 | **PARTIAL** — maze v4 working set only (64x64-offline + companions + settingA/B); NOT settingB_v3 / 128x128 |
+
+`las`/`dl-d` being partial means `storage.md` §Existence Is Not Completeness
+bites: check `_MIRRORED`/`_SUCCESS` on `dl-d` before pinning a job there rather
+than assuming a dataset exists. `research/v7_storage_placement.md` owns the
+authoritative cell survey and the `las` naming trap (`la-d`/`lb-d` are `lpp`, not
+`las`; only `dl-d` is `las`).
+
 **Every host must read the checkpoint itself.** The obvious optimisation — rank
 0 reads and `broadcast_one_to_all` rather than N hosts amplifying the read
 N-fold — halts the TPU core with `RuntimeUnexpectedCoreHalt` *after* the read
@@ -605,8 +625,9 @@ read as the solving one: harmless there, badly wrong off it.
 ### Periodic-wall (Setting-A) corpora
 
 **`Maze-period-easy` / `Maze-period-hard` are the dynamic-maze corpora** — 20M
-train + 1k test each, mirrored to all three metros and registered in
-`_SETTINGA_MIRRORS`, same 30x30 geometry as the static corpora and so drop-in
+train + 1k test each, mirrored to all four full data metros (cbf/tul/lpp/dfw;
+plus partial `las`) and registered in `_SETTINGA_MIRRORS`, same 30x30 geometry as
+the static corpora and so drop-in
 comparable, plus **period-P blinking walls**, one token per phase (`easy` P=2,
 vocab 8; `hard` P=3, vocab 9). The solution is still a drawable wait-free line,
 so image-to-image is unchanged; full definition in

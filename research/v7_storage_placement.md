@@ -7,18 +7,31 @@ below** — obtainability moves daily, and the v7 fleet is still turning up.
 Delete this file once the placement is settled and recorded in the project
 guide.
 
-## The Standing Decision: Three Metros
+## The Standing Decision: Four Full Data Metros (+ one partial)
 
-**Datasets are mirrored into `cbf`, `tul`, `lpp` and nowhere else**, chosen on
-the intersection of live obtainability, storage headroom, and a verified smoke,
+**The full mirror set is now `cbf`, `tul`, `lpp`, `dfw` — four metros** (was
+three: `dfw` was added to unlock cheap v4). A fifth, `las`, carries a PARTIAL
+mirror (the maze v4 working set only, not every dataset). Each was chosen on the
+intersection of live obtainability, storage headroom, and a verified smoke,
 weighting *breadth of cells* because a metro with one cell is one stockout away
 from useless.
 
-| metro | v7 cells live | storage cell | smoke | role |
-|---|---|---|---|---|
-| **`cbf`** | `yucbfiv`, `yucbful`, `yucbfwv`, `je`, `yucbfrl` | `is-d` 68.1 PiB sp50 | completed 12/12 | **primary** — the only metro with cell redundancy |
-| **`tul`** | `yutulpz`, `nl`, `nk` | **`oi-d` 29.6 PiB** (nm-d's quota is FULL — see below) | scheduled, 8 tasks | second NA metro; existing `jax_llava` work sits here |
-| **`lpp`** | `yulpptr` | `li-d` 85.3 PiB sp50 | ran to step 6 | European leg; largest storage of the three |
+| metro | v-family | v7 cells live | storage cell | smoke | role |
+|---|---|---|---|---|---|
+| **`cbf`** | v7 | `yucbfiv`, `yucbful`, `yucbfwv`, `je`, `yucbfrl` | `is-d` 68.1 PiB sp50 | completed 12/12 | **primary** — the only metro with cell redundancy; generation source |
+| **`tul`** | v7 | `yutulpz`, `nl`, `nk` | **`oi-d` 29.6 PiB** (nm-d's quota is FULL — see below) | scheduled, 8 tasks | second NA metro; existing `jax_llava` work sits here |
+| **`lpp`** | v7 | `yulpptr` | `li-d` 85.3 PiB sp50 | ran to step 6 | European leg; largest storage of the three originals |
+| **`dfw`** | **v4** | `yudfwra` | `rs-d` 48.5 PiB sp50 | loader-resolve + read PASS | **4th FULL mirror** (all 16 datasets). v4 is ~8x cheaper/chip than v7; ckpt bucket `_CELL_BUCKETS['yudfwra']` → rs-d |
+| `las` | **v4** | `dl` | `dl-d` 31.6 PiB sp10 | loader-resolve + read PASS | **PARTIAL** — only the maze v4 working set (64x64-offline + companions + settingA/B), NOT settingB_v3 / 128x128. Non-oversold fallback when `dfw` v4 fragments. ckpt bucket `dl` → dl-d |
+
+**`las`/`dl-d` is a partial mirror — do not assume a dataset is there.** It holds
+maze64's v4 working set only. `storage.md` §Existence Is Not Completeness applies:
+check for the dataset's `_MIRRORED`/`_SUCCESS` on `dl-d` before pinning a job
+there. `dfw`/`rs-d` is the complete 4th mirror.
+
+**Naming trap for `las`:** only `dl-d` is the true `las` storage cell —
+`la-d`/`lb-d` resolve to `lpp`, and `mg-d` (looks like `cmh`) is `ckv`. Verify
+any new cell with `mach_locality -k metro <cell>` before trusting its name.
 
 Live chip and slice counts are deliberately not repeated here — the survey table
 below owns them, and they move daily.
@@ -40,7 +53,8 @@ Rejected, with the reason, so this is not re-litigated:
 | `ske`, `kul`, `phx` | **Most chips of all, zero team storage.** Compute without co-located storage is the pruner-kill case. |
 | `grq` / `el` | The best storage anywhere (95.7 PiB, same cell as the chips), but obtainability swung 0 -> 937 across a day. A single cell that thin cannot be a primary. |
 | `sin` | Completed its smoke, but the thinnest storage of any candidate (under 10 PiB) and far from the others. |
-| `ckv`, `dfw` | Good storage; obtainability has since recovered from zero (2398 / 2885 on a later sample), so re-check rather than treating the rejection as settled. |
+| `ckv` | Good storage; obtainability has since recovered from zero (2398 on a later sample), so re-check rather than treating the rejection as settled. |
+| ~~`dfw`~~ | **No longer rejected — now the 4th FULL data metro** (`rs-d`), stood up for cheap v4. See the standing-decision table above. |
 
 **The launcher's `_CELL_BUCKETS` maps every v7 cell to a same-metro bucket**, so
 `--cell=<v7 cell>` alone picks the right storage; it prints the choice at
