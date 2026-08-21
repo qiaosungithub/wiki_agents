@@ -56,6 +56,15 @@ seconds.
   survives, and it survives nowhere durable; naming configs also grows one file
   per finished experiment. Nothing is lost — the snapshot is immutable and a
   helper copies a past run's exact config back out (`infra/tpu_cli.md`).
+  **The default is `remote_run`; write the run into `remote_run_config.yml` and
+  DO NOT pass `--config`.** If a mode must be named, pass the BARE name
+  (`--config=trm_sudoku`), never a path or filename: the launcher wraps the
+  value into `configs/<mode>_config.yml`, so `--config=configs/x_config.yml`
+  double-wraps to `configs/configs/x_config.yml_config.yml` and the job dies at
+  startup with "Could not locate …". The launcher now normalises the value and,
+  on a resume, refuses a missing config before packaging — but the contract is
+  the bare mode, and a resume that skipped this check once shipped exactly this
+  bug.
 - **When the checkout is shared, edit the config in a COPY and launch from it.**
   "In place" means in the file the launcher reads, not the shared worktree:
   every launch overwrites that one file, so two agents launching minutes apart
