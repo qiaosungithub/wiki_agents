@@ -101,6 +101,11 @@ like it had covered them:
   account owner. A stale cache plus one `npu quota` ran
   `tmux kill-session -t tpu-daemon` and killed it — the frozen board that
   recovery exists to repair, caused by the repair.
+- **A consumer that reaches past the registry may still read the owner's, and
+  some still do.** `infra_check` reads a hardcoded `~/.tpu_jobs.json`, not
+  `$TPU_JOBS_FILE`, so the guest daemon's infra pass polls the OWNER's registry.
+  Harmless only because both boards then reflect the owner's jobs; a real fix
+  scopes the path. Treat any unscoped path here as a latent instance of this bug.
 
 **The owner stays unscoped on purpose.** Whoever pays for the quota needs to
 see and stop everything running on it; the partial view belongs to the guest.
@@ -116,10 +121,18 @@ the background daemon refreshing it, and the commands warn when the cache is
 stale. **A full daemon round must therefore finish well inside the staleness
 threshold.**
 
-- **Run the checkers concurrently.** Each pays a substantial interpreter cold
-  start while its RPCs cost under a second, so serial runs paid that tax
-  repeatedly and pushed a round past the threshold. They are independent and
-  write to disjoint outputs.
+- **Split the round into a fast lane and a slow lane.** The commands warn per
+  cache, so a slow checker must not hold a fast one past the alarm. money and
+  quota are cheap (~40s) and the round WAITS for them; infra_check scales with
+  registry size (one serial RPC per tracked job) and takes minutes, so it runs
+  DETACHED — the round never waits on it, and a `kill -0` guard skips launching
+  a second pass while one is still in flight. A single `wait` barrier over all
+  three once let a multi-minute infra pass age money.txt past its threshold
+  while money's own data had been ready for seconds.
+- **Every checker cold-starts once; keep them out of a serial chain.** Each pays
+  a substantial interpreter cold start while its RPCs cost under a second, so
+  running them one after another pays that tax repeatedly. They share no state
+  and write to disjoint outputs, so they run in parallel.
 - **Rebuild all checker binaries in one build invocation.** Building a single
   target can publish an output namespace holding only that target, and the
   daemon then reports failures that look like data or auth bugs.
@@ -147,12 +160,28 @@ threshold.**
   what the command prints; the section layouts differ (running carries an extra
   `REGION|DETAILS` pair the 6-column pending/done rows do not), so a parser must
   gate per-section on the column count rather than a fixed index.
+- **`AGE` is derived in the wrapper, not the daemon.** The active/pending tables
+  show `AGE` = wall-clock since *submission*, parsed from the timestamp
+  `tpu_wrapper` already baked into each entry's `logdir`
+  (`eqr_run_YYMMDD_HHMMSS`) or `bucket_cp_path` (`..._YYYYMMDD_HHMMSS_...`) in
+  `~/.tpu_jobs.json` (`_age_str`). It is submit-age (queue + run), NOT pure Borg
+  run-uptime — the daemon cache carries no work-unit start time, so "how long has
+  it actually been *training*" still comes from `STEP × sec/step`, not `AGE`. On
+  the pending board `AGE` doubles as "how long stuck in the auction". Add a
+  wrapper column by editing the per-section `*_headers`/`*_caps` lists and the
+  matching `*_rows.append(...)` — no daemon rebuild needed, effect is immediate.
 
 ## Job Bookkeeping
 
 The live registry is the file `tpu check` renders from; an older predecessor
 file is no longer written and survives only as a fallback for resume.
 
+- **A terminal row is polling load, not just clutter.** infra_check issues one
+  serial RPC per tracked job, so hundreds of never-migrating rows
+  (`TERMINAL_RECONCILED`, `CANCELLED`) inflate the round for jobs whose state
+  can never change again. The daemon filters terminal status out of its poll
+  set, and archiving them keeps the live registry small; do both, since a fresh
+  registry accretes them continuously.
 - **Clear archives rather than deletes**, moving entries to a legacy file. Keep
   it: an entry is the only mapping from an experiment id back to its checkpoint
   bucket, staging directory, and launch log once the job and work unit are gone.
