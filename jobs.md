@@ -187,6 +187,13 @@ first. The decisions are here; the mechanism is in `infra/`.
     launcher). Reserve an explicit `--cell` for when you truly must pin one exact
     cell; for storage locality, `--metro` is the right, less brittle tool. Only a
     run with no storage constraint should let the default roam all metros.
+    - **`--metro` fails CLOSED when the metro is full.** If no cell in the named
+      metro can place the slice right now, `tpu queue` **refuses to submit**
+      (rather than roaming to an out-of-metro, no-data cell where the dataloader
+      would crash — the exact incident that drifted 3 arms to `yuskedq`). Wait
+      and retry (the metro frees up), or pin an explicit `--cell=<in-metro cell>`
+      to stage-and-queue there. Only a run with NO data need should override with
+      `--force` / `TPU_METRO_FALLBACK=1` to permit an out-of-metro cell.
 - **Pick the group first, and default to the one that actually holds your floor.**
   A PROD floor is per (group, accelerator, cell) (last bullet), so the group is
   not cosmetic — it decides whether a slice sits inside an idle guarantee or is
