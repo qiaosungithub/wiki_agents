@@ -259,19 +259,77 @@ A short submit with the real workload answers "can I get this slice here" at 100
 the capacity table was ~12% accurate against the live queue
 (`research/accelerator_choice.md`).
 
+## The Smart Local Queue Automates "Change Cell"
+
+**When the verdict says change cell, `tpu enqueue` does it for you.** The manual
+loop above — read the verdict, pick a cell that can place the slice, resubmit,
+watch, repeat — is exactly what the local-queue router automates. It is
+side-by-side with `tpu queue`: the one-shot path is unchanged, and if you never
+enqueue anything nothing about the tool changes.
+
+The mental model is two queues. `tpu queue` admits a job to ONE cell and waits;
+if that cell is oversold the job sits PENDING for hours while the same
+accelerator is idle elsewhere. The **local queue** is a durable, unlimited list
+of desired runs (a queued job costs nothing — PENDING does not bill), and the
+router drains it into the XM queue one placement at a time, choosing a cell that
+can actually place the slice **right now** (free chips, not the obtainable table;
+never an oversold or full cell).
+
+| Command | Does |
+|---|---|
+| `tpu enqueue --power=v7-32 --archs=v7,v6p --launch=config=...` | Add a desired run. `--archs` lists the accelerator generations it accepts; `--launch=k=v,flag` is passed verbatim to `tpu queue` at submit. |
+| `tpu queue-status` (alias `tpu qs`) | The local queue plus, live, why each job waits or which cell it is placeable in now. |
+| `tpu dequeue <job_id>` | Remove one before it is submitted. |
+| `tpu route-tick` | Run the router by hand: plan (dry-run) then, with `--nodry_run`, submit placeable jobs. `--reroute --nodry_run` cancels jobs stuck PENDING past 10 min and re-queues them. |
+
+**A checkpoint-sharded resume must pass `--topology_locked`.** Then the router
+only moves the job between shapes of the SAME mesh geometry — `v6p-32` and
+`v7-32` are both `2x4x4` and interchangeable, but `v6e-32` (`4_8`) is not, and a
+locked job is never placed on it. Omit the flag only for a run that can retrain
+from scratch. A chip count is not a size (see the top-level rule): give `--power`
+an explicit `arch-chips` so the lock has a mesh to anchor to.
+
+**The router is off by default in the daemon.** Enqueuing is safe and free;
+nothing is submitted or cancelled until you run `tpu route-tick --nodry_run`
+yourself (or the daemon's router lane is armed with `TPU_ROUTE_ENABLED=1`, which
+it is not by default). The router never submits into an oversold/full cell and
+never cancels a job whose live status it cannot read. Tool internals:
+`infra/tpu_cli.md`.
+
 ## Preemption, Restart, And Resume
 
 - **A restart restores nothing.** The binary re-executes from the top on a fresh
   machine with the same arguments: no process state, memory image, accelerator
   snapshot, or execution position. Continuity is the application's job, via
   checkpoints.
-- **A job with no restart budget dies on its first preemption.** The defaults
-  are "never restart": the preemption is a free failure, but the non-zero task
-  exit when the gang is torn apart is counted and the job declared dead. Always
-  pass an explicit scheduling policy — ours allows unlimited task failures but
-  at most one per task per credit window, so a long run survives unrelated
-  preemptions while a task that keeps dying is declared dead rather than retried
-  forever.
+- **A job with no restart budget dies on its first preemption.** The preemption
+  is a free failure, but the non-zero task exit when the gang is torn apart is
+  counted and the job declared dead. Always pass an explicit scheduling policy —
+  ours allows unlimited task failures but at most one per task per credit window,
+  so a long run survives unrelated preemptions while a task that keeps dying is
+  declared dead rather than retried forever.
+- **⚠️ In a preemption STORM (thin/borrowed capacity, no floor), the default
+  `borg_max_per_task_failures=1` will kill a job that is merely trying to hold
+  its ground — this is NOT the same as "never restart".** The `xm_launcher.py`
+  defaults are actually `borg_max_task_failures=-1` (unlimited),
+  `borg_max_task_evictions=-1` (unlimited), but `borg_max_per_task_failures=1`
+  with a 7200s credit window. A *clean* preemption counts as an eviction (budget
+  unlimited, fine), BUT when the gang is torn apart the surviving tasks often
+  exit non-zero — counted as a per-task *failure*, not an eviction. On a cell
+  where you have no floor and get ABORTed repeatedly, each task burns its single
+  failure credit within one 7200s window and the whole job flips to FAILED
+  (signature: `task_states=[ABORT×N, FAILURE×k]`, WU=FAILED). Observed 2026-08-21:
+  four PaliGemma v4-256 arms on `oe` (no v4 floor) all died this way, repeatedly,
+  even though a pure-PENDING job would have waited harmlessly for hours.
+  **To "queue and ride out the storm" — i.e. keep re-attempting until a window
+  holds, instead of dying — you MUST raise the per-task budget explicitly:**
+  `tpu queue ... --borg_max_per_task_failures=100` (with the default unlimited
+  eviction budget). Then repeated ABORTs re-queue instead of failing the job.
+  A job that stays PENDING and never schedules is NEVER failed for waiting
+  (board routinely shows others pending 2d+); only a schedule-then-abort with an
+  exhausted per-task budget dies. **If you have a real floor elsewhere (see the
+  survival test above), prefer that — the budget knob is for riding out a storm
+  on borrowed capacity, not a substitute for a floor.**
 - **Checkpoints must not live in the working directory.** It is task-local and
   wiped by the very event the restart budget exists to survive; a budget without
   durable checkpoints only buys the right to redo the run from step zero.

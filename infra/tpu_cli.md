@@ -246,3 +246,60 @@ every read or write; pin one explicitly if it must outlive that.
 blocks the service and every local binary hits the same wall. This is a
 workstation limitation only, a job writes fine; use the browser URLs in
 `../research/result_logging.md`.
+
+## The Local-Queue Smart Router
+
+A side-by-side scheduler that drains an unlimited local queue into the XM queue
+only when a cell can place the slice. User-facing workflow is `../jobs.md`
+§The Smart Local Queue; this is the build. It never touches the one-shot
+`tpu queue`. Four modules in the google3 half, each a `pytype_strict_library`
+with its own `pytype_strict_contrib_test`:
+
+| Module | Role |
+|---|---|
+| `route_lib.py` | Pure scheduling core: queue schema (`QueueEntry`), placement, priority + seeded-random fairness, cell ranking by placeable slices, effective-price type selection (raw price discounted by a pool-size bonus), topology lock. No I/O, no RPC — unit-tested in full. |
+| `avail_provider.py` | Wraps `GetCellAvailability` (the same RPC as `slice_probe`) plus the money `market.json` cache into `(avail_by_cell, arch_price, arch_pool)`. Free chips (`max_available_chips`) decide; `obtainable_capacity` is never read for a decision — it lies. |
+| `route_check.py` | The tick: load queue → fetch availability → plan → submit via `tpu queue` (default `--dry_run`). `--reroute` cancels jobs stuck PENDING past the deadline and re-queues. Binary + library share the source; the binary target just re-exports it. |
+| `queue_cli.py` | `tpu enqueue` / `queue-status` / `dequeue`. Reuses route_check's queue persistence and a dry-run planning tick for the live status view. |
+
+**Side effects sit behind seams so the whole thing unit-tests offline.** The
+submitter (`tpu queue`/`tpu cancel` shell-out), the availability provider, and
+the XManager status probe are all injected; the 90-plus tests use fakes and
+never touch a real RPC or shell. Keep it that way — a test that needs the network
+is a test that will not run in the daemon's build.
+
+**A cell can host two accelerator generations at once** (`je` carries both a
+v6e and a v7 pod; `nk`/`nl` both v6e and v6p). Availability is therefore keyed
+per `(cell, arch)` as `cell|arch`, not by bare cell name, or the second
+generation silently overwrites the first and the router never sees it. Anything
+that draws down a cell's free chips within a tick must match by content
+(cell AND arch), not by dict key.
+
+**A topology-locked job must anchor its mesh before the first placement.** Once
+placed, `locked_geometry` is frozen and only same-mesh shapes are eligible
+(`v6p-32`↔`v7-32`, both `2x4x4`; never `v6e-32`, `4_8`). Before the first
+placement there is no pinned geometry, so it anchors to the mesh named by the
+job's own `--power` spec — a locked `v6p-32` never first-lands on a v6e-64 (`8_8`)
+that merely fell inside the power tolerance window. A bare-int power names no
+arch, so a locked job with one is unplaceable by design (it would be guessing a
+mesh for a sharded checkpoint).
+
+**The re-route sweep never cancels on missing data.** It only cancels a job the
+XManager probe CONFIRMS is still PENDING; UNKNOWN (probe failed, no work units)
+is a no-op, and a job that has since started RUNNING is promoted, not killed. The
+clock rule (submitted, older than the deadline) is `route_lib.needs_reroute`; the
+live check and the cancel/cool-down side effects are in `route_check.run_reroute`.
+
+**The daemon's router lane is the 4th lane, OFF by default.** `TPU_ROUTE_ENABLED`
+unset is a complete no-op — the daemon behaves exactly as before. Armed, it runs
+like the infra lane: DETACHED with a `kill -0` guard, so its serial RPCs never
+delay the money/quota fast lane, and `TPU_ROUTE_DRYRUN=1` (the default when
+armed) plans and logs without submitting. The queue file is operator-scoped like
+the registry: `npu` points `TPU_LOCAL_QUEUE_FILE` at lyy's copy, so an enqueue
+under one operator never lands in the other's queue.
+
+**Building it: `blaze build $CHECKER_SUBDIR:{route_check,queue_cli}`** (the two
+binaries; the libraries and tests come along as deps). A py-strict binary may
+not depend on another binary — that is why route_check's logic lives in a
+library the queue_cli binary depends on, rather than queue_cli importing the
+route_check binary target.
