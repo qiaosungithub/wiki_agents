@@ -158,6 +158,14 @@ first. The decisions are here; the mechanism is in `infra/`.
   `TPU_NO_SMART_CELL=1` skip it; and if nothing can be recommended it silently
   falls back to letting the allocator choose — it can only help, never block. So
   the group still matters (below), but the cell usually does not.
+  - **EXCEPTION — a data-locality-locked run must still pin `--cell`.** The pick
+    ranks on free chips and oversold ONLY; it has no storage-co-location
+    dimension (next bullet), so it can send a run to a cell a metro away from its
+    checkpoint bucket — 4-5x throughput and the pruner kills it (storage rule).
+    A Type-1 / bucket-pinned run (e.g. v6p on `is-d`/cbf writing to a same-metro
+    cell) should keep an explicit `--cell=<co-located cell>`; locality outranks
+    avoiding oversold. Only a run with no storage constraint should let the
+    default choose freely.
 - **Pick the group first, and default to the one that actually holds your floor.**
   A PROD floor is per (group, accelerator, cell) (last bullet), so the group is
   not cosmetic — it decides whether a slice sits inside an idle guarantee or is
