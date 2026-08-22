@@ -289,6 +289,17 @@ locked job is never placed on it. Omit the flag only for a run that can retrain
 from scratch. A chip count is not a size (see the top-level rule): give `--power`
 an explicit `arch-chips` so the lock has a mesh to anchor to.
 
+**`tpu enqueue` captures the checkout you run it from, so enqueue from the right
+tree.** `tpu queue` packages its source by rsyncing the CURRENT directory into
+the stagedir, and the router runs the submit from the entry's `workdir`
+(defaulting to the CWD at enqueue time). A run whose config or edits live in a
+particular checkout — a per-arm snapshot dir, an edit not passed via `--config`
+— must be enqueued FROM that directory, or the router ships a copy of the wrong
+source. `tpu queue-status` and `tpu route-tick` print the packaging dir so you
+can check it before it submits; override with `tpu enqueue --workdir=<dir>`. Only
+a run whose every difference rides on an explicit flag is safe to enqueue from
+anywhere.
+
 **The router is off by default in the daemon.** Enqueuing is safe and free;
 nothing is submitted or cancelled until you run `tpu route-tick --nodry_run`
 yourself (or the daemon's router lane is armed with `TPU_ROUTE_ENABLED=1`, which
