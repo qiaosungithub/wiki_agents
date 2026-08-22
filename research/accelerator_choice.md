@@ -1,5 +1,16 @@
 # Choosing An Accelerator: Obtainability Beats Peak FLOPs
 
+**Do not ask the operator which card or cell to use — they do not know, and
+the answer moves daily. Decide it yourself from three live checks:** the
+clearing price is affordable (`tpu route --power=<slice>` prints cost/hr; cross
+with `budget_check.py`), a cell in the DATA's own metro can hold it (`tpu
+preflight --json` `cells_ok` ∩ the metro of your CNS bucket, via `mach_locality
+-k metro`), and the slice is actually obtainable there. Only escalate a genuine
+tradeoff the checks cannot settle (e.g. every affordable cell is cross-metro).
+Re-run the checks each time; a remembered ranking is wrong within a day — e.g.
+"v4 is cheapest" flipped when v6p PROD cleared at ~2/chip (cost/hr 64 for a
+v6p-32) while v4-256 cost ~1600.
+
 Measured 2026-08-10 21:02 → 08-11 15:44 UTC (18.7 h) by **really queueing**, not
 by reading a capacity table: 180 Borg-verified v6p-64 acquisitions across four
 probes, plus a v5p-128 probe and read-only observation of two v6e-64 jobs. Every
@@ -12,19 +23,33 @@ FLOPs.** `tpu_reference.md` says v6p is 4.34x a v5p chip. Over this window v6p
 delivered *less finished work than either alternative*, because the median hold
 was shorter than one checkpoint interval.
 
-## Pick In This Order
+## There Is No Fixed Ranking — Decide Live, Every Time
 
-1. **v6e** — the default when it fits. One observed job ran **249 min
-   continuous, 0 job/task failures**. Per chip it is half a v6p, and it is the
-   only one of the three that reliably finishes.
-2. **v5p** — a real fallback. Preempted 3 times (8.0 / 0.2 / 1.1 min) then got
-   an 11.1 min window and **ran to SUCCESS**, writing its checkpoint.
-3. **v6p** — only with the guard rails below. 180 acquisitions, **median hold
-   2.3 min**, and long stretches of literally zero completed checkpoints.
+**Which card holds best flips day to day and hour to hour; never carry a
+ranking between runs.** Any list of "use X, then Y" in this file — including
+the one this section replaced — is stale within a day. Before every long run,
+run these live checks and let *them* pick, in this order:
 
-Do not read this as a permanent ranking: it is one 18.7 h window on a market
-that moves. Re-measure with a short probe before committing a long run — the
-method matters more than the numbers.
+1. **Which cards a limit order is blocking RIGHT NOW** — `tools/limit_order.sh
+   status` (or read `tpu money`). A card whose pool-wide clearing price sits
+   above an in-force cap is un-gettable at PROD *no matter how much capacity it
+   shows*, and moving to a cheaper cell does NOT help (the cap is pool-wide).
+   Which cards are blocked changes daily and is the single fastest way to rule
+   options out.
+2. **Price you can afford** — `tpu route --power=<slice>` for cost/hr, crossed
+   with `tools/budget_check.py`. Cheapest card ≠ same card as yesterday.
+3. **Obtainability in your data's metro** — a capacity table does not predict
+   acquisition (see below). Queue a short probe with the REAL workload and
+   judge from Borg.
+
+How wrong a remembered ranking gets, concretely: the 18.7 h window below
+(2026-08-10) found v6e the most reliable and v6p the worst — and on 2026-08-21
+v6e and v5e PROD were **limit-order-blocked pool-wide** (un-gettable at any
+cell), v5p cleared at **0.0**, and v7 cleared **cheaper than v6p** — i.e. the
+exact inversion of that ranking, ten days later. The window is kept below only
+as *method evidence* for the durable rule (**a slice you cannot hold has no
+throughput**), never as a card recommendation. Re-measure every time; the
+method is the asset, the numbers are disposable.
 
 ## v6p-64, Measured
 

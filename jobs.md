@@ -606,10 +606,37 @@ an XID with no work unit, or no XID at all. **A job that never created a work
 unit, or a launch that produced no XID, never reached the scheduler** — read
 those as local problems, not allocator or quota rejections.
 
-- **Never pipe content into the submit command.** Each attribution question is
-  satisfied by an EOF, so redirecting from `/dev/null` answers all of them, and
-  piping something like `yes` segfaults the underlying CLI outright — no XID, no
-  diagnostic.
+- **Never pipe content into the submit command, and always redirect stdin from
+  `/dev/null` for a backgrounded launch.** Each attribution question is
+  satisfied by an EOF, so `< /dev/null` answers all of them, and piping
+  something like `yes` segfaults the underlying CLI outright — no XID, no
+  diagnostic. **A `nohup`/`setsid` launch WITHOUT `< /dev/null` is the
+  dangerous case**: the attribution prompt reads EOF, but instead of exiting the
+  CLI can re-loop and SUBMIT AGAIN — one `tpu queue` then yields TWO experiments
+  on the same out_dir (two writers = corruption), and the shared `~/.tpu_jobs.json`
+  records only one, so the survivor has no registry entry. Always background as
+  `tpu queue ... < /dev/null`, and after launch confirm EXACTLY ONE experiment
+  with `xmanager.par list | grep <name>` before walking away.
+- **Do NOT build a home-grown "anti-dup" wrapper that kills the launcher on the
+  `Experiment id: N` line.** That line prints at experiment *creation* — BEFORE
+  the blaze build (minutes) and BEFORE any work unit is added. Killing the
+  launcher there leaves a RUNNING-forever **zombie**: an experiment shell with
+  "No work units found", no log dir, and an out_dir that is never created. The
+  ONLY line that means "launch truly finished" is `Launched experiment N` (or,
+  for a resume, `Added N work unit(s) to experiment`), printed AFTER the build +
+  work-unit add. The wrapper already self-guards against dup retries (it retries
+  only when that line is ABSENT), so with `< /dev/null` you do not need any
+  kill logic — just let the launcher exit on its own and then confirm exactly
+  one experiment. If you must detect completion programmatically, grep for
+  `Launched experiment|work unit\(s\) to experiment`, never for `Experiment id:`.
+- **ANSI-strip wrapper output before grepping for the XID.** XManager prints the
+  XID wrapped in color codes: `Launched experiment \e[1m\e[34m281839914\e[0m
+  "name"`. A pattern like `Launched experiment \K\d+` then matches nothing
+  (the char after the space is ESC, not a digit) and you get a false "launch
+  failed" verdict on a perfectly healthy job. Always pipe through
+  `sed 's/\x1b\[[0-9;]*m//g'` first. (Same rule applies to parsing step numbers
+  / status out of the log mirror — colored `SUBMITTED`/`Preempted.` have bitten
+  watchers before.)
 - **A full `/tmp` breaks the submit with `SIGBUS`.** `/tmp` is RAM-backed tmpfs,
   so a core dump from a local repro fills it and the next writer dies on a page
   it cannot get. Disable cores for local repro runs and check free space before
@@ -647,3 +674,7 @@ run actually wrote metrics, and the settings that are easy to get wrong
 
 Current wrapper code, allocator configuration, work-unit state, and logs outrank
 this guide whenever implementation details change.
+
+## Budget Checking
+
+Before launching a job, the launcher logic automatically invokes `tools/budget_check.py` to ensure that the projected GQM credits spent by this job plus all active jobs in the queue does not exceed one-third of the total available G9 income. If the budget is exceeded, the job launch is halted automatically. The `npu` aliases are subject to their own separate identical budget check.

@@ -29,6 +29,17 @@ infrastructure.
 - **Distinguish "it was killed" from "it exited".** Different footprints — exit
   codes, attempt identity, failure counters, any shutdown marker the program
   writes itself — and opposite fixes.
+- **A log's last LINE is not proof of life; its last WRITE TIME is.** A remote
+  job's log file persists after the job is preempted or dies, so `cat`-ing it
+  and reading the final `[step N/T]` reports the step where it STOPPED, not
+  where it IS — and re-reading the same static file confirms the same stale
+  number, which reads as "healthy, unchanged" when it means "dead". A monitor
+  once reported a training run "healthy ~11%" three times off a log whose mtime
+  was two hours old; the run had been preempted at that step. Before trusting a
+  progress number, check the log's mtime (`fileutil ls -l`) against now, or read
+  the authoritative scheduler state (`tpu check` / borg BCL), never the log body
+  alone. A step that has not advanced AND an mtime older than a few minutes mean
+  preempted, not progressing.
 - **A cause that does not move when the suspect moves is not the cause.**
   Correlate the symptom's period or magnitude with the thing you suspect before
   acting on it.
@@ -74,6 +85,23 @@ Guards, validators, and telemetry run inside the job but are not the job. Put
 them behind a total comparison that can answer "can't tell", make them swallow
 their own failures, and never let one raise into a training or serving loop. A
 check that can crash a run has negative value.
+
+**A monitor that hardcodes an endpoint reports a false mass-death when that
+endpoint moves.** The amply UX gateway (the `:PORT` server behind the web UI and
+all cross-run query tools) is not on a stable port: when it crashes — e.g. on
+LOAS2 expiry — it relaunches on a *fresh* port and rewrites the new URL into
+`~/.amply/dashboard_url`. The worker processes are reparented to init and keep
+running across this (verify with `pgrep -af 'amply worker|claude-amply.py
+resume'` and `ps -o ppid` — a worker whose PPID=1 is independent of the
+gateway). A watcher that hardcodes the old port then probes a dead socket and
+notifies every session DEAD in the same second — a false alarm, not an outage.
+Two defenses: (1) read the live base URL from `~/.amply/dashboard_url` instead
+of hardcoding a port; (2) treat a *simultaneous* all-sessions DEAD with a
+`Connection refused` on resolve as gateway-down-until-proven-otherwise —
+confirm the workers are alive before touching anything, and NEVER `amp
+start`/kill a worker to "recover" (that is what actually kills a live session).
+The gateway self-heals onto the new port; the fix is repointing the observer,
+not restarting the observed.
 
 ## Failure Modes That Only Appear On The Long Path
 

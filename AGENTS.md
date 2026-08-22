@@ -22,6 +22,7 @@ and each has a `README.md` index.
 | `storage.md` | Where data lives, reading it fast, cleaning up safely. |
 | `tpu_reference.md` | Accelerator names, memory, legal shapes, ratios. |
 | `gcp_gpu_ssh.md` | SSH to the GCP GPU VMs (viscam-cloud); OS Login vs metadata keys. |
+| `monitoring.md` | The monitor role: watcher, DEAD/idle alerts, handoffs, escalation. |
 | `projects/` | Per-checkout semantics and boundaries. |
 | `research/` | Running experiments; logging results. |
 | `reports/` | Writing and rendering paper reports. |
@@ -57,6 +58,8 @@ and each has a `README.md` index.
 | Write a checker, or a verification keeps saying OK | `engineering.md` §A Test That Cannot Fail |
 | **Log a result to the spreadsheet**; find a chart | `research/result_logging.md` |
 | Write or render a paper report | `reports/README.md` |
+| **Monitor a fleet of autonomous runs**; watcher, handoffs, DEAD/idle alerts | `monitoring.md` |
+| A watched run shows DEAD/500; hand a heavy line to a fresh session | `monitoring.md` |
 | `EqR` / `EqR-jax` | `projects/eqr_jax.md` |
 | VLM training, data, benchmark reporting | `projects/vlm_training.md`, `projects/vlm_data.md`, `projects/vlm_metrics.md` |
 | Agent web app, or a local agent CLI | `projects/agent_web.md`, `projects/local_agent_cli.md` |

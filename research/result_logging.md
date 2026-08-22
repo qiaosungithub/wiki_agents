@@ -40,8 +40,8 @@ short, and a row without a chart makes every reader rebuild the URL by hand
 **Resolve a tab by title, never by gid.** Both workbooks hold a tab with the
 same gid for different projects, plus dated backup tabs of each other; a gid
 writes your result into a frozen snapshot nobody reads. **A new line of work
-opens a titled BLOCK at the bottom of the live tab**, as every family there
-already does — not a new tab.
+opens a titled BLOCK at the bottom of the live tab by default**, as every family there
+already does — not by default a new tab.
 
 **The two EqR tabs disagree on columns I and J, in the direction that hurts**:
 per-token and whole-board TRADE PLACES, so a row appended to `EqR-reproduction`,

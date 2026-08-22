@@ -13,6 +13,20 @@ repair a started stream — loaders resolve and cache the shard glob at startup.
 **Never infer completeness from a listing, and never trust a remembered mirror
 status**: re-verify live before scheduling.
 
+**A metro appearing in `g3_env`'s cell->data map does NOT mean its data is
+complete — verify the stage-1 datasets per cell before choosing a landing
+cell.** The map records where a replica is *intended*, not where it is whole.
+Measured: `is-d` (cbf) and `li-d` (lpp) carry the full stage-1 set
+(laion-aesthetic, BLIP3o-Short, visual_genome, openimages-detection) with
+`data/_SUCCESS`; `go-d` (cmh) is a PARTIAL replica — it has visual_genome and
+the Qwen model but is MISSING laion-aesthetic / BLIP3o-Short /
+openimages-detection and has no `data/_SUCCESS`, so a from-scratch stage-1 run
+launched there fails on a missing dataset. Consequence for placement: an
+accelerator whose only co-located candidate cells sit in cmh is not actually
+ready without a data copy first. Confirm `_SUCCESS` plus each required dataset
+dir on the specific data cell (`fileutil ls /cns/<cell>-d/home/qiaos/data`)
+before committing a job there.
+
 ## Dataset Uploads
 
 **Upload with `beifen/upload_data.py` plus `beifen/data_upload/datasets.json`,

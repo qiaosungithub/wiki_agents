@@ -157,3 +157,5 @@ on ANY invocation — an agent ran `ux_launch.py --help` for usage text and
 started server #3** (now gated behind `AMPLY_UX_LAUNCH=really-launch`); and a
 TUI/window keeps the base URL it read at startup, so after any server change,
 windows spewing `Connection refused` just need quitting and reopening.
+
+*Update*: A direct patch has been added to `third_party/py/simply/amply/agents/event_loop.py` in the local CitC workspace to detect tool call leaks inline (`TOOL_MARKUP_RE.search(content)`) and immediately append a system correction without sleeping, eliminating the idle time entirely.

@@ -129,6 +129,16 @@ instantly by pool policy — not by Borg — even though the topology is valid. 
 usually allows the architecture minimum; `infra/tpu_cli.md` owns where these
 rules are encoded.
 
+**`v5e` tops out at 64 chips in `deepmind-dynamic`, so it cannot match a
+v7-32.** A `v5e-256` request is rejected outright — `preflight: RED, "v5e-256
+is not a supported slice size (Borg has no legal locus for it). Supported sizes
+for v5e: [8, 16, 32, 64]"` — this is a shape/pool ceiling, NOT a quota or
+credit shortfall (having credit only lets you bid; the topology must be legal
+first). The 256 row above is the physical torus; the obtainable slice in this
+pool is capped lower. Since v7 = 8x v4 = 8x v5e per chip, one v7-32 needs 256
+v5e chips, which is four v5e-64 slices — not power-equivalent as a single job.
+**Treat v5e as unusable for v7-scale training and skip it in surveys.**
+
 **Global batch size must be a non-zero multiple of the chip count**, or the job
 dies with `ValueError: Batch size <B> must be a non-zero multiple of the number
 of chips`. Check against the *slice* you requested, not the one you meant to.
