@@ -335,6 +335,7 @@ never an oversold or full cell), and re-routing anything that gets stuck.
 | `tpu enqueue --power=v7-32 --archs=v7,v6p --launch=config=...` | Add a desired run. `--archs` lists the accelerator generations it accepts; `--launch=k=v,flag` is passed verbatim to `tpu queue` at submit. |
 | `tpu queue-status` (alias `tpu qs`) | The local queue plus, live, why each job waits or which cell it is placeable in now. |
 | `tpu dequeue <job_id>` | Remove one before it is submitted. |
+| `tpu requeue [job_id...]` | Return HELD job(s) to QUEUED after you fix the cause (empty = all held). |
 | `tpu build-worker start` \| `stop` \| `status` | The SERIAL build-worker (dedicated tmux session): claims one QUEUED job at a time as BUILDING, runs its build, records the XID, repeats. One build in flight at a time — the safe way to drain a batch. |
 | `tpu route-tick` | Run one router pass by hand (no daemon/worker): plan (dry-run) then, with `--nodry_run`, submit placeable jobs. `--reroute --nodry_run` cancels jobs stuck PENDING past 10 min and re-queues them. |
 
@@ -343,6 +344,17 @@ one live build) → SUBMITTED → RUNNING; `tpu queue-status` and `tpu check` sh
 which stage each is in. A build that produces no XID (a `found[]` zombie) is
 requeued, not left dangling; a crashed worker's stale BUILDING claim is reclaimed
 after `--build_stale_s`.
+
+**HELD is the anti-churn park.** An unattended worker must not spin forever on a
+job it can never build, so it moves such a job to **HELD** (skipped until a human
+acts) instead of requeuing it endlessly: a `--workdir` that does not exist (park
+immediately — the wrong source would be packaged), or a job that fails to produce
+an XID `--max_build_attempts` times (default 3). This is exactly what catches a
+stale/duplicate enqueue (e.g. entries whose runs are already on Borg) or an
+empty-workdir batch enqueued from the wrong directory — they sit HELD, not
+churning or double-firing. Fix the cause (usually: re-`tpu enqueue` from the
+right checkout so `workdir` is captured) and `tpu requeue` the rest; inspect why
+with `tpu queue-status`.
 
 **A checkpoint-sharded resume must pass `--topology_locked`.** Then the router
 only moves the job between shapes of the SAME mesh geometry — `v6p-32` and

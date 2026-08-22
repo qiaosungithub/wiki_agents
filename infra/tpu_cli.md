@@ -309,8 +309,20 @@ runs the ONE build, and records SUBMITTED — or requeues on no-XID (the `found[
 guard, so a zombie is retried not left dangling). A crashed worker's stale
 BUILDING claim is reclaimed after `--build_stale_s`. An injectable stage-health
 probe brakes when srcfs failures spike (`--srcfs_fail_brake`, mode-2 guard).
-`tpu build-worker start|stop|status` runs it in a self-restarting tmux session;
-the queue file is operator-scoped so `npu` gets its own worker.
+`tpu build-worker start|stop|status` runs it in a self-restarting tmux session
+(`start` bakes STAGE_WS_ROOT in and `stop` kills the child, see above); the
+queue file is operator-scoped so `npu` gets its own worker.
+
+**HELD parks a job the worker can never build, so it cannot churn.** An
+unattended worker that requeued a permanently-bad job would spin on it and
+starve the queue. `JobState.HELD` (skipped by `next_queued`) is the park:
+`run_worker_once` moves a job there when its `workdir` is set-but-nonexistent
+(immediate — wrong source would be packaged) or it has failed to yield an XID
+`--max_build_attempts` times (default 3, the empty-workdir/`found[]`-repeat
+case). This is what neutralises a stale/duplicate enqueue (entries whose runs
+are already on Borg) or a batch enqueued from the wrong dir: they sit HELD, not
+double-firing. `route_lib.hold_entry`/`requeue_held` are the transitions; a
+human runs `tpu requeue [id...]` after fixing the cause.
 
 **Staging workspace: `export STAGE_WS_ROOT=<healthy google3 root>` BEFORE
 `build-worker start`.** `tpu queue` stages into `${STAGE_WS_ROOT}/experimental/
