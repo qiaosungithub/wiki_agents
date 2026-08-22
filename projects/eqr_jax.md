@@ -303,6 +303,42 @@ no real external tracker unless current code proves one was created.
   training unrolls the full `halt_max_steps`, and a 100k-step maze leg already
   runs ~8 hours at v7-16's measured 3.53 steps/s.
 
+## Harvesting Final Train Metrics
+
+`../research/result_logging.md` §Every Row Carries Its Train Metrics owns *why*
+every row needs its train columns; this owns *where the numbers are* when the
+run was preempted and the obvious log looks empty.
+
+**Per-step train metrics are printed by exactly one worker — jax process 0 — and
+after a preemption that worker is a different physical log file.** The line to
+grep is `[Info] [<step>/<total> <pct>%] loss=.. lm_loss=.. acc=.. exact=..`; it
+appears only in the `rank_<n>.log` whose banner says `borg task <n> == jax
+process 0`. **That borg-task↔jax-process mapping is reshuffled on every retry**,
+so the rank that carried the curve in `attempt1` almost never carries it in the
+final attempt — which is why `rank_7` (the old "proc0") so often reads empty and
+the metric gets mis-filed as "log rotated". The final segment is not gone; it is
+in a rank you have not looked at yet.
+
+Procedure (the run reached `step_<budget>`, so the curve exists):
+
+1. Take the **last** attempt (`fileutil ls .../logs/ | grep -oE
+   'attempt[0-9]+' | sort -V | tail -1`).
+2. Find which rank is jax process 0 in that attempt, or just which rank has the
+   progress lines:
+   ```bash
+   for r in $(seq 0 7); do
+     n=$(fileutil cat "$LOGDIR/logs/rank_${r}_attempt${A}.log" 2>/dev/null \
+         | sed 's/\x1b\[[0-9;]*m//g' | grep -cE '\[Info\] \[[0-9]+/[0-9]+ ')
+     echo "rank_$r: $n progress lines"
+   done
+   ```
+3. Tail-window mean the last ~10 progress lines of that log (not the single last
+   row — §Divisors and cadence). Field map to the `EqR-refactored` columns:
+   `lm_loss=` → `final train/lm_loss`; `acc=` → `final train/token_acc`;
+   `exact=` → `final train/acc` (whole-board exact).
+4. `extra.json` in the checkpoint dir confirms `step` / `total_steps` (proof the
+   run finished) but carries **no** metrics — do not expect the numbers there.
+
 ## Metric Names, Divisors, And Denominators
 
 `../research/result_logging.md` owns the general discipline; the checkout's

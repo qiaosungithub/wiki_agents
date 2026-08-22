@@ -23,12 +23,16 @@ scraping the URL.
 7. Read values, formulas, and colors back; render if the change was structural.
 8. Report the changed row, run id, missing diagnostics, and any caveat.
 
-**Only a run that reaches a conclusion is logged**; one that exposed a code bug,
-a packaging failure, or a preemption belongs in the commit message. **Every row
-carries the chart link plus the `logdir` / `stagedir` pointers**: they recover
-the exact code, command, and resolved config, which is what lets the cells stay
-short, and a row without a chart makes every reader rebuild the URL by hand
-(§Chart Links).
+**Only a run that reaches a conclusion is logged**; one that exposed a code bug
+or a packaging failure belongs in the commit message. **Preemption is not such a
+failure**: a job that was preempted but still reached its step budget produced a
+real result, and its final metrics — train loss included — must be harvested and
+logged, never waved off as "see chart (log rotated)". The rotation is a place to
+look harder (§Every Row Carries Its Train Metrics), not a licence to leave the
+columns blank. **Every row carries the chart link plus the `logdir` / `stagedir`
+pointers**: they recover the exact code, command, and resolved config, which is
+what lets the cells stay short, and a row without a chart makes every reader
+rebuild the URL by hand (§Chart Links).
 
 ## Which Tab
 
@@ -100,6 +104,39 @@ different** — match the conventions of the block you write into.
 | **The CLI splits cell text on `,` and `|`** | A comma starts a new COLUMN and a pipe a new ROW, so an unescaped prose note silently scatters itself across the metric columns and the row below — overwriting real data that reads back as plausible. Escape commas (`\,`) and keep pipes out of the text. Read the whole written range back, not just the cell you aimed at. |
 | **Keep the metric columns visible** | Long text in an early column defeats the side-by-side comparison the layout exists for. |
 | **Read colors back, not just values** | Render the tab (export PNG) after a structural change. |
+
+## Every Row Carries Its Train Metrics
+
+**A results row is incomplete until its train-metric columns are filled, and
+train loss is the one that is never optional.** The eval number is the headline,
+but the train columns (`final train/lm_loss`, `final train/token_acc`, `final
+train/acc`) are what let a reader see *why* an arm sits where it does — an arm
+that evals low because it never fit versus one that fit and failed to generalize
+read identically in the eval column and oppositely in train loss. A row logged
+with the eval filled and the train columns blank silently discards half of every
+lr×wd comparison the tab exists for.
+
+- **Harvest the train metrics as part of the transaction, not as a nice-to-have.**
+  Step 4 ("pull final metrics from logs") includes them; do not treat them as a
+  separate errand you skip when the log is awkward.
+- **"The log rotated" is a lookup problem, not an exemption.** A preempted run
+  whose final-segment progress lines are not where you first looked still has
+  them somewhere; the framework prints per-step train metrics from exactly one
+  worker, and after a preemption that worker is a *different* physical log file.
+  Find it before you write "see chart". The mechanic for this codebase
+  (which `rank_<n>.log` holds the final train curve) is
+  `../projects/eqr_jax.md` §Harvesting Final Train Metrics.
+- **Report a train metric as a tail-window mean over the logged curve**, not the
+  single last row (§Stop If It Is Not Comparable, "Converged value or single
+  sample"; `../projects/eqr_jax.md` §Divisors and cadence).
+- **Match the block's format for each column** — these tabs are inconsistent
+  (`token_acc` is a percent in one section and a fraction in another), and a
+  number in the wrong convention reads as a 100x error. Read the neighbors, not
+  your memory.
+- **Genuinely unrecoverable is the rare exception, and it is stated, not left
+  blank.** If the metric truly cannot be recovered, write why in one clause
+  (`train log lost to N preemptions`) so a blank never reads as an unlogged
+  oversight — but exhaust the lookup first.
 
 ## Stop If It Is Not Comparable
 
