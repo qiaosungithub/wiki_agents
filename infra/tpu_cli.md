@@ -262,7 +262,7 @@ pins a `--cell` onto it. Modules in the google3 half, each a
 | `route_lib.py` | Pure scheduling core: queue schema (`QueueEntry`), placement, priority + seeded-random fairness, cell ranking by placeable slices, effective-price type selection (raw price discounted by a pool-size bonus), topology lock. No I/O, no RPC — unit-tested in full. |
 | `avail_provider.py` | Wraps `GetCellAvailability` (the same RPC as `slice_probe`) plus the money `market.json` cache into `(avail_by_cell, arch_price, arch_pool)`. Free chips (`max_available_chips`) decide; `obtainable_capacity` is never read for a decision — it lies. |
 | `pick_cell.py` | **The default-path picker.** One RPC for the requested type, ranks with `best_cell_for_shape`, prints the single best cell (or nothing). `tpu queue` pins `--cell=<that>` unless the user pinned a cell / used `--power` / passed a comma type / set `TPU_NO_SMART_CELL=1`. Accepts `--metros` (the wrapper forwards `tpu queue --metro/--metros`) so a data-locality-locked run stays in its storage metro while still dodging the oversold cells inside it. FAIL-SAFE by contract: any failure prints nothing and the wrapper lets the allocator choose. |
-| `route_check.py` | The tick: load queue → fetch availability → plan → submit via `tpu queue` (default `--dry_run`). `--reroute` cancels jobs stuck PENDING past the deadline and re-queues. Binary + library share the source; the binary target just re-exports it. |
+| `route_check.py` | The tick AND the serial build-worker. `--reroute` cancels jobs stuck PENDING past the deadline and re-queues. `--worker` runs the serial build loop (below). Binary + library share the source; the binary target just re-exports it. |
 | `queue_cli.py` | `tpu enqueue` / `queue-status` / `dequeue`. Reuses route_check's queue persistence and a dry-run planning tick for the live status view. |
 
 **Side effects sit behind seams so the whole thing unit-tests offline.** The
@@ -292,6 +292,25 @@ XManager probe CONFIRMS is still PENDING; UNKNOWN (probe failed, no work units)
 is a no-op, and a job that has since started RUNNING is promoted, not killed. The
 clock rule (submitted, older than the deadline) is `route_lib.needs_reroute`; the
 live check and the cancel/cool-down side effects are in `route_check.run_reroute`.
+
+**The serial build-worker (`--worker`) is the cure for concurrent-build failures.**
+Concurrent `tpu queue` builds on this workstation fail three ways: (1) two builds
+sharing a checkout race on the blaze **output_base** → `found[]` zombie work
+units (a same-checkout copy dir does NOT isolate it — output_base is per checkout
+root); (2) a burst of concurrent stage-writes drains the CitC **CreateSnapshot
+token bucket** → truncated stagedir, `.par` crash (per-workspace; a fresh
+workspace drains just as fast under a pile-on); (3) stacked build memory peaks
+(survivable on 94G). All three are cured by never building two at once. The
+invariant is the **BUILDING** JobState held IN the durable queue file:
+`claim_next_build` does reclaim-stale + claim-next as one `flock`'d
+read-modify-write on a sidecar lockfile, so at most one entry is BUILDING even
+across separate worker processes. `run_worker_once` claims one, plans a cell,
+runs the ONE build, and records SUBMITTED — or requeues on no-XID (the `found[]`
+guard, so a zombie is retried not left dangling). A crashed worker's stale
+BUILDING claim is reclaimed after `--build_stale_s`. An injectable stage-health
+probe brakes when srcfs failures spike (`--srcfs_fail_brake`, mode-2 guard).
+`tpu build-worker start|stop|status` runs it in a self-restarting tmux session;
+the queue file is operator-scoped so `npu` gets its own worker.
 
 **The daemon's router lane is the 4th lane, OFF by default.** `TPU_ROUTE_ENABLED`
 unset is a complete no-op — the daemon behaves exactly as before. Armed, it runs

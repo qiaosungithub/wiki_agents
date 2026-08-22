@@ -87,16 +87,30 @@ seconds.
   do not affect a queued or running job.
 - **Verify registration after submit** rather than assuming the launch
   transaction completed.
-- **Launch a large batch in PARALLEL, not serially.** Each `tpu queue` reruns
-  the Blaze build + package (~1-1.5 min) even when only the config changed, so a
-  serial sweep of N arms costs ~N x that in wall clock (19 arms measured ~30 min,
-  almost all packaging). Fan the launches out — background each with `setsid`
-  and a bounded concurrency (e.g. 5 at a time) — to collapse the batch to one
-  packaging window (~6-8 min). Each launch still needs its OWN config copy: with
-  a shared `/tmp` template the concurrent writers race on `remote_run_config.yml`
-  and package each other's arm, so give each arm its own copy dir (or serialize
-  only the write+queue call, not the build). Record every XID to a file as it is
-  submitted; parallel launcher output interleaves and is otherwise unreadable.
+- **Launch a batch through the SERIAL build-worker, not by fanning out parallel
+  builds.** Concurrent `tpu queue` builds fail on this workstation — do not do
+  it. Instead `tpu enqueue` every arm (instant, free) and let one build-worker
+  drain them one at a time: `tpu build-worker start`, then
+  `tpu enqueue --power=… --archs=… --launch=config=…` per arm from its own
+  checkout, and watch `tpu queue-status`. One build in flight at a time, no
+  races, and you never wait on a submit.
+  - **Why not parallel** (three failure modes, all real, all cured by serial):
+    (1) two builds sharing a checkout race on the blaze **output_base** and one
+    yields a `found[]` zombie work unit — a same-checkout copy dir does NOT
+    isolate this (output_base is per checkout root, not per copy); (2) a burst of
+    concurrent stage-writes drains the CitC **CreateSnapshot token bucket**,
+    truncating stagedirs and crashing the `.par` — this is per-workspace and a
+    fresh workspace is drained just as fast if everyone piles in; (3) memory
+    peaks from stacked builds (survivable on 94G, but real). The old
+    fan-out-with-setsid-5-at-a-time recipe hit (1)+(2) and was abandoned;
+    serial is the standing rule.
+  - The worker also carries the night's 5 guards: one build at a time, an srcfs
+    failure brake, post-rsync staging checks, a `found[]`/no-XID check that
+    requeues instead of leaving a zombie, and a real-XID done test. Internals:
+    `infra/tpu_cli.md` §The Local-Queue Smart Router.
+  - If you must launch by hand without the worker, launch arms **strictly one at
+    a time** (wait for each to finish packaging before the next), each from its
+    own config copy; never background several builds at once.
 
 ## Requirements And Runtime
 
@@ -321,7 +335,14 @@ never an oversold or full cell), and re-routing anything that gets stuck.
 | `tpu enqueue --power=v7-32 --archs=v7,v6p --launch=config=...` | Add a desired run. `--archs` lists the accelerator generations it accepts; `--launch=k=v,flag` is passed verbatim to `tpu queue` at submit. |
 | `tpu queue-status` (alias `tpu qs`) | The local queue plus, live, why each job waits or which cell it is placeable in now. |
 | `tpu dequeue <job_id>` | Remove one before it is submitted. |
-| `tpu route-tick` | Run the router by hand: plan (dry-run) then, with `--nodry_run`, submit placeable jobs. `--reroute --nodry_run` cancels jobs stuck PENDING past 10 min and re-queues them. |
+| `tpu build-worker start` \| `stop` \| `status` | The SERIAL build-worker (dedicated tmux session): claims one QUEUED job at a time as BUILDING, runs its build, records the XID, repeats. One build in flight at a time — the safe way to drain a batch. |
+| `tpu route-tick` | Run one router pass by hand (no daemon/worker): plan (dry-run) then, with `--nodry_run`, submit placeable jobs. `--reroute --nodry_run` cancels jobs stuck PENDING past 10 min and re-queues them. |
+
+A job's state moves QUEUED → **BUILDING** (a worker is running its build now, the
+one live build) → SUBMITTED → RUNNING; `tpu queue-status` and `tpu check` show
+which stage each is in. A build that produces no XID (a `found[]` zombie) is
+requeued, not left dangling; a crashed worker's stale BUILDING claim is reclaimed
+after `--build_stale_s`.
 
 **A checkpoint-sharded resume must pass `--topology_locked`.** Then the router
 only moves the job between shapes of the SAME mesh geometry — `v6p-32` and
