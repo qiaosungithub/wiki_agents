@@ -312,6 +312,18 @@ probe brakes when srcfs failures spike (`--srcfs_fail_brake`, mode-2 guard).
 `tpu build-worker start|stop|status` runs it in a self-restarting tmux session;
 the queue file is operator-scoped so `npu` gets its own worker.
 
+**Staging workspace: `export STAGE_WS_ROOT=<healthy google3 root>` BEFORE
+`build-worker start`.** `tpu queue` stages into `${STAGE_WS_ROOT}/experimental/
+qiaos/eqr_jax_final_stages/` (default the EqR-jax checkout); a data-locked or
+token-drained workspace forces a different one. Two subtleties the worker path
+handles: (1) `tmux new-session` attaches to the tmux SERVER's stale env, so a
+bare `export` does NOT reach the session -- `start` bakes STAGE_WS_ROOT into the
+worker command inline, so `export STAGE_WS_ROOT=...; tpu build-worker start`
+works (it prints the pinned root, or warns when unset). (2) `stop` kills the
+worker child too, not just the tmux `while` shell -- an orphaned worker would
+keep holding the BUILDING slot. STAGE_WS_ROOT then rides the env through
+`submit()` (subprocess with no `env=`, so it inherits) into `tpu queue`.
+
 **The daemon's router lane is the 4th lane, OFF by default.** `TPU_ROUTE_ENABLED`
 unset is a complete no-op — the daemon behaves exactly as before. Armed, it runs
 like the infra lane: DETACHED with a `kill -0` guard, so its serial RPCs never
