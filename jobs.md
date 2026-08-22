@@ -80,8 +80,9 @@ seconds.
   config against what you meant to run covers the whole path: the copy, the
   overwrite, and the launcher's staging.
 - **The cell is auto-selected by default.** `tpu queue` pins the best placeable
-  cell for you (§Choosing Where To Run); pass `--cell` to override or
-  `TPU_NO_SMART_CELL=1` to opt out. This is transparent — no command changes.
+  cell for you (§Choosing Where To Run); pass `--cell` to override, `--metro=<m>`
+  to constrain the pick to a data-co-located metro, or `TPU_NO_SMART_CELL=1` to
+  opt out. This is transparent — no command changes.
 - **Packaging freezes the code.** The wrapper packages a snapshot; later edits
   do not affect a queued or running job.
 - **Verify registration after submit** rather than assuming the launch
@@ -158,14 +159,20 @@ first. The decisions are here; the mechanism is in `infra/`.
   `TPU_NO_SMART_CELL=1` skip it; and if nothing can be recommended it silently
   falls back to letting the allocator choose — it can only help, never block. So
   the group still matters (below), but the cell usually does not.
-  - **EXCEPTION — a data-locality-locked run must still pin `--cell`.** The pick
-    ranks on free chips and oversold ONLY; it has no storage-co-location
-    dimension (next bullet), so it can send a run to a cell a metro away from its
-    checkpoint bucket — 4-5x throughput and the pruner kills it (storage rule).
-    A Type-1 / bucket-pinned run (e.g. v6p on `is-d`/cbf writing to a same-metro
-    cell) should keep an explicit `--cell=<co-located cell>`; locality outranks
-    avoiding oversold. Only a run with no storage constraint should let the
-    default choose freely.
+  - **A data-locality-locked run passes `--metro`, not a hand-pinned `--cell`.**
+    The pick ranks on free chips and oversold ONLY; it has no storage-co-location
+    dimension (next bullet), so left unconstrained it can send a run to a cell a
+    metro away from its checkpoint bucket — 4-5x throughput and the pruner kills
+    it (storage rule). But data-locality is a METRO-level constraint, not a
+    cell-level one: a whole metro shares one storage cell (cbf's `yucbfiv`,
+    `yucbful`, `yucbfwv`, `yucbfsl`, `je` all read `/cns/is-d`), so you do not
+    need to name a single cell. Pass **`--metro=<m>`** (e.g. `--metro=cbf`) and
+    the smart pick stays inside that metro while still choosing the least-oversold
+    cell in it — same-metro AND avoids the stall, both at once. `--metros=a,b`
+    allows several. `--metro` is a router selector only (it never reaches the
+    launcher). Reserve an explicit `--cell` for when you truly must pin one exact
+    cell; for storage locality, `--metro` is the right, less brittle tool. Only a
+    run with no storage constraint should let the default roam all metros.
 - **Pick the group first, and default to the one that actually holds your floor.**
   A PROD floor is per (group, accelerator, cell) (last bullet), so the group is
   not cosmetic — it decides whether a slice sits inside an idle guarantee or is
