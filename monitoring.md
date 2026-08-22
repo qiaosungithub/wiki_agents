@@ -147,25 +147,38 @@ the operator has closed — interrupting a live decision loop loses work. A doc
 written minutes ago can already be stale (a just-launched XID, a merge that
 landed); patch it before shipping.
 
-**Serialize concurrent launches that share a build root.** Approving two lines
-to relaunch at the same moment can make their `blaze` builds interfere and yield
-a `found []` zombie work-unit (XManager snapshots the code but blaze produces no
-output for the target). This bit an elt+parcae v6e migration a monitor approved
-in parallel. **Note the mechanism precisely — it is NOT a stagedir collision.**
-The stagedir is already collision-proof (`tpu_wrapper.sh` names it
-`eqr_run_<ts>_<6hex-urandom>` and claims it with an atomic `mkdir`, added after a
-2026-08-17 "4 XIDs → 1 stagedir" incident). The real shared resource is the
-**blaze output layer**: `blaze-bin`'s second symlink hop
-(`blaze-out → /google/obj/workspace/namespace/<uuid>/blaze-out`) is *republished
-by every build* under the same checkout root, so two concurrent builds in
-`/google/src/cloud/qiaos/EqR-jax/google3/` race on it and one build's target
-outputs land in a namespace the other isn't looking at → `found []`. Fixes:
-approve such migrations one at a time, or tell each line to gate its launch (poll
-until `rabbit.*build` / `xmanager.par launch` windows are clear, wait for two
-consecutive idle checks, then submit serially). A per-build `--output_base`
-would also isolate them, if the launch path supported it. The monitor
-coordinates the fleet; simultaneous "go" messages are a coordination hazard, not
-free parallelism.
+**Concurrent launches that share a build root corrupt each other — route a batch
+through the serial build-worker, do not hand-orchestrate it.** Two `blaze` builds
+running at once under one checkout race on the **blaze output layer**: `blaze-bin`'s
+second symlink hop (`blaze-out → /google/obj/workspace/namespace/<uuid>/blaze-out`)
+is republished by every build under the same checkout root, so one build's outputs
+land in a namespace the other isn't looking at → a `found []` zombie work-unit
+(XManager snapshots the code but blaze produced no output for the target; this bit
+a parallel elt+parcae v6e migration). A second failure mode compounds it: a burst
+of concurrent stage-writes drains the CitC CreateSnapshot token bucket →
+truncated stagedir, `.par` crash. **Neither is a stagedir-name collision** — that
+was fixed separately (`eqr_run_<ts>_<6hex-urandom>` + atomic `mkdir`, after the
+2026-08-17 "4 XIDs → 1 stagedir" incident).
+
+**The fix is now a tool, not a monitor chore: `tpu build-worker` (serial
+build-worker).** A batch is `tpu enqueue`'d and one worker drains it one build at
+a time (a durable `flock`'d BUILDING lock guarantees ≤1 build in flight even
+across processes), curing both failure modes at once. So when a line wants to
+launch a **sweep / multi-arm batch**, tell it to use the build-worker
+(`../jobs.md` §Launch a batch), not to fan out `setsid` launches. The worker also
+self-limits (bad `--workdir` or repeated `found[]` → the job goes HELD, not an
+infinite churn), so it is safe to leave draining unattended.
+
+**What the monitor still owns:**
+- A **single line hand-launching one arm** (the common case) needs no worker —
+  its own guard (`tpu_queue_guarded_wsaware.sh`, 5 gates) is enough; just don't
+  green-light two *different* lines to build in the *same checkout* at the same
+  instant. Simultaneous "go" messages into one checkout are still a coordination
+  hazard.
+- **Different checkouts** (different `output_base`) genuinely don't collide, so
+  parallel go's across distinct checkouts are fine.
+- When in doubt, prefer the build-worker: it makes "serial" the default instead
+  of something you enforce by timing green-lights.
 
 ## Deciding Vs Escalating
 
