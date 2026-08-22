@@ -249,16 +249,19 @@ workstation limitation only, a job writes fine; use the browser URLs in
 
 ## The Local-Queue Smart Router
 
-A side-by-side scheduler that drains an unlimited local queue into the XM queue
-only when a cell can place the slice. User-facing workflow is `../jobs.md`
-§The Smart Local Queue; this is the build. It never touches the one-shot
-`tpu queue`. Four modules in the google3 half, each a `pytype_strict_library`
-with its own `pytype_strict_contrib_test`:
+Two things share this core: the **default** smart cell pick that every
+`tpu queue` now does (`pick_cell`), and the **advanced** local queue that drains
+unlimited enqueues with auto-reroute (`route_check` / `queue_cli`). User-facing
+workflow is `../jobs.md` §Choosing Where To Run (the default) and §The Local
+Queue (advanced). Neither replaces the one-shot `tpu queue` — the picker only
+pins a `--cell` onto it. Modules in the google3 half, each a
+`pytype_strict_library` with its own `pytype_strict_contrib_test`:
 
 | Module | Role |
 |---|---|
 | `route_lib.py` | Pure scheduling core: queue schema (`QueueEntry`), placement, priority + seeded-random fairness, cell ranking by placeable slices, effective-price type selection (raw price discounted by a pool-size bonus), topology lock. No I/O, no RPC — unit-tested in full. |
 | `avail_provider.py` | Wraps `GetCellAvailability` (the same RPC as `slice_probe`) plus the money `market.json` cache into `(avail_by_cell, arch_price, arch_pool)`. Free chips (`max_available_chips`) decide; `obtainable_capacity` is never read for a decision — it lies. |
+| `pick_cell.py` | **The default-path picker.** One RPC for the requested type, ranks with `best_cell_for_shape`, prints the single best cell (or nothing). `tpu queue` pins `--cell=<that>` unless the user pinned a cell / used `--power` / passed a comma type / set `TPU_NO_SMART_CELL=1`. FAIL-SAFE by contract: any failure prints nothing and the wrapper lets the allocator choose. |
 | `route_check.py` | The tick: load queue → fetch availability → plan → submit via `tpu queue` (default `--dry_run`). `--reroute` cancels jobs stuck PENDING past the deadline and re-queues. Binary + library share the source; the binary target just re-exports it. |
 | `queue_cli.py` | `tpu enqueue` / `queue-status` / `dequeue`. Reuses route_check's queue persistence and a dry-run planning tick for the live status view. |
 
@@ -298,8 +301,10 @@ armed) plans and logs without submitting. The queue file is operator-scoped like
 the registry: `npu` points `TPU_LOCAL_QUEUE_FILE` at lyy's copy, so an enqueue
 under one operator never lands in the other's queue.
 
-**Building it: `blaze build $CHECKER_SUBDIR:{route_check,queue_cli}`** (the two
-binaries; the libraries and tests come along as deps). A py-strict binary may
-not depend on another binary — that is why route_check's logic lives in a
-library the queue_cli binary depends on, rather than queue_cli importing the
-route_check binary target.
+**Building it: `blaze build $CHECKER_SUBDIR:{route_check,queue_cli,pick_cell}`**
+(the binaries; the libraries and tests come along as deps). A py-strict binary
+may not depend on another binary — that is why each binary's logic lives in a
+`*_lib` library that the binary and any dependent (queue_cli on route_check_lib)
+import, rather than one binary importing another. The wrapper's `_PICK_CELL_BIN`
+points at the built `pick_cell`; if it is ever missing, `tpu queue` simply skips
+the smart pick (fail-safe) — so rebuild it with the others after any change.

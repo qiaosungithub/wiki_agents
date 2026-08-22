@@ -79,6 +79,9 @@ seconds.
 - **Verify the SNAPSHOT, not the file you edited.** One `diff` of the packaged
   config against what you meant to run covers the whole path: the copy, the
   overwrite, and the launcher's staging.
+- **The cell is auto-selected by default.** `tpu queue` pins the best placeable
+  cell for you (§Choosing Where To Run); pass `--cell` to override or
+  `TPU_NO_SMART_CELL=1` to opt out. This is transparent — no command changes.
 - **Packaging freezes the code.** The wrapper packages a snapshot; later edits
   do not affect a queued or running job.
 - **Verify registration after submit** rather than assuming the launch
@@ -145,6 +148,16 @@ seconds.
 Packaging costs minutes; an allocator rejects in seconds — settle placement
 first. The decisions are here; the mechanism is in `infra/`.
 
+- **The cell is now chosen for you by default — you rarely pass `--cell`.**
+  Every `tpu queue` first asks which cell can actually place the slice RIGHT NOW
+  (most free chips, not oversold) and pins it, so a submit stops landing on an
+  oversold cell while the same accelerator sits idle elsewhere (the disease that
+  once pinned 13 v7-32 jobs to an oversold `yulpptr` while `yukulwh` had 101 free
+  slices). It prints `Smart cell: pinned --cell=…`. Your own `--cell` always
+  wins; `--power` does its own pick; a comma `--tpu_type` list and
+  `TPU_NO_SMART_CELL=1` skip it; and if nothing can be recommended it silently
+  falls back to letting the allocator choose — it can only help, never block. So
+  the group still matters (below), but the cell usually does not.
 - **Pick the group first, and default to the one that actually holds your floor.**
   A PROD floor is per (group, accelerator, cell) (last bullet), so the group is
   not cosmetic — it decides whether a slice sits inside an idle guarantee or is
@@ -228,6 +241,11 @@ first. The decisions are here; the mechanism is in `infra/`.
 
 ## When A Pending Job Should Move
 
+**A fresh submit already picks a placeable cell** (§Choosing Where To Run), so
+this section is mostly for a job that went PENDING AFTER it was placed, or one
+submitted with an explicit `--cell`. A new `tpu queue` will avoid the oversold
+cell on its own.
+
 **Queued is not failed, and PENDING for hours can be normal** (an oversold pool
 leaves work units PENDING for hours). Do NOT reflexively resubmit — every
 resubmission stacks another work unit contending the same slice. Instead, **read
@@ -259,21 +277,29 @@ A short submit with the real workload answers "can I get this slice here" at 100
 the capacity table was ~12% accurate against the live queue
 (`research/accelerator_choice.md`).
 
-## The Smart Local Queue Automates "Change Cell"
+## The Local Queue (advanced): Unlimited Enqueue + Auto-Reroute
 
-**When the verdict says change cell, `tpu enqueue` does it for you.** The manual
-loop above — read the verdict, pick a cell that can place the slice, resubmit,
-watch, repeat — is exactly what the local-queue router automates. It is
-side-by-side with `tpu queue`: the one-shot path is unchanged, and if you never
-enqueue anything nothing about the tool changes.
+**Smart cell selection is already the default of `tpu queue`** (§Choosing Where
+To Run) — a single submit picks a placeable cell for you, and most runs need
+nothing more. The **local queue** is the next tier up, for cases a one-shot
+submit does not cover:
 
-The mental model is two queues. `tpu queue` admits a job to ONE cell and waits;
-if that cell is oversold the job sits PENDING for hours while the same
-accelerator is idle elsewhere. The **local queue** is a durable, unlimited list
+- a **batch** you want to hand off all at once and let drain as capacity frees
+  up, rather than babysitting N submits;
+- runs that must **re-route automatically** if they go PENDING after placement
+  (the 10-minute sweep, below);
+- a **mixed batch across several checkouts** (each entry remembers its own
+  source dir).
+
+It is side-by-side with `tpu queue`: the one-shot path is unchanged, and if you
+never enqueue anything nothing about the tool changes.
+
+The mental model is two queues. `tpu queue` admits a job to ONE cell (now a
+smartly-chosen one) and waits. The **local queue** is a durable, unlimited list
 of desired runs (a queued job costs nothing — PENDING does not bill), and the
 router drains it into the XM queue one placement at a time, choosing a cell that
 can actually place the slice **right now** (free chips, not the obtainable table;
-never an oversold or full cell).
+never an oversold or full cell), and re-routing anything that gets stuck.
 
 | Command | Does |
 |---|---|
