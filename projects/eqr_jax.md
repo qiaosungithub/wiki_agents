@@ -319,25 +319,38 @@ final attempt — which is why `rank_7` (the old "proc0") so often reads empty a
 the metric gets mis-filed as "log rotated". The final segment is not gone; it is
 in a rank you have not looked at yet.
 
-Procedure (the run reached `step_<budget>`, so the curve exists):
+Procedure (the run reached `step_<budget>`, so the curve exists). **The fast
+path is a size sort, not a rank scan** — it sidesteps both traps below in one
+`ls`:
 
-1. Take the **last** attempt (`fileutil ls .../logs/ | grep -oE
-   'attempt[0-9]+' | sort -V | tail -1`).
-2. Find which rank is jax process 0 in that attempt, or just which rank has the
-   progress lines:
+1. **Find the training-bearing log by size.** The log holding the curve is by far
+   the largest; a rank scan that assumes 8 ranks or that the last attempt is the
+   right one will miss it.
    ```bash
-   for r in $(seq 0 7); do
-     n=$(fileutil cat "$LOGDIR/logs/rank_${r}_attempt${A}.log" 2>/dev/null \
-         | sed 's/\x1b\[[0-9;]*m//g' | grep -cE '\[Info\] \[[0-9]+/[0-9]+ ')
-     echo "rank_$r: $n progress lines"
-   done
+   fileutil ls -l "$LOGDIR/logs/" | grep rank_ \
+     | awk '{print $5, $NF}' | sort -rn | head -5   # size, path — biggest = training log
    ```
-3. Tail-window mean the last ~10 progress lines of that log (not the single last
+   Then confirm that file's last progress line reached the budget
+   (`grep -E '\[Info\] \[[0-9]+/<budget>' <file> | tail -1`); if it stopped
+   short, take the next-largest that reached it.
+2. Tail-window mean the last ~10 progress lines of that log (not the single last
    row — §Divisors and cadence). Field map to the `EqR-refactored` columns:
    `lm_loss=` → `final train/lm_loss`; `acc=` → `final train/token_acc`;
    `exact=` → `final train/acc` (whole-board exact).
-4. `extra.json` in the checkpoint dir confirms `step` / `total_steps` (proof the
+3. `extra.json` in the checkpoint dir confirms `step` / `total_steps` (proof the
    run finished) but carries **no** metrics — do not expect the numbers there.
+
+Two traps the size sort avoids, both seen on the old 9-arm sqrt grid:
+
+- **Rank count follows topology, not 8.** A `v6p-32` maze run has 64 hosts, so
+   `rank_0..63` — jax process 0 can be `rank_33`. Never hard-code `seq 0 7`;
+   derive the range (`fileutil ls .../logs/ | grep -oE 'rank_[0-9]+' | sort -V
+   -u`) or just let the size sort point at the right file.
+- **The last attempt is often eval-only.** After the final preemption the run
+   reloads the `step_<budget>` checkpoint and evaluates — that attempt has *no*
+   training progress lines, so "grep the last attempt" comes back empty even
+   though the run finished. The final training segment is in an *earlier*
+   attempt (e.g. the 60000/60000 curve lived in `attempt18`, not `attempt20`).
 
 ## Metric Names, Divisors, And Denominators
 
