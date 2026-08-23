@@ -342,6 +342,24 @@ worker child too, not just the tmux `while` shell -- an orphaned worker would
 keep holding the BUILDING slot. STAGE_WS_ROOT then rides the env through
 `submit()` (subprocess with no `env=`, so it inherits) into `tpu queue`.
 
+**One stage-write at a time per workspace — the lock that makes "enqueue jobs
+however you like" actually safe.** The build-worker's BUILDING flock only
+serializes ITS OWN queue; it does nothing about a bare or `tpu_queue_guarded`
+direct submit running at the same time, and both rsync into the same workspace,
+whose CitC CreateSnapshot token bucket is per-(user,workspace) — a concurrent
+stage-write burst drains it and truncates stagedirs. The fix is a lock INSIDE
+`tpu queue` around the stage-write (mkdir + rsync + config copy), keyed by
+`STAGE_WS_ROOT`: **every** submit path funnels through `tpu queue`, so one lock
+there serializes staging across bare / guarded / worker alike. It is a bash
+`flock` on fd 200 over `/tmp/tpu_stage.<ws>.lock`, released BEFORE the
+build/launch (different-checkout builds don't collide — only the token bucket was
+shared — so serializing builds too would negate parallel checkouts). `-w 900`
+degrades to unlocked rather than blocking forever, and `flock` auto-releases on
+process death, so a killed `tpu queue` never wedges it. This is what lets an
+operator fire jobs through any mix of paths without hand-coordinating a stage
+storm; the earlier hand-serialization advice (`monitoring.md`) is now the
+fallback, not the mechanism.
+
 **The daemon's router lane is the 4th lane, OFF by default.** `TPU_ROUTE_ENABLED`
 unset is a complete no-op — the daemon behaves exactly as before. Armed, it runs
 like the infra lane: DETACHED with a `kill -0` guard, so its serial RPCs never
