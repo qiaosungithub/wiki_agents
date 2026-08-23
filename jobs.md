@@ -5,6 +5,28 @@ Queue, inspect, resume, and debug a job on the internal XManager/Borg stack.
 accelerator naming and shapes, `infra/` the market, allocator, and CLI
 internals — read those only when the rules here do not explain what you see.
 
+## The Smart Queue In One Screen
+
+`tpu queue` gained a scheduling layer so you rarely hand-pick cells or
+hand-serialize launches any more. What it does for you now, and where each piece
+is specified:
+
+| You want | Do | What happens | Details |
+|---|---|---|---|
+| Launch one job | `tpu queue --tpu_type=… --group=9 …` (as always) | **Cell is auto-picked** — the most-free, non-oversold cell that can place the slice now; you rarely pass `--cell` | §Choosing Where To Run |
+| Keep a run in its data metro | add `--metro=<m>` (e.g. `cbf`) | the pick stays in-metro; if the metro is full it **refuses** rather than roaming to a no-data cell | §Choosing Where To Run |
+| Launch a batch / sweep | `tpu enqueue` each arm, run `tpu build-worker` | one **serial** worker drains them one build at a time — no concurrent-build corruption, no hand-timing | §The Local Queue |
+| A job stuck PENDING for 10 min | (automatic, if the router runs) | cancelled and re-routed to a placeable cell | §The Local Queue |
+| Fire many jobs from many paths at once | just do it | a per-workspace **stage-write lock** serializes staging across every path, so the CitC token bucket can't be drained | `infra/tpu_cli.md` |
+
+The old reflexes — hand-probe every cell before launching, hand-serialize
+concurrent launches, hand-pin a cell for locality — are now **fallbacks**, not
+the default path. `tpu queue` stays one-shot and synchronous (returns an XID);
+the local queue (`tpu enqueue`) is the opt-in batch/auto-reroute tier. None of
+this changed the submission contract: same flags, same registry, `--cell` always
+wins, `TPU_NO_SMART_CELL=1` opts out entirely. Build internals: `infra/tpu_cli.md`
+§The Local-Queue Smart Router.
+
 ## The Launch Workflow
 
 Run this every launch. Each step names the section that explains it; this is the
@@ -18,8 +40,10 @@ seconds.
 2. **Pick the group** (§Choosing Where To Run). Default **g9** for TPU (it holds
    the floor), **g8** for CPU-only. `tpu quota` tells you WHICH GROUP holds a
    floor for the accelerator — nothing about cells.
-3. **Find cells that can actually take the slice** (§Choosing Where To Run),
-   three tightening probes:
+3. **The cell is auto-picked — you usually skip this step** (§Choosing Where To
+   Run). `tpu queue` pins the most-free non-oversold placeable cell for you; add
+   `--metro=<m>` if the run is data-locality-locked. Only drop to the manual
+   probes below when you need to OVERRIDE the pick or understand a rejection:
    - `tpu preflight --tpu_type=<t> --group=<g> --json` → the `cells_ok` list with
      a per-cell **obtainable** count (the only cell-level view; `tpu quota` has
      none). Obtainable means "can be *got*", not "can be *held*".
@@ -45,6 +69,10 @@ seconds.
 - **Submit through the wrapper**: `source ~/work/tpu_cmd/tpu_wrapper.sh &&
   tpu queue ...`. Never call `xm launch` / `xmanager launch` directly; only the
   wrapper may do so internally.
+  `tpu` is a shell FUNCTION, not a binary on `PATH` — so a launcher SCRIPT that
+  wraps `tpu queue` (e.g. sourcing a guard helper) must `source
+  ~/work/tpu_cmd/tpu_wrapper.sh` in the SAME shell, or the call dies with `tpu:
+  command not found` (seen as an instant guard "DEAD", ~6 s, no stagedir).
 - **One shared launcher.** `~/work/tpu_cmd/xm_launcher.py` owns packaging,
   staging, and job registration. Projects contribute versioned configuration,
   not their own launcher.

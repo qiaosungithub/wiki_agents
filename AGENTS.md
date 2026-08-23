@@ -37,8 +37,10 @@ and each has a `README.md` index.
 | Anything, before you start | `engineering.md` |
 | Find a checkout or its boundaries | `projects/README.md` |
 | Queue, inspect, resume, debug a job | `jobs.md`, then the project guide |
+| How the smart `tpu queue` works (auto cell / `--metro` / batch / worker) | `jobs.md` §The Smart Queue In One Screen |
+| Launch a BATCH / sweep, or many jobs at once | `jobs.md` §The Local Queue (`tpu enqueue` + `tpu build-worker`) |
 | A CPU-only batch job will not schedule | `jobs.md` §Requirements And Runtime |
-| Choose a cell; preflight before packaging | `jobs.md` §Choosing Where To Run |
+| Choose a cell (now auto-picked); preflight before packaging | `jobs.md` §Choosing Where To Run |
 | A job will not schedule; capping spend | `infra/quota_market.md`, `tools/limit_order.sh` |
 | Change the `tpu` CLI or its daemon | `infra/tpu_cli.md` |
 | TPU codename, HBM, legal shape, equivalence | `tpu_reference.md` |
