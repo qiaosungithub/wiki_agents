@@ -61,11 +61,17 @@ process inherits the dead handle from its parent:
 
 **`npu` is `tpu` with a different registry, not a fork.** A collaborator
 (lyy) works on this workstation under the same Unix account, so ownership is
-expressed by four environment variables that every consumer reads with the old
+expressed by environment variables that every consumer reads with the old
 hardcoded path as its default: `TPU_JOBS_FILE`, `TPU_JOBS_LEGACY_FILE`,
-`TPU_CHECK_CACHE_FILE`, `TPU_JOB_NAME_PREFIX`. Unset, the tool behaves exactly
-as it did before they existed — the way to verify a change here is to diff the
-full `tpu check` output against the pre-change script, not to eyeball it.
+`TPU_CHECK_CACHE_FILE`, `TPU_JOB_NAME_PREFIX`, and — for the local-queue router —
+`TPU_LOCAL_QUEUE_FILE` (lyy's own queue) and `TPU_BUILD_WORKER_SESSION` (lyy's
+own `npu-build-worker` tmux session, so a build-worker start/stop never collides
+with sqa's). **Every NEW per-operator resource must be scoped here too**: the
+queue file and the worker session each shipped a collision until added — an
+unscoped shared path or tmux name means one operator's action hits the other's.
+Unset, the tool behaves exactly as it did before they existed — the way to verify
+a change here is to diff the full `tpu check` output against the pre-change
+script, not to eyeball it.
 
 The `npu` function sets them with `local -x`, never a bare `export`: a plain
 export would leak into every later `tpu` in that shell and silently file the
