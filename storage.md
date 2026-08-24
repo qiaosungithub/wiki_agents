@@ -188,6 +188,54 @@ because nobody watched the check say no. And **make failure conservative**: a
 partial listing must under-count completed work, never invent it, so a crash mid
 verification is safe.
 
+## Mirroring A Live Tree To Another Metro
+
+**A long-running copy driver runs the script it read at startup; editing the file
+on disk changes nothing until you relaunch.** Mirroring ~15 TB to two v4 metros,
+a driver launched a day earlier held an *intermediate* version of the row list in
+memory: later edits that split one row into a small needed subset and skipped the
+1M-small-file siblings never took effect, so it copied the whole directory
+(easy/mid test junk included) instead of the 69 GB subset. `bash` slurps the
+script at exec and never re-reads it. After editing any driver, **kill and
+relaunch** — do not assume a running loop picked up the change.
+
+**A driver that stalls mid-list silently skips every row after it; its own "ALL
+DONE" counts skips as done.** The same stale driver wedged on the whole-directory
+copy and, once killed, the rows after it — including the 1.5 TB core training
+data and four eval dirs — **were never attempted**. The completion tally lied
+because opt-out skips and real copies both increment it. **The `_MIRRORED`
+marker inventory on the destination is the only authority on what landed** — walk
+it and diff against the intended row list; never trust the driver's progress
+print or a `(31/33)` counter.
+
+**A fresh, idempotent driver is the cheapest repair.** Rather than hand-copy the
+missing rows, relaunch the corrected script: with a per-row marker gate it
+skips the 24 verified rows in seconds and re-copies only the gaps. Idempotency
+turns "figure out exactly what's missing" into "run it again."
+
+**A crc verifier must ignore files that are not payload, or it fabricates a
+failure.** Two benign classes broke an otherwise-correct mirror check, each
+`bad=0` (every real file's crc matched) but `missing>0`:
+
+| Verifier false-fail | Why | Fix |
+|---|---|---|
+| Source held a stale `.write_probe_<ts>.txt` from an earlier quota probe (`§Recover`). `cp -R` skips dot-prefix files but `ls -lall -R` enumerates them, so src listed one more file than dst | The probe is not data; the copy was complete | Filter `\.write_probe_[0-9]+\.txt$` (and tombstones `\.~[0-9]+~$`) out of both listings before diffing |
+| `dst_files` is always `src_files + 1` | The `_MIRRORED` marker lives in dst, not src | Join on path and count crc mismatches + real missing; the extra marker is neither |
+
+**A source tree can change AFTER you finish mirroring it; only a final re-verify
+catches it.** A 656 MB model file was added to the source *hours after* both
+metros copied that directory, so both were correctly complete at copy time and
+both missed it. A closing DoD sweep — re-diff every row source-vs-dest — is what
+surfaced it; the per-row marker (written at copy time) never will. Mirror status
+is a claim about a moment, not a standing fact.
+
+**`fileutil cp` does not create multiple missing parent levels.** After deleting
+a directory to re-copy a subset, `cp src .../a/b/c` fails `no parent directory`;
+`mkdir -p` the parent first. And **kill a wedged `fileutil` by exact PID** — a
+`pkill -f` on the copy's path also matches your own inspecting shell; enumerate
+the PID, confirm its cmdline, then signal it (TERM, then KILL if it ignores TERM
+mid-RPC).
+
 ## An Over-Quota Cell Looks Like A Broken Program
 
 **Rule out quota before believing any "the writer is broken" story** — this cost
