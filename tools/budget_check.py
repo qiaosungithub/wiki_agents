@@ -184,7 +184,11 @@ def main():
         print("\033[33m[budget check] Warning: Could not read G9 income, skipping budget limit check.\033[0m")
         sys.exit(0)
         
-    limit = income / 3.0
+    # Credit hard cap = 1/10 of G9 income (operator 2026-08-25: tightened from
+    # 1/5 to 1/10 per boss directive to further reduce credit usage; was 1/3
+    # before that -- applies to BOTH the tpu and npu/lyy agents since both run
+    # through this same gate, so qiaos and lyy are each capped at 1/10).
+    limit = income / 10.0
     jobs_file = os.environ.get('TPU_JOBS_FILE', os.path.expanduser('~/.tpu_jobs.json'))
     agent_name = "npu" if "npu" in jobs_file else "tpu"
     
@@ -239,7 +243,7 @@ def main():
           + "\033[0m")
     print(f"\033[36m[budget check] {agent_name} agent current cost: {current_cost:.1f} credits/hr\033[0m")
     print(f"\033[36m[budget check] new job cost: {new_cost:.1f} credits/hr\033[0m")
-    print(f"\033[36m[budget check] total projected: {total_cost:.1f} (Limit: {limit:.1f} = 1/3 of G9 income {income:.1f})\033[0m")
+    print(f"\033[36m[budget check] total projected: {total_cost:.1f} (Limit: {limit:.1f} = 1/10 of G9 income {income:.1f})\033[0m")
 
     # A BATCH-tier job draws from the free BATCH pool (clears at 0) and does NOT
     # consume the PROD income/3 budget this gate protects, so it must never be
@@ -252,8 +256,35 @@ def main():
               f"admitted regardless of PROD aggregate.\033[0m")
         sys.exit(0)
 
+    # DEBUG ESCAPE HATCH (opt-in, off by default). lyy 2026-08-25: a small v7
+    # job must stay launchable while the aggregate is over budget, because that
+    # is exactly when you need to debug why. Unset, this changes nothing for
+    # anyone -- sqa's launches see the identical gate they saw before.
+    #
+    # BOUNDED THREE WAYS so it cannot become a general override:
+    #   * opt-in     TPU_BUDGET_DEBUG_V7=1 must be set explicitly per invocation
+    #   * v7 only    other families still face the full limit
+    #   * <=16 chips one v7-16 or two v7-8; a v7-32 is refused like anything else
+    #
+    # WHAT IT DOES NOT BOUND, said plainly because the name suggests otherwise:
+    # this is PER LAUNCH, not a global cap of 16 chips. Ten invocations admit
+    # ten jobs. There is no marker on an admitted job, so a later run cannot
+    # count what earlier ones let through; adding one would mean writing to the
+    # registry from a read-only check. Treat it as "one debug job at a time,
+    # by hand" -- it is loud on purpose so an unattended loop using it shows up
+    # in the log.
+    if (total_cost > limit
+            and os.environ.get('TPU_BUDGET_DEBUG_V7') == '1'
+            and new_tpu_type.split('-')[0].lower() == 'v7'
+            and parse_tpu_type(new_tpu_type) <= 16):
+        print(f"\033[33m[budget check] DEBUG BYPASS: over budget "
+              f"({total_cost:.1f} > {limit:.1f}) but admitting {new_tpu_type} "
+              f"({parse_tpu_type(new_tpu_type)} chips <= 16, v7) because "
+              f"TPU_BUDGET_DEBUG_V7=1. This is PER-LAUNCH, not a running total.\033[0m")
+        sys.exit(0)
+
     if total_cost > limit:
-        print(f"\033[31m[budget check] ERROR: Budget exceeded for {agent_name} check! Total projected cost ({total_cost:.1f}) exceeds the 1/3 limit ({limit:.1f}) of G9 income.\033[0m")
+        print(f"\033[31m[budget check] ERROR: Budget exceeded for {agent_name} check! Total projected cost ({total_cost:.1f}) exceeds the 1/10 limit ({limit:.1f}) of G9 income.\033[0m")
         sys.exit(2)
         
     sys.exit(0)
