@@ -132,7 +132,12 @@ lr×wd comparison the tab exists for.
 - **Match the block's format for each column** — these tabs are inconsistent
   (`token_acc` is a percent in one section and a fraction in another), and a
   number in the wrong convention reads as a 100x error. Read the neighbors, not
-  your memory.
+  your memory. On `maze64-clean`, the accuracy columns (ss20 / ss100
+  `solution_acc`, D/E) are kept on a **0-100 scale** (`0.924` is written `92.4`,
+  a genuine `0` stays `0`); convert any fraction-scale value before writing, and
+  when a whole column is mixed, normalize every row to 0-100 in one pass. A
+  sub-1% accuracy (e.g. `0.3` meaning 0.3%) is a legitimate 0-100 value, not a
+  leftover fraction — disambiguate by the arm, not by the magnitude alone.
 - **Genuinely unrecoverable is the rare exception, and it is stated, not left
   blank.** If the metric truly cannot be recovered, write why in one clause
   (`train log lost to N preemptions`) so a blank never reads as an unlogged
@@ -184,6 +189,27 @@ explicit** — the default writes nothing, with no error. A short `eval_only` jo
 may never reach the flush threshold, so its durable evidence is the metrics
 files under the checkpoint bucket: log that path too. Wiring:
 `../projects/eqr_jax.md` §Experiment Tracking.
+**Writing a datatable requires a Borg credential; a workstation cannot.** The
+table lives at `owner=…deepmind-jobs realm=… type=PROD`, and a workstation LOAS
+is a *restricted* credential — `DatatableService.CreateTable` / `Read` both
+return `PERMISSION_DENIED` (`go/loas-restricted-credentials`), as do `analog`
+and `xmanager tail_logs` for the same reason. So a metric only reaches a table
+from inside a work unit, which mints a real prod credential; `blaze run` on the
+workstation fails at table creation. This also means you cannot verify the write
+from the workstation — read the job's own CNS log (the writer prints
+`writing to http://flatboard/xid/<XID>`), or have the job drop a small CNS
+completion marker a watcher can poll.
+
+**A finished run's empty chart can be backfilled from its text log.** If a run
+completed before the code had a datatable writer, its `_boot_log` stream on CNS
+still holds every logged scalar. A tiny CPU replay job (parse the rank-0 log,
+re-emit via the same writer, keyed by the *new* job's XID) reconstructs the
+curves; the source XID's own table cannot be written after its work unit ends,
+so the row points at the replay XID. Run it as a **g9 PROD CPU controller**
+(`--tpu_type=cpu=N --group=9 --tier=PROD --skip-preflight --cell=<in-metro>`):
+the g8 shared CPU pool routinely sits unscheduled (experiment `RUNNING` but the
+work unit never executes — no heartbeat, no log), while the PROD controller
+schedules in ~1 min (§the CPU-only bullet in `../jobs.md`).
 
 ### Provenance: what the chart link does not carry
 

@@ -120,18 +120,6 @@ def market_prices():
         mm = re.search(r'median\s+([\d.]+)\s*,\s*n=(\d+)', blob)
         if mm:
             out[m.group(1).lower()] = float(mm.group(1))
-            continue
-        # Some families print a single median value with no "(median X, n=Y)"
-        # continuation row -- e.g. v7 shows just "20.00 Credits/hr" (or a
-        # "A-B Credits/hr" range). The n=-based regex above misses these, so the
-        # price silently fell back to the conservative cap (100 cr/chip-hr for
-        # v7 = ~5x the real price), inflating the whole fleet's projected spend
-        # ~4x and refusing every new PROD job. Fall back to the first numeric
-        # value in front of "Credits/hr" (the low/floor of a range, matching the
-        # 'median' semantics of taking the representative low price).
-        mm2 = re.search(r'([\d.]+)\s*(?:[\u2013\u2014-]\s*[\d.]+\s*)?Credits/hr', blob)
-        if mm2:
-            out[m.group(1).lower()] = float(mm2.group(1))
     return out
 
 
@@ -184,11 +172,7 @@ def main():
         print("\033[33m[budget check] Warning: Could not read G9 income, skipping budget limit check.\033[0m")
         sys.exit(0)
         
-    # Credit hard cap = 1/10 of G9 income (operator 2026-08-25: tightened from
-    # 1/5 to 1/10 per boss directive to further reduce credit usage; was 1/3
-    # before that -- applies to BOTH the tpu and npu/lyy agents since both run
-    # through this same gate, so qiaos and lyy are each capped at 1/10).
-    limit = income / 10.0
+    limit = income / 3.0
     jobs_file = os.environ.get('TPU_JOBS_FILE', os.path.expanduser('~/.tpu_jobs.json'))
     agent_name = "npu" if "npu" in jobs_file else "tpu"
     
@@ -243,10 +227,10 @@ def main():
           + "\033[0m")
     print(f"\033[36m[budget check] {agent_name} agent current cost: {current_cost:.1f} credits/hr\033[0m")
     print(f"\033[36m[budget check] new job cost: {new_cost:.1f} credits/hr\033[0m")
-    print(f"\033[36m[budget check] total projected: {total_cost:.1f} (Limit: {limit:.1f} = 1/10 of G9 income {income:.1f})\033[0m")
+    print(f"\033[36m[budget check] total projected: {total_cost:.1f} (Limit: {limit:.1f} = 1/3 of G9 income {income:.1f})\033[0m")
 
     # A BATCH-tier job draws from the free BATCH pool (clears at 0) and does NOT
-    # consume the PROD income/10 budget this gate protects, so it must never be
+    # consume the PROD income/3 budget this gate protects, so it must never be
     # refused on account of the PROD aggregate. Without this, a zero-cost BATCH
     # submission is still blocked whenever PROD is already over budget -- exactly
     # when BATCH is the correct escape hatch. `new_cost` is already 0 for BATCH
@@ -256,31 +240,8 @@ def main():
               f"admitted regardless of PROD aggregate.\033[0m")
         sys.exit(0)
 
-    # A CPU-ONLY ask has no chips, so it cannot consume the budget this gate
-    # protects. The limit is 1/10 of G9 *chip* income and every cost above is
-    # chips x clearing price; `npu money` reports G8 -- the pool these run in --
-    # as a Static Pool with 0.0 bidding power and no credit balance at all. This
-    # is the same situation the BATCH branch exists for: a zero-cost submission
-    # refused on account of a PROD aggregate it does not contribute to. That
-    # hatch keys on tier, and CPU jobs are submitted with no tier, so they
-    # arrive here as PROD and fall through it.
-    #
-    # WHY THIS IS A POSITIVE TEST AND NOT `if new_cost == 0`. parse_tpu_type
-    # splits on '-' and returns 0 chips for anything that is not
-    # "<name>-<digits>", so new_cost is ALREADY 0 for every type it fails to
-    # parse -- a typo like "v7_32", or any future naming scheme. Bypassing on
-    # cost==0 would wave all of those through, turning a parser miss into an
-    # unbounded spend path: fail-open, in the one place that has to fail closed.
-    # Naming the CPU case explicitly keeps unrecognised TPU types on the
-    # refusing side. (Added 2026-08-26 at lyy's request, after four CPU corpora
-    # on the free pool were refused by a G9 credit budget they cannot spend.)
-    if new_tpu_type.strip().lower().startswith('cpu'):
-        print(f"\033[32m[budget check] new job is CPU-only ({new_tpu_type}) -- no chips, "
-              f"does not draw on the G9 chip budget; admitted regardless of aggregate.\033[0m")
-        sys.exit(0)
-
     if total_cost > limit:
-        print(f"\033[31m[budget check] ERROR: Budget exceeded for {agent_name} check! Total projected cost ({total_cost:.1f}) exceeds the 1/10 limit ({limit:.1f}) of G9 income.\033[0m")
+        print(f"\033[31m[budget check] ERROR: Budget exceeded for {agent_name} check! Total projected cost ({total_cost:.1f}) exceeds the 1/3 limit ({limit:.1f}) of G9 income.\033[0m")
         sys.exit(2)
         
     sys.exit(0)

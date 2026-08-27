@@ -43,6 +43,14 @@ infrastructure.
 - **A cause that does not move when the suspect moves is not the cause.**
   Correlate the symptom's period or magnitude with the thing you suspect before
   acting on it.
+- **A serial pipeline does not bound memory; standing servers do.** "The build
+  is serial, so why is memory low?" mis-locates the cost: each workspace's blaze
+  server holds a multi-GB JVM heap for its whole `max_idle_secs` (days),
+  whether or not a build is running, and one per checkout. Under pressure
+  `--shutdown_on_low_sys_mem` evicts it, so the next build is a cold heavy
+  respawn that deepens the dip. Enumerate the resident heaps (`ps` by RSS) before
+  blaming concurrent builds — the memory is held by idle servers, not by
+  overlap.
 - **Two broken things can be true at once.** A real, measurable problem standing
   next to the failure is not automatically its explanation.
 - **Absence of evidence is evidence.** No log, no status message, and no
@@ -102,6 +110,14 @@ confirm the workers are alive before touching anything, and NEVER `amp
 start`/kill a worker to "recover" (that is what actually kills a live session).
 The gateway self-heals onto the new port; the fix is repointing the observer,
 not restarting the observed.
+
+**While diagnosing a stuck healer, read its state — do not invoke it.** A probe
+that runs the self-heal script (even `--help`) can trigger its side effect: a
+rebuild whose `blaze` child outlives your `timeout` wrapper, orphaning to init
+and joining the exact concurrent-build storm you are investigating. The
+`timeout` kills the wrapper, not the grandchild it already forked. Inspect the
+binary, the lock, and the logs directly; run the healer only once, deliberately,
+after you understand the state — never as a way to observe it.
 
 ## Failure Modes That Only Appear On The Long Path
 
@@ -202,6 +218,22 @@ back what each one actually is), confirm each is what you think, then signal
 those PIDs. `fuser -k` on a port is the same trap wearing a different hat:
 check who holds it before killing it, and never assume a port number is
 unused — 8891 in this incident was a real service someone else had added.
+
+**A process wedged in uninterruptible-D on a FUSE call is immune to SIGKILL and
+to its siblings dying — only an srcfs restart's EIO-bounce frees it.** A holder
+stuck in `request_wait_answer` (an unanswered CitC/FUSE request, e.g. an
+xmanager orphan of a dead launcher) keeps whatever lock or fd it owns, and
+tearing down the rest of its process tree does not release it: the kernel will
+not deliver a fatal signal until the syscall returns. Restarting srcfs bounces
+the hung syscall with EIO, the process finally dies, and the fd/lock closes.
+That restart is fleet control-plane — it severs every CitC CWD, including the
+amply gateway (`§Do Not Let A Diagnostic Kill` for the fallout) — so it is
+operator/sentinel-owned, never a casual fix. Two corollaries: attributing a
+lock's release to "the sibling process died" is almost always a coincidence with
+a concurrent srcfs restart, so check the restart log before believing it; and a
+global D-count gate ("restart when procs_blocked ≥ N") MISSES a low-D-count
+convoy where one orphan holds a lock with waiters queued behind it — detect that
+by the held lock plus its waiters, not by the aggregate count.
 
 ## A Tool Call Only Fires As A Structured Call, Never As Prose
 

@@ -5,27 +5,26 @@ Queue, inspect, resume, and debug a job on the internal XManager/Borg stack.
 accelerator naming and shapes, `infra/` the market, allocator, and CLI
 internals — read those only when the rules here do not explain what you see.
 
-## The Smart Queue In One Screen
+## The Submission Queue In One Screen
 
-`tpu queue` gained a scheduling layer so you rarely hand-pick cells or
-hand-serialize launches any more. What it does for you now, and where each piece
-is specified:
+**This is a SHARED workstation that chronically has several builds in flight, so
+the default submission path is `tpu enqueue` (instant, free) + one serial
+`tpu build-worker` draining builds one at a time.** A one-shot `tpu queue` races
+any other in-flight build on the blaze `output_base` (per checkout ROOT, not per
+copy dir) and silently ships a **zombie XID with 0 work units**; only serial
+building cures it (`infra/tpu_cli.md` §The Local-Queue Smart Router owns why).
 
-| You want | Do | What happens | Details |
-|---|---|---|---|
-| Launch one job | `tpu queue --tpu_type=… --group=9 …` (as always) | **Cell is auto-picked** — the most-free, non-oversold cell that can place the slice now; you rarely pass `--cell` | §Choosing Where To Run |
-| Keep a run in its data metro | add `--metro=<m>` (e.g. `cbf`) | the pick stays in-metro; if the metro is full it **refuses** rather than roaming to a no-data cell | §Choosing Where To Run |
-| Launch a batch / sweep | `tpu enqueue` each arm, run `tpu build-worker` | one **serial** worker drains them one build at a time — no concurrent-build corruption, no hand-timing | §The Local Queue |
-| A job stuck PENDING for 10 min | (automatic, if the router runs) | cancelled and re-routed to a placeable cell | §The Local Queue |
-| Fire many jobs from many paths at once | just do it | a per-workspace **stage-write lock** serializes staging across every path, so the CitC token bucket can't be drained | `infra/tpu_cli.md` |
+| You want | Do | Details |
+|---|---|---|
+| Launch one job (default) | `tpu enqueue …` with a `tpu build-worker` running — it builds serially, cell auto-picked | §The Local Queue |
+| Launch a batch / sweep | `tpu enqueue` each arm; the same worker drains them one at a time | §The Local Queue |
+| Keep a run in its data metro | add `--metro=<m>` (e.g. `cbf`); a full metro **refuses** rather than roaming to a no-data cell | §Choosing Where To Run |
+| One-shot, no worker (fallback) | `tpu queue …` — synchronous, returns an XID; ONLY when no other build is in flight | §Submission Contract |
+| A job stuck PENDING past 10 min | the router cancels and re-routes it to a placeable cell | §The Local Queue |
 
-The old reflexes — hand-probe every cell before launching, hand-serialize
-concurrent launches, hand-pin a cell for locality — are now **fallbacks**, not
-the default path. `tpu queue` stays one-shot and synchronous (returns an XID);
-the local queue (`tpu enqueue`) is the opt-in batch/auto-reroute tier. None of
-this changed the submission contract: same flags, same registry, `--cell` always
-wins, `TPU_NO_SMART_CELL=1` opts out entirely. Build internals: `infra/tpu_cli.md`
-§The Local-Queue Smart Router.
+Both paths share one submission contract (same flags, same registry) and the
+same smart cell pick — the least-oversold placeable cell, so you rarely pass
+`--cell` (it always wins; `TPU_NO_SMART_CELL=1` opts out; §Choosing Where To Run).
 
 ## The Launch Workflow
 
@@ -41,7 +40,7 @@ seconds.
    the floor), **g8** for CPU-only. `tpu quota` tells you WHICH GROUP holds a
    floor for the accelerator — nothing about cells.
 3. **The cell is auto-picked — you usually skip this step** (§Choosing Where To
-   Run). `tpu queue` pins the most-free non-oversold placeable cell for you; add
+   Run). The submit pins the most-free non-oversold placeable cell for you; add
    `--metro=<m>` if the run is data-locality-locked. Only drop to the manual
    probes below when you need to OVERRIDE the pick or understand a rejection:
    - `tpu preflight --tpu_type=<t> --group=<g> --json` → the `cells_ok` list with
@@ -67,10 +66,11 @@ seconds.
 ## Submission Contract
 
 - **Submit through the wrapper**: `source ~/work/tpu_cmd/tpu_wrapper.sh &&
-  tpu queue ...`. Never call `xm launch` / `xmanager launch` directly; only the
-  wrapper may do so internally.
+  tpu enqueue ...` (the default path; a `tpu build-worker` drains it serially —
+  §The Local Queue). Never call `xm launch` / `xmanager launch` directly; only
+  the wrapper may do so internally.
   `tpu` is a shell FUNCTION, not a binary on `PATH` — so a launcher SCRIPT that
-  wraps `tpu queue` (e.g. sourcing a guard helper) must `source
+  wraps it (e.g. sourcing a guard helper) must `source
   ~/work/tpu_cmd/tpu_wrapper.sh` in the SAME shell, or the call dies with `tpu:
   command not found` (seen as an instant guard "DEAD", ~6 s, no stagedir).
 - **One shared launcher.** `~/work/tpu_cmd/xm_launcher.py` owns packaging,
@@ -107,7 +107,7 @@ seconds.
 - **Verify the SNAPSHOT, not the file you edited.** One `diff` of the packaged
   config against what you meant to run covers the whole path: the copy, the
   overwrite, and the launcher's staging.
-- **The cell is auto-selected by default.** `tpu queue` pins the best placeable
+- **The cell is auto-selected by default.** The submit pins the best placeable
   cell for you (§Choosing Where To Run); pass `--cell` to override, `--metro=<m>`
   to constrain the pick to a data-co-located metro, or `TPU_NO_SMART_CELL=1` to
   opt out. This is transparent — no command changes.
@@ -115,30 +115,15 @@ seconds.
   do not affect a queued or running job.
 - **Verify registration after submit** rather than assuming the launch
   transaction completed.
-- **Launch a batch through the SERIAL build-worker, not by fanning out parallel
-  builds.** Concurrent `tpu queue` builds fail on this workstation — do not do
-  it. Instead `tpu enqueue` every arm (instant, free) and let one build-worker
-  drain them one at a time: `tpu build-worker start`, then
-  `tpu enqueue --power=… --archs=… --launch=config=…` per arm from its own
-  checkout, and watch `tpu queue-status`. One build in flight at a time, no
-  races, and you never wait on a submit.
-  - **Why not parallel** (three failure modes, all real, all cured by serial):
-    (1) two builds sharing a checkout race on the blaze **output_base** and one
-    yields a `found[]` zombie work unit — a same-checkout copy dir does NOT
-    isolate this (output_base is per checkout root, not per copy); (2) a burst of
-    concurrent stage-writes drains the CitC **CreateSnapshot token bucket**,
-    truncating stagedirs and crashing the `.par` — this is per-workspace and a
-    fresh workspace is drained just as fast if everyone piles in; (3) memory
-    peaks from stacked builds (survivable on 94G, but real). The old
-    fan-out-with-setsid-5-at-a-time recipe hit (1)+(2) and was abandoned;
-    serial is the standing rule.
-  - The worker also carries the night's 5 guards: one build at a time, an srcfs
-    failure brake, post-rsync staging checks, a `found[]`/no-XID check that
-    requeues instead of leaving a zombie, and a real-XID done test. Internals:
-    `infra/tpu_cli.md` §The Local-Queue Smart Router.
-  - If you must launch by hand without the worker, launch arms **strictly one at
-    a time** (wait for each to finish packaging before the next), each from its
-    own config copy; never background several builds at once.
+- **Default to `tpu enqueue` + one serial `tpu build-worker` — for a single job
+  as much as for a batch.** On this shared workstation a one-shot `tpu queue`
+  races other in-flight builds on the blaze `output_base` and ships a
+  0-work-unit zombie XID; the serial worker builds one at a time, the only thing
+  that avoids it. `tpu build-worker start` once, then `tpu enqueue` each run from
+  its own checkout and watch `tpu queue-status`. Mechanism, the failure modes it
+  cures, and the worker's guards: `infra/tpu_cli.md` §The Local-Queue Smart
+  Router. `tpu queue` (one-shot, synchronous) is the fallback for when you KNOW
+  no other build is in flight.
 
 ## Requirements And Runtime
 
@@ -192,7 +177,7 @@ Packaging costs minutes; an allocator rejects in seconds — settle placement
 first. The decisions are here; the mechanism is in `infra/`.
 
 - **The cell is now chosen for you by default — you rarely pass `--cell`.**
-  Every `tpu queue` first asks which cell can actually place the slice RIGHT NOW
+  Every submit first asks which cell can actually place the slice RIGHT NOW
   (most free chips, not oversold) and pins it, so a submit stops landing on an
   oversold cell while the same accelerator sits idle elsewhere (the disease that
   once pinned 13 v7-32 jobs to an oversold `yulpptr` while `yukulwh` had 101 free
@@ -216,8 +201,8 @@ first. The decisions are here; the mechanism is in `infra/`.
     cell; for storage locality, `--metro` is the right, less brittle tool. Only a
     run with no storage constraint should let the default roam all metros.
     - **`--metro` fails CLOSED when the metro is full.** If no cell in the named
-      metro can place the slice right now, `tpu queue` **refuses to submit**
-      (rather than roaming to an out-of-metro, no-data cell where the dataloader
+      metro can place the slice right now, the submit **refuses** (rather than
+      roaming to an out-of-metro, no-data cell where the dataloader
       would crash — the exact incident that drifted 3 arms to `yuskedq`). Wait
       and retry (the metro frees up), or pin an explicit `--cell=<in-metro cell>`
       to stage-and-queue there. Only a run with NO data need should override with
@@ -307,7 +292,7 @@ first. The decisions are here; the mechanism is in `infra/`.
 
 **A fresh submit already picks a placeable cell** (§Choosing Where To Run), so
 this section is mostly for a job that went PENDING AFTER it was placed, or one
-submitted with an explicit `--cell`. A new `tpu queue` will avoid the oversold
+submitted with an explicit `--cell`. A fresh submit will avoid the oversold
 cell on its own.
 
 **Queued is not failed, and PENDING for hours can be normal** (an oversold pool
@@ -341,29 +326,41 @@ A short submit with the real workload answers "can I get this slice here" at 100
 the capacity table was ~12% accurate against the live queue
 (`research/accelerator_choice.md`).
 
-## The Local Queue (advanced): Unlimited Enqueue + Auto-Reroute
+## The Local Queue: `tpu enqueue` + Serial Build-Worker
 
-**Smart cell selection is already the default of `tpu queue`** (§Choosing Where
-To Run) — a single submit picks a placeable cell for you, and most runs need
-nothing more. The **local queue** is the next tier up, for cases a one-shot
-submit does not cover:
+**`tpu enqueue` + a serial `tpu build-worker` is the DEFAULT submission path**
+(§Submission Contract), for a single job as much as for a batch: on this shared
+workstation the serial worker is the only thing that avoids the concurrent-build
+`output_base` race and its 0-work-unit zombie XID (`infra/tpu_cli.md`).
+Enqueuing is instant and free — a queued job costs nothing (PENDING does not
+bill) — and the worker builds one at a time. Beyond the single-job case the
+router also:
 
-- a **batch** you want to hand off all at once and let drain as capacity frees
-  up, rather than babysitting N submits;
-- runs that must **re-route automatically** if they go PENDING after placement
-  (the 10-minute sweep, below);
-- a **mixed batch across several checkouts** (each entry remembers its own
-  source dir).
+- drains a **batch / sweep** as capacity frees up, no babysitting N submits;
+- **re-routes automatically** anything that goes PENDING after placement (the
+  10-minute sweep, below);
+- handles a **mixed batch across several checkouts** (each entry remembers its
+  own source dir).
 
-It is side-by-side with `tpu queue`: the one-shot path is unchanged, and if you
-never enqueue anything nothing about the tool changes.
+The mental model is two queues. The **local queue** is a durable, unlimited list
+of desired runs; the router drains it into the XM queue one placement at a time,
+choosing a cell that can place the slice **right now** (free chips, not the
+obtainable table; never an oversold or full cell) and re-routing anything stuck.
+`tpu queue` — the one-shot fallback — instead admits a job to ONE cell and waits.
 
-The mental model is two queues. `tpu queue` admits a job to ONE cell (now a
-smartly-chosen one) and waits. The **local queue** is a durable, unlimited list
-of desired runs (a queued job costs nothing — PENDING does not bill), and the
-router drains it into the XM queue one placement at a time, choosing a cell that
-can actually place the slice **right now** (free chips, not the obtainable table;
-never an oversold or full cell), and re-routing anything that gets stuck.
+**Never enqueue with `priority` > 0 without the operator's explicit permission.**
+The local queue drains highest-priority-first (`tpu enqueue --priority=N`; the
+router sorts by `-priority`, so a bigger number jumps the queue). On this shared
+workstation every line enqueues into the *same* local queue, so one line quietly
+setting `--priority=5` or `6` parks every default `priority=0` job behind it
+indefinitely — a line that never raised its priority can be starved for the whole
+shift while wondering why its arms never build. **The default is `priority=0` and
+you leave it there.** Raising it is a fleet-wide fairness decision, not a
+per-line optimization: only the operator, who can see all lines' needs, may
+authorize a `priority>0`. If your batch genuinely needs to go first, ask — do not
+self-assign. (This is distinct from the dead `tpu queue --priority` CLI flag
+above, which is parsed but never read; the *local-queue* priority field IS
+honored, which is exactly why misusing it starves peers.)
 
 | Command | Does |
 |---|---|
@@ -409,12 +406,13 @@ can check it before it submits; override with `tpu enqueue --workdir=<dir>`. Onl
 a run whose every difference rides on an explicit flag is safe to enqueue from
 anywhere.
 
-**The router is off by default in the daemon.** Enqueuing is safe and free;
-nothing is submitted or cancelled until you run `tpu route-tick --nodry_run`
-yourself (or the daemon's router lane is armed with `TPU_ROUTE_ENABLED=1`, which
-it is not by default). The router never submits into an oversold/full cell and
-never cancels a job whose live status it cannot read. Tool internals:
-`infra/tpu_cli.md`.
+**Enqueuing alone submits nothing; a running `tpu build-worker` is what drains
+and submits it** (one build at a time). The separate AUTO-reroute sweep
+(cancel-and-requeue a job stuck PENDING past 10 min) is off by default: run
+`tpu route-tick --reroute --nodry_run` yourself, or arm the daemon's router lane
+with `TPU_ROUTE_ENABLED=1` (unset by default). Neither the worker nor the router
+ever submits into an oversold/full cell or cancels a job whose live status it
+cannot read. Tool internals: `infra/tpu_cli.md`.
 
 ## Preemption, Restart, And Resume
 

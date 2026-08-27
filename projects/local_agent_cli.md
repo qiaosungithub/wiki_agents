@@ -53,6 +53,26 @@ host's LOAS credential cannot reach superroot, so every call fails and dumps a
 permission wall into the log. Noise rather than a cause of crashes, but it is
 why run logs reach hundreds of MB.
 
+## `amp` Sends Operator Messages While The Agent Works
+
+**A message typed at the `amp` spinner is SENT immediately, mid-turn — not
+queued until the turn ends.** The backend always supported this: `/chat/send`
+appends a `MessageEvent` and wakes the session at once, and a busy chatbot's
+`run()` loop re-reads its context every iteration, so the message folds into
+the running turn at the agent's **next tool-call boundary** (seconds), surfaced
+as the `[STATUS]` **NEW OPERATOR MESSAGE** banner. The old lag was purely the
+TUI deferring the send to a post-idle drain. So the injection point is a tool
+boundary, NOT preemption: a long in-flight tool (or the current LLM
+generation) must finish first; it is not a hang.
+
+**Slash commands are the one exception — still deferred to the idle prompt.**
+`/status`, `/help`, `/compact`, `/quit` print to the screen or mutate turn
+state, which is unsafe while the hand-drawn spinner owns the bottom rows. Only
+plain messages send mid-turn. See `claude-amply.py` `_compose_submit_draft`
+(slash → `_queued_messages`, else `_send_operator_message(..., begin_turn=
+False)` so the in-flight turn's clock is neither reset nor torn down on a send
+failure); contract pinned by `agent-island/tests/test_queue.py`.
+
 ## Amply Workers Segfault Overnight
 
 **A run that reads `Stopped` was usually not stopped — its worker segfaulted.**
@@ -143,6 +163,22 @@ then restart the server. **Workers are reparented to init and survive the UX
 server dying**, so a run that looks lost usually needs the server back, not
 `amp start`.
 
+**A useful util function for fixing infra issues: Any agent can self-restart the gateway with `~/.amply/bin/restart-amply-ux.sh`
+(bashrc: `amp-restart-ux`), without going through `amp`.** It mirrors the exact
+tmux sequence `amp` uses internally (`claude-amply.py:_launch_ux_in_tmux`):
+settle, `tmux kill-session -t amply_ux`, fresh detached session at the
+workspace, wait for `~/.bashrc`, then `send-keys` `cd <ws> && amply-launch`.
+The indirection is mandatory, not stylistic: `amply-launch` is a bashrc ALIAS
+that exists ONLY in an interactive shell (`bash -lc` does NOT see it — bashrc
+returns early when non-interactive), and the detached tmux session OUTLIVES the
+agent that ran it so the server survives. The agent's bash tool shares the
+operator's default tmux socket, so plain `tmux` reaches `amply_ux`. Always
+`--dry-run` first when unsure; it bounded-verifies revival (polls
+`dashboard_url` + `/api/runs` 200) unless `--no-verify`. Flags/env:
+`--warmup`/`--wait`, `AMP_UX_TMUX` / `AMP_UX_WORKSPACE` / `AMP_UX_ALIAS`. Do
+NOT use the deprecated `~/.amply/bin/ux_launch.py` (it exec's a server on any
+invocation — the 3-server split-brain footgun).
+
 **Never start a second UX server to "fix" an unreachable one — find the one
 already running first** (`ss -ltnp | grep amply`, wildcard 0.0.0.0 binds are
 servers, 127.0.0.1 are workers). Every server boot rewrites
@@ -158,4 +194,75 @@ started server #3** (now gated behind `AMPLY_UX_LAUNCH=really-launch`); and a
 TUI/window keeps the base URL it read at startup, so after any server change,
 windows spewing `Connection refused` just need quitting and reopening.
 
+**A cold gateway takes MINUTES to answer `/api/runs`, and a concurrent `amp`
+that pinged-and-missed during that window launched a duplicate — the split-brain
+above, but self-inflicted by the client, not the operator.** The UX server does
+not bind its HTTP port / write `~/.amply/dashboard_url` until the skill-index +
+embedder build finishes; under load that cold start was measured at ~4 minutes
+(normally ~30s). So a first `amp new` launches a gateway, and a second `amp new`
+typed a few minutes later reads the still-stale/absent `dashboard_url`, its two
+3s pings both miss the not-yet-serving gateway, and it launches gateway #2 that
+then steals `dashboard_url`. This is NOT a bug in the ping logic — it is a launch
+not yet finished. The fix is a **cross-process launch lock**
+(`~/.amply/ux.launching.lock`, JSON `{pid,host,started_at}`, 6-min TTL +
+dead-pid steal): the first `amp` to launch claims it; every concurrent `amp`
+sees it and WAITS for that launch (polling `dashboard_url` + a port scan to
+adopt) instead of starting its own. Only the lock winner launches; a stale lock
+(launcher died, or past TTL) is stolen. The claim is `write-temp-then-os.link`,
+NOT `O_EXCL`-then-write: `O_EXCL` creates an EMPTY file first, and a losing
+racer that read it mid-write got `json.loads('')` → treated it as "stale" →
+stole it → two winners (3/30 concurrent races still doubled). `os.link` publishes
+the already-written payload atomically, so there is no empty window. Two more
+subtleties the tests pin: on lock-clear a waiter must RE-CHECK `dashboard_url`
+before taking over (the peer usually just succeeded), and the winner re-checks
+once more under the lock (double-checked locking) before spending a launch. See `claude-amply.py`
+`_try_acquire_launch_lock` / `_wait_for_peer_launch` / `ensure_ux_server`, tests
+in `agent-island/tests/test_launch_lock.py` (incl. a 3-way-race E2E asserting
+exactly one gateway launches). Independently, `amp stop <id|latest>` now exists
+(resumable pause, mirrors the web Stop button) for shedding a worker's RAM/CPU
+without losing state.
+
+**`amp new` / `amp resume` 500 with `FileNotFoundError: .../amply` is the
+gateway's spawn path gone stale after a concurrent build — restart the gateway,
+don't blame version skew.** The ux server caches the worker binary path at
+import time; historically that was `sys.argv[0]`, which points into the
+checkout's blaze `execroot/.../blaze-out` symlink. That symlink is **republished
+to a fresh objfs namespace (and the old one GC'd) whenever ANY `blaze build`
+runs under the same `$AMPLY_WORKSPACE` checkout** — a build-worker draining a
+sweep, or any line building there. The gateway's cached path then dangles, and
+every spawn (`_spawn_new_run_subprocess` → `subprocess.Popen`) dies with
+`FileNotFoundError`, 500ing `/api/run/new` and `/api/run/start` while the READ
+path (`/api/chat`, `/chat/messages`) stays 200 — so only "open/restart a line"
+breaks, and existing lines are untouched. Tell it apart from the version-skew
+500 (`engineering.md` §Gateway Version Skew, which 500s the *read/status* path
+on new runs): grep the server log for the endpoint + traceback
+(`E.... Exception on /api/run/new [POST]` in
+`/usr/local/google/tmp/amply.*.INFO.*`). **The fix in both the live-incident
+sense and the durable sense: `_AMPLY_BIN` now resolves from
+`os.path.realpath('/proc/self/exe')` (the inode this process holds open, which
+objfs keeps alive for our lifetime; falls back to `sys.argv[0]`) — see
+`third_party/py/simply/amply/ux/server.py:_resolve_amply_bin`. But a gateway
+already running with the old cached path must still be RESTARTED once — the
+value was captured at its import time and the patch only helps future boots.**
+
+
 *Update*: A direct patch has been added to `third_party/py/simply/amply/agents/event_loop.py` in the local CitC workspace to detect tool call leaks inline (`TOOL_MARKUP_RE.search(content)`) and immediately append a system correction without sleeping, eliminating the idle time entirely.
+
+## Host Quick-Stats Utils (`memavail` / `cpuload` / `hstat`)
+
+**One-line host health from `~/.bashrc`, read straight from `/proc` (no deps,
+work in any shell).** Added because this SHARED workstation overloads (load has
+hit 102; see `engineering.md` §Do Not Let A Diagnostic Kill The Thing It
+Watches for the amply-gateway-restart-loop that causes it), and an agent needs
+to check pressure before launching work.
+
+| Util | Shows |
+|---|---|
+| `memavail` | Available RAM (allocatable) + used/total + %avail, from `MemAvailable` |
+| `cpuload` | Load average + core count + **per-core** 1-min load; flags `** OVERSUBSCRIBED **` when >1.0/core |
+| `hstat` | Both of the above in one call |
+
+**Read `cpuload` per-core, not raw.** A raw load of 20 is healthy on a 24-core
+box (0.83/core) and on fire on an 8-core one (2.5/core) — the number is
+meaningless without its denominator (`engineering.md` §Communicating A Result).
+The util does the division; trust `/core`, not the first column.

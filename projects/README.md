@@ -34,6 +34,7 @@ job; the two obey different storage law.** `../storage.md` owns the detail.
 | Agent web / Jetski (resolve the live path) | n/a | Web interface for Gemini, Amply, Claude agents | `agent_web.md`, then native docs |
 | `agent-island/` | n/a | Terminal session managers for `clod`, `amp`, `gpt`, `gemini` | `local_agent_cli.md`, then native docs |
 | `work/reports/` | n/a | Paper deep-reading reports | `../reports/paper_reading.md` |
+| `rnn_unroll/` | 2 | RNN unroll-optimizer science line: gradient propagation / adding problem (vanilla RNN). Remote A100 box, not Borg. | `rnn_unroll_adding.md` |
 
 ## Boundaries That Are Easy To Miss
 

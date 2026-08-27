@@ -94,11 +94,15 @@ discipline `../research/result_logging.md`.
 ## Launch And Packaging
 
 - **Edit the unrestricted home checkout, launch from a `/tmp` copy.**
-  `tpu queue` packages a unique CitC snapshot, so post-package edits never reach
-  the job, and several agents share the checkout (`../jobs.md` §Submission
-  Contract). `rsync -aL` the tree minus `.git`/`data`/`logs`, write the config
-  there, `tpu queue`, delete it. `-aL` is required: `xm_launcher.py` is an
-  absolute symlink, and Bazel will not glob a package containing one.
+  Packaging is a unique CitC snapshot, so post-package edits never reach the
+  job, and several agents share the checkout (`../jobs.md` §Submission Contract).
+  `rsync -aL` the tree minus `.git`/`data`/`logs`, write the config there, then
+  `tpu enqueue` FROM that copy (the default serial path — `../jobs.md`; it
+  records the copy as the entry `workdir`). `-aL` is required: `xm_launcher.py`
+  is an absolute symlink, and Bazel will not glob a package containing one.
+  **Delete the copy only AFTER the build-worker has built it** (`tpu
+  queue-status` shows SUBMITTED) — a `workdir` that vanishes before its turn is
+  parked HELD, not packaged.
 - **Write the run into `configs/remote_run_config.yml` and launch without a
   config argument** (rule owned by `../jobs.md` §Submission Contract). EqR-jax
   consequence: `configs/` holds ONLY templates — `local_debug`, `remote_run`,
@@ -196,6 +200,7 @@ to host numpy before save, and restore into a numpy target symmetrically. Any re
   is endless. `epochs`, `max_steps` and `train_epochs_per_iter` are retired and
   raise naming their successor; a fixed-size corpus still prints its epoch
   budget, as a report and never a stopping rule.
+  **Default run length is 150k steps for maze-128.**
 - **An "epoch" here was never a pass over the data:** every builder writes
   `mean_puzzle_examples = 1` and every corpus holds 1000 groups, so
   `steps_per_epoch` floored to **1** and `epochs: 50000` meant 50,000 steps.

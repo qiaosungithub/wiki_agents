@@ -113,8 +113,9 @@ into a second cell/group in the same window.
 Cheap and worth it before any long run on a preemptible tier:
 
 ```bash
-tpu queue --tpu_type=<type> --group=<g> --tier=PROD --cell=<cell> \
-          --bucket=<co-located CNS path> -n <probe-name>
+tpu enqueue --power=<type> \
+  --launch=group=<g>,tier=PROD,cell=<cell>,bucket=<co-located CNS path>,exp_name=<probe-name>
+tpu build-worker start   # serial worker drains it (the default path — ../jobs.md)
 ```
 
 - Use the **real workload**, not a trivial one. A sleep loop cannot show whether
@@ -127,5 +128,8 @@ tpu queue --tpu_type=<type> --group=<g> --tier=PROD --cell=<cell> \
 - A terminal state (`SUCCESS`/`FAILURE`) **persists in `findjobs` output**. Use
   the first terminal sample as the end time; "last seen" over-counts a finished
   job by hours.
-- Never run `tpu queue` in a foreground call that can time out: **a killed
-  `tpu queue` still submits**, leaving an orphan XID.
+- **`tpu enqueue` returns instantly**, so a timed-out launch call no longer
+  risks the orphan submit a foreground `tpu queue` did (a killed `tpu queue`
+  still submits). The serial build-worker can still yield a 0-work-unit zombie
+  XID if a build fails — spot it (no work units) with `tpu queue-status` /
+  `tpu check` and read it as a launcher-side failure (`../jobs.md`).

@@ -156,6 +156,29 @@ threshold.**
   rebuilding all of them together. A hint printed into a detached tmux pane is
   not a fix, and the staleness auto-recovery restarts the session — never the
   problem.
+- **Serialize every self-heal rebuild behind one shared `flock`.** A checker
+  binary is objfs-GC'd after a while, and more than one path rebuilds it — the
+  daemon's own self-heal, a wrapper's on-demand rebuild, a periodic keep-warm.
+  Fired together they race on the single blaze **output_base** and republish
+  each other's namespace, so none publishes a clean binary and the checker stays
+  frozen while `blaze build` appears to run non-stop. A non-blocking `flock`
+  shared by ALL rebuild paths collapses the storm to one build; the losers skip,
+  never stack. (The checker-rebuild instance of the output_base race that
+  §The Local-Queue Smart Router's serial build-worker cures for job builds.)
+- **A keep-warm rebuilds only when the binary is MISSING.** Once built, the
+  binary survives for a long time, so an unconditional periodic `blaze build` is
+  pure overhead — and not free: blaze's `--shutdown_on_low_sys_mem` evicts the
+  idle server under memory pressure, so each "up-to-date check" cold-respawns a
+  multi-GB JVM heap that deepens the very dip that evicted it. Steady state is a
+  cheap liveness exec (the binary's own `--help`); pay for a real build only on a
+  missing binary, plus a rare low-frequency refresh. If the binary's build mtime
+  never moves across many keep-warm cycles, every "rebuild" was wasted work.
+- **The rebuild is the plain, proven `blaze build`; exotic flags each broke it.**
+  A `startup`-class option (e.g. `--noenable_dbip_auto_opt_in`, declared
+  `startup` in `tools/blaze.blazerc`) placed AFTER the subcommand is rejected at
+  parse time (`Unrecognized option`) — it must precede `build` or not appear —
+  and `--spawn_strategy=local` breaks a non-sandboxed genrule (unuran) in the
+  graph. Copy the command the daemon already runs; do not decorate it.
 - **The command re-renders the cache; it does not print it.** `tpu check` parses
   the daemon's cached table and rebuilds its own, so a column the daemon
   computes and writes can still be invisible if the command's parser drops it.
@@ -355,7 +378,11 @@ there serializes staging across bare / guarded / worker alike. It is a bash
 build/launch (different-checkout builds don't collide — only the token bucket was
 shared — so serializing builds too would negate parallel checkouts). `-w 900`
 degrades to unlocked rather than blocking forever, and `flock` auto-releases on
-process death, so a killed `tpu queue` never wedges it. This is what lets an
+process death, so a killed `tpu queue` never wedges it. The exception is a
+holder wedged in FUSE-D (`request_wait_answer`): it cannot die on SIGKILL, so
+killing it does NOT release its `flock` — only an srcfs restart's EIO-bounce
+frees the lock (`../engineering.md` §External Writes Are Transactions). This is
+what lets an
 operator fire jobs through any mix of paths without hand-coordinating a stage
 storm; the earlier hand-serialization advice (`monitoring.md`) is now the
 fallback, not the mechanism.

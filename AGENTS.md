@@ -37,8 +37,7 @@ and each has a `README.md` index.
 | Anything, before you start | `engineering.md` |
 | Find a checkout or its boundaries | `projects/README.md` |
 | Queue, inspect, resume, debug a job | `jobs.md`, then the project guide |
-| How the smart `tpu queue` works (auto cell / `--metro` / batch / worker) | `jobs.md` §The Smart Queue In One Screen |
-| Launch a BATCH / sweep, or many jobs at once | `jobs.md` §The Local Queue (`tpu enqueue` + `tpu build-worker`) |
+| Submit a job or a batch (default `tpu enqueue` + serial `tpu build-worker`; auto cell / `--metro`) | `jobs.md` §The Submission Queue In One Screen |
 | A CPU-only batch job will not schedule | `jobs.md` §Requirements And Runtime |
 | Choose a cell (now auto-picked); preflight before packaging | `jobs.md` §Choosing Where To Run |
 | A job will not schedule; capping spend | `infra/quota_market.md`, `tools/limit_order.sh` |
@@ -62,7 +61,10 @@ and each has a `README.md` index.
 | Write or render a paper report | `reports/README.md` |
 | **Monitor a fleet of autonomous runs**; watcher, handoffs, DEAD/idle alerts | `monitoring.md` |
 | A watched run shows DEAD/500; hand a heavy line to a fresh session | `monitoring.md` |
+| Monitor got a request mid-task; track it so it isn't dropped | `monitoring.md` §Track Every Request In The Todo List |
+| Write a handoff doc; retire an old session (kill its worker) | `monitoring.md` §Handoffs: Let The Line Summarize Itself |
 | `EqR` / `EqR-jax` | `projects/eqr_jax.md` |
+| RNN unroll optimizer / adding problem / gradient propagation science line | `projects/rnn_unroll_adding.md` |
 | VLM training, data, benchmark reporting | `projects/vlm_training.md`, `projects/vlm_data.md`, `projects/vlm_metrics.md` |
 | Agent web app, or a local agent CLI | `projects/agent_web.md`, `projects/local_agent_cli.md` |
 
@@ -93,7 +95,7 @@ deletion (`engineering.md` §External Writes Are Transactions).
 **Committing** — git push is your friend. You can push regularly, but need to be
 careful which branch to push.
 
-**Jobs** — Submit through `tpu queue`; never call `xm launch` / `xmanager launch` directly (`jobs.md` §Submission Contract).
+**Jobs** — On this SHARED workstation, submit through `tpu enqueue` + one serial `tpu build-worker` (the default that dodges the concurrent-build zombie XID); `tpu queue` one-shot only when no other build is in flight. Never call `xm launch` / `xmanager launch` directly (`jobs.md` §Submission Contract).
 
 **A chip count is not a size** — Per chip, `v7 = v6p ≈ 2x v6e ≈ 4x v5p ≈
 8x v4`, so matching a `v6p-16` needs a **`v6e-32`**. Asking for `v6e-16`

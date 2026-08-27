@@ -392,6 +392,42 @@ entry). The arithmetic names the culprit: a size that grew from zero, or sits
 append cannot shrink a file, so it means another writer, and the two have
 opposite fixes.
 
+## A Wedged CitC Workspace Is Server-Side, Not Yours To Restart
+
+**When one CitC workspace silently rolls back writes, the fault is server-side
+per-workspace state — it survives an srcfsd restart AND `citctools forceupdate`,
+and fleet-restarting srcfs will not fix it.** The signature is not an error: a
+write into the checkout reads back gone from a fresh process, while srcfsd logs a
+`CreateSnapshot failure ... dropping local changes` (RPC ECONNRESET, code 104)
+for that workspace id. It is scoped to the workspace, not the host: another
+client on the same host persists fine.
+
+**Prove server-side-per-workspace before touching anything shared.** A
+brand-new throwaway client that persists writes rules out the host, srcfsd, and
+the backend in one test — leaving stale per-workspace snapshot-stream state that
+no client-side action resets. `forceupdate` returning rc=0 with "synced to
+snapshot N" (the last good one) and the very next probe still dropping is the
+confirmation that it was a no-op. A fleet `srcfs.service` restart severs every
+CitC CWD on the box (the amply gateway included) and still will not clear it, so
+it is the wrong hammer.
+
+**A pending CitC CL is snapshot-backed in the client, NOT in Piper — so a
+wedged workspace's uncommitted work has exactly two real recovery paths: a
+submitted+landed CL, or a copy on local ext4.** `g4 print`/`files` at the CL and
+at HEAD both return "no such file(s)"; `describe` lists the files but carries no
+diff content. And a deleted client's snapshot is GC-eligible (retained only by an
+explicit `citctools retain`), so "byte-identical to snapshot N" is not a durable
+plan — it evaporates when the client is reclaimed. Preserve to ext4 first, then
+re-create the CL in a healthy client and submit.
+
+**Sidestep a wedged workspace; do not resurrect it.** Source files are identical
+across clients, so apply the edits in any healthy checkout and build/submit from
+there — verifying persistence (an *existing-file overwrite* is the failure mode:
+sync, wait, re-read the edit) before building on top. This unblocks the work
+without a client recreate or a fleet restart. (A giant `.citc/manifest.rawproto`
+in the healthy client can fail `g4 reconcile` with `File too large`; use
+`g4 --disable_reconcile` for opened/revert/submit — edit and build are unaffected.)
+
 ## Copying From A Bucket Someone Else Pays For
 
 **When the source bucket belongs to an external GCP project, a cross-region read
