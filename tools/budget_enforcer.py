@@ -72,15 +72,17 @@ def active_prod_jobs(jobs_file, cache_file):
             continue
         if e.get('status') not in ('SUBMITTED', 'RUNNING'):
             continue
-        # Bill only what actually BURNS credit: count a cached job only when its
-        # live state is `running`. A pending/queued gang holds zero Borg tasks
-        # (zero chip-hours), so it spends nothing and must not be a cancel
-        # candidate -- mirrors budget_check's launch-gate accounting.
-        if xid in cache_status and cache_status[xid] != 'running':
+        # Count SUBMITTED-and-PENDING as well as RUNNING (operator 2026-08-27,
+        # option B): a committed-but-pending job reserves budget too, so it is a
+        # legitimate cancel candidate when the aggregate is over cap. Only drop
+        # ZOMBIES (live check-cache state terminal, i.e. not running/pending/
+        # queued) -- mirrors budget_check's launch-gate accounting.
+        if xid in cache_status and cache_status[xid] not in ('running', 'pending', 'queued'):
             continue
         # g3/g5 draw on their own balance, not G9's income, so they are exempt
         # from the G9 income/10 cap this enforcer defends -- never count or
-        # cancel them here (mirrors budget_check).
+        # cancel them here (mirrors budget_check; kept pending operator's
+        # separate call on the g3/g5 exemption).
         if bc.is_exempt_group(e.get('alloc', '')):
             continue
         tpu_type = e.get('tpu_type', '')

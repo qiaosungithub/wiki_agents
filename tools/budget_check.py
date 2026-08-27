@@ -247,18 +247,23 @@ def main():
                 for xid, info in jobs.items():
                     # Only count active jobs (SUBMITTED or RUNNING)
                     if info.get('status') in ['SUBMITTED', 'RUNNING']:
-                        # Bill only what actually BURNS credit: a job in the live
-                        # check cache counts only when its state is `running`.
-                        # A pending/queued job holds ZERO Borg tasks -> zero
-                        # chip-hours -> spends nothing, so it must not inflate the
-                        # aggregate (operator 2026-08-27: the over-credit ENFORCER
-                        # already kills real overspend, so the launch gate should
-                        # reserve budget only for genuinely-running load).
-                        if xid in cache_status and cache_status[xid] != 'running':
+                        # Count SUBMITTED-and-PENDING as well as RUNNING against
+                        # the bar (operator 2026-08-27, option B): a job the
+                        # scheduler has committed to the XM queue reserves budget
+                        # even before its Borg gang is RUNNING, so the drainer
+                        # cannot flood the queue with an unbounded backlog of
+                        # pending jobs that each look free. The reroute lane
+                        # (pending > 600s -> auto-cancel + requeue) bounds how
+                        # long any one pending job can hold that reservation, so
+                        # it can never occupy the bar permanently. We still drop
+                        # ZOMBIES: a row whose live check-cache state is terminal
+                        # (not running/pending/queued) is no longer real load.
+                        if xid in cache_status and cache_status[xid] not in ['running', 'pending', 'queued']:
                             continue
                         # g3/g5 draw on their own balance, not G9's income, so a
-                        # running job there never spends the budget this gate
-                        # protects -- exclude it from the G9 aggregate.
+                        # job there never spends the budget this gate protects --
+                        # exclude it from the G9 aggregate. (Kept from the earlier
+                        # change; operator has not revisited the g3/g5 exemption.)
                         if is_exempt_group(info.get('alloc', '')):
                             continue
                         cost = get_job_cost(info.get('tpu_type', ''), info.get('tier', 'PROD'))
