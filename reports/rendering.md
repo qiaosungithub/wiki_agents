@@ -14,15 +14,14 @@ browser-first shell in
 Copy its complete inline CSS rather than substituting another `readings` style
 or extracting a new design system.
 
-The shell is a gradient `.header` with a monospace `.kicker`, large `h1`,
-`.subtitle`, pill metadata, and plain `.nav` links. The body is a centered
-two-column `main`: an `article.content` of warm-paper `.card` sections plus a
-290-pixel sticky `.toc` placed after the article. Inside cards, reuse its
-`.lead`, `.grid > .box`, `.note`, `.warn`, `.lesson`, `.formula`,
-`table.metric`, `.diagram`, `.caption`, and `.tag` components. Preserve the
-980-pixel single-column responsive breakpoint, rounded borders, shadows,
-sans-serif typography, colors, and inline-CSS packaging. Bilingual reports are
-separate HTML files with matching section IDs and reciprocal links in `.nav`.
+Reuse its structure and components verbatim: gradient `.header` (monospace
+`.kicker`, large `h1`, `.subtitle`, pill metadata, `.nav` links); centered
+two-column `main` (an `article.content` of warm-paper `.card` sections + a
+290px sticky `.toc` after the article); in-card `.lead`, `.grid > .box`, `.note`,
+`.warn`, `.lesson`, `.formula`, `table.metric`, `.diagram`, `.caption`, `.tag`.
+Preserve the 980px single-column breakpoint, borders, shadows, sans-serif type,
+colors, and inline-CSS packaging. Bilingual reports = separate HTML files with
+matching section IDs and reciprocal `.nav` links.
 
 ## Encode Line Structure Explicitly
 
@@ -75,12 +74,11 @@ values into HTML.
 
 **Browser HTML inspection is not sufficient** — render the actual PDF and look
 at every formula/pseudocode page at readable resolution, plus a contact sheet of
-the whole document; `pdftotext -layout` is a useful secondary check, never a
-replacement for looking. Confirm the intended line count survived, indentation
-still carries the right grouping, no token or subscript is clipped, no line
-broke at an arbitrary symbol, no block split across pages, each figure's
-footprint is proportional to the evidence it carries, and no avoidable blank or
-figure-only page appeared.
+the whole document (`pdftotext -layout` is a secondary check, never a
+replacement for looking). Confirm: intended line count survived, indentation
+still groups correctly, no token/subscript clipped, no line broke at an
+arbitrary symbol, no block split across pages, each figure's footprint matches
+its evidence, and no avoidable blank or figure-only page appeared.
 
 Exact extraction and rendering snippets from earlier work are kept under
 `../archive/legacy/`, for troubleshooting only.

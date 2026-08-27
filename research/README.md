@@ -40,9 +40,8 @@ the spreadsheet with its chart link (`result_logging.md`).
 
 **Identify the actual tracking backend before querying it** (`EqR-jax` routes
 WandB-shaped calls to DeepMind Datatables — `../projects/eqr_jax.md`;
-`result_logging.md` §Chart Links owns URL forms and how to verify a run wrote
-metrics). For a real external WandB run, resolve the exact entity/project/run
-and enumerate `run.files()` before downloading — `output.log` is common, not
-guaranteed. Never assume redirected stdout, child-process output, or a crashed
-process uploaded complete console logs; compare tracker artifacts against the
-job's authoritative logs and staged config.
+`result_logging.md` §Chart Links owns URL forms and metric-verification). For a
+real external WandB run, resolve the exact entity/project/run and enumerate
+`run.files()` before downloading (`output.log` is common, not guaranteed). Never
+assume a crashed process uploaded complete console logs; compare tracker
+artifacts against the job's authoritative logs and staged config.

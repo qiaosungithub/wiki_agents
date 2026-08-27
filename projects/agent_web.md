@@ -13,7 +13,7 @@ authoritative over this file; the workstation CLIs are `local_agent_cli.md`.
 | Looks broken | Actually |
 |---|---|
 | `CODEX_HOME`, `CODEX_NAME_HELPER`, `CODEX_WEB_BIN`, `CODEX_MODEL` and friends pointing at `~/.gemini` | **These are the *Gemini* slots**: Codex was replaced by Gemini without renaming the keys. There is no `codex` agent — the union is `amply \| claude \| gemini`, and tests or fixtures still naming one are stale. |
-| A failing test on a feature you cannot find a caller for | **This codebase carries features that are written but never called**, so a failing test here is not proof of a regression — and equally, a name on any old "dead" list may since have been wired. **Grep for a call site before you believe either story**: separate the definition from its callers, and for a websocket message require a sender *and* a handler on both sides (`*_get` in the browser store, its branch in the server's message switch, and the reply handled back in the store). If the only hit is the definition, the feature never ran and its bugs (a `Math.max` over two fields nothing populated, say) were never observable; if it has callers, treat the failure as a real regression. Test files are not call sites. |
+| A failing test on a feature you cannot find a caller for | **This codebase carries features that are written but never called**, so a failing test is not proof of a regression — and a name on any old "dead" list may since have been wired. **Grep for a call site before believing either story.** For a websocket message require a sender *and* a handler on both sides (`*_get` in the browser store, its branch in the server's message switch, the reply handled back in the store). Only-the-definition = the feature never ran and its bugs were never observable; has-callers = a real regression. Test files are not call sites. |
 
 ## What A Child Process Gets, And Must Not Inherit
 
@@ -22,77 +22,73 @@ escalation only reaches a client launched with `--permission-prompt-tool
 stdio`** — the sentinel the Agent SDK passes when a host supplies a `canUseTool`
 callback, turning an ask-decision into a `can_use_tool` control_request on
 stdout, answered by a control_response on stdin. **Without that flag every ask
-is auto-denied and no prompt appears**, looking exactly like the classifier
-deciding alone. **Answer `allow` by echoing the model's own `input` back as
-`updatedInput`** (the CLI validates it against the tool's schema; anything else
-risks rejection), and **never forward the CLI's `permission_suggestions` to a
-browser** — acting on one writes a permanent rule into settings on behalf of
-whoever holds the web token.
+is auto-denied and no prompt appears**, looking like the classifier deciding
+alone. **Answer `allow` by echoing the model's own `input` back as
+`updatedInput`** (the CLI validates it against the tool's schema), and **never
+forward the CLI's `permission_suggestions` to a browser** — acting on one writes
+a permanent rule into settings on behalf of whoever holds the web token.
 
 **When a backend invocation represents a human UI message, remove peer-agent
 identity variables such as `ANTIGRAVITY_CONVERSATION_ID` and
-`ANTIGRAVITY_AGENT_NAME` from that child process**, or the target classifies the
-request as agent-to-agent traffic and returns tool-oriented content the human
-message view does not render. Clear only variables whose semantics you have
-verified; do not strip the whole service environment as a generic fix.
+`ANTIGRAVITY_AGENT_NAME` from that child process**, or the target classifies it
+as agent-to-agent traffic and returns tool-oriented content the human message
+view does not render. Clear only variables whose semantics you have verified;
+do not strip the whole service environment as a generic fix.
 
 ## Two Instances, Separated By Session Name Prefix
 
 **The collaborator site (`run-lyy.sh`, port 8889, `lyy.kaiming.me`, token
 `.lyy.token`, cwd `~/lyy-work`) shares every agent home and login with the main
 site; the only separation is the session display name.** An instance with
-`AGENT_WEB_SESSION_NAME_PREFIX="[lyy]"` lists only sessions whose name starts
-with the prefix, forces the prefix onto renames, and auto-names a new session
-`[lyy] <first user message>` after its first turn; the main `run.sh` hides that
-prefix via `AGENT_WEB_SESSION_NAME_HIDE`. Renaming a session across the prefix
-boundary hands it to the other site. This is cooperative list-level separation
-only — both instances run as the same Unix user with the same credentials, so a
-token IS full access to this machine. `tests/session-prefix.mjs` (zero
-inference) is the regression test.
+`AGENT_WEB_SESSION_NAME_PREFIX="[lyy]"` lists only prefixed sessions, forces the
+prefix onto renames, and auto-names a new session `[lyy] <first user message>`
+after its first turn; the main `run.sh` hides the prefix via
+`AGENT_WEB_SESSION_NAME_HIDE`. Renaming across the prefix boundary hands a
+session to the other site. This is cooperative list-level separation only —
+both instances run as the same Unix user with the same credentials, so a token
+IS full access to this machine. `tests/session-prefix.mjs` (zero inference) is
+the regression test.
 
 ## DNS For A New Subdomain
 
 **Every new `*.kaiming.me` hostname needs its own proxied CNAME to
 `<tunnel-id>.cfargotunnel.com` in the domain owner's Cloudflare dashboard —
 this machine has no `~/.cloudflared/cert.pem`, so `cloudflared tunnel create` /
-`route dns` cannot run here** (the certs that once created gemini/chat lived on
-the old NFS deployment host). A `cloudflared tunnel login` link dies with its
+`route dns` cannot run here.** A `cloudflared tunnel login` link dies with its
 process after ~10 minutes ("Failed to fetch resource"), so it only works with
 the operator standing by; the dashboard record has no such deadline. Prefer a
-`path:` ingress rule on an existing hostname over a new subdomain — a path
-route needs no DNS change at all, only a tunnel restart.
+`path:` ingress rule on an existing hostname over a new subdomain — a path route
+needs no DNS change, only a tunnel restart.
 
 ## Verifying A Web Instance Without Spending Inference
 
 **A fresh Claude runner emits NO `init` event until its first user turn — a
-probe that opens a session and waits for `init` times out against a perfectly
-healthy server.** The correct zero-inference health check is: ws `open` (a
-broken spawn answers with `agent_exited code=spawn-error` in the replay within
-seconds), then `attach since:0`, confirm several seconds of silence, then
-`close` and expect `runner_closed`/`gone` — which only subscribers receive, so
-the `attach` is not optional. Confirm separately that `server.log` gained no
-`spawn-error` lines.
+probe that opens a session and waits for `init` times out against a healthy
+server.** The correct zero-inference health check: ws `open` (a broken spawn
+answers `agent_exited code=spawn-error` in the replay within seconds), then
+`attach since:0`, confirm several seconds of silence, then `close` and expect
+`runner_closed`/`gone` — which only subscribers receive, so the `attach` is not
+optional. Confirm separately that `server.log` gained no `spawn-error` lines.
 
 ## Claude Binary Resolution
 
 **Never let the backend resolve `claude` from an inherited PATH.** A server
 started under a tmux whose PATH lacked `~/.npm-global/bin` answered every web
-"launch Claude" with `spawn claude ENOENT` for a day — millions of retry lines
-in `server.log` — while terminal sessions kept working, so the failure looked
-like anything but PATH. `run.sh` now pins `CLAUDE_WEB_BIN` to an absolute path
-and refuses to start without one; keep it that way.
+"launch Claude" with `spawn claude ENOENT` while terminal sessions kept working,
+so the failure looked like anything but PATH. `run.sh` now pins `CLAUDE_WEB_BIN`
+to an absolute path and refuses to start without one; keep it that way.
 
 ## A Web-Launched Agent Cannot Redeploy These Servers
 
 **An agent session launched from the web runs inside a bwrap jail (clod): a
-private PID namespace and private `/tmp` mean it can see neither the host's
-processes nor the tmux socket, and `crontab`, `systemd --user`, setuid
-binaries, and key-based `ssh localhost` are all unavailable.** It can edit
-files, commit, build, and reach shared-namespace ports over localhost — but it
-cannot kill or restart the very backend that is serving it. Redeploys go
-through `deploy-restart.sh` in a real terminal; the jailed agent verifies over
-HTTP afterwards. The network namespace IS shared, so port probes and `curl`
-from inside the jail tell the truth.
+private PID namespace and private `/tmp` mean it sees neither the host's
+processes nor the tmux socket; `crontab`, `systemd --user`, setuid binaries, and
+key-based `ssh localhost` are all unavailable.** It can edit files, commit,
+build, and reach shared-namespace ports over localhost — but cannot kill or
+restart the backend serving it. Redeploys go through `deploy-restart.sh` in a
+real terminal; the jailed agent verifies over HTTP afterwards. The network
+namespace IS shared, so port probes and `curl` from inside the jail tell the
+truth.
 
 ## Jetski Language Server Address
 
@@ -101,11 +97,11 @@ discovery fallback (unset, the only reply is
 `{"error": "ANTIGRAVITY_LS_ADDRESS is not set"}`), and it names a language
 server the jetski CLI hosts on a **random** port (`--http_server_port ... 0
 means random`) that dies with the CLI session owning it. A backend started
-inside a CLI session freezes that soon-dead port into its environment forever.
+inside a CLI session freezes that soon-dead port into its environment.
 
 **Recognise it**: creating a web session appears to succeed and only the FIRST
 message fails, with `session id missing` — `GeminiRunner.runTurn` finding no
-session id, while the real failure is upstream in `start()`, which swallows the
+session id. The real failure is upstream in `start()`, which swallows the
 `agentapi` error into one `console.error` and emits an init with an undefined
 session id anyway. Confirm by running `agentapi new-conversation` by hand under
 the backend's own environment

@@ -23,12 +23,12 @@ two marked values. Naive BPTT gradients vanish for early timesteps. Probes:
 | W&B | project `rnn-unroll-adding` (entity zhh24-massachusetts-institute-of-technology); group = experiment name |
 | Results spreadsheet | EqR workbook `17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0`, tab **`RNN-unroll-adding (qiaos)`** (sheet-id 960697842). Log conclusions here (`../research/result_logging.md`). |
 
-**Compute is plain PROCESSES on a reserved box, NOT Borg/XManager** — so there
-is NO BATCH tier and nothing is preemptible; `../jobs.md` does not apply. Runs
-are `CUDA_VISIBLE_DEVICES=N .venv/bin/python train.py …`, 12 lanes (3/GPU),
-driven by a `scripts/run_*.sh` scheduler that writes `_sched*.log` and a final
-`ALL DONE` marker; a `watch_*.sh` polls over SSH and pings the owning session
-via `~/.amply/bin/amply_notify <session_id> -`.
+**Compute is plain PROCESSES on a reserved box, NOT Borg/XManager** — no BATCH
+tier, nothing preemptible; `../jobs.md` does not apply. Runs are
+`CUDA_VISIBLE_DEVICES=N .venv/bin/python train.py …`, 12 lanes (3/GPU), driven by
+a `scripts/run_*.sh` scheduler that writes `_sched*.log` and a final `ALL DONE`
+marker; a `watch_*.sh` polls over SSH and pings the owning session via
+`~/.amply/bin/amply_notify <session_id> -`.
 
 ## How The Mechanism Works (the code)
 - `model.py` VanillaRNN: `h_t=tanh(x_t W_ih^T + h_{t-1} W_hh^T + b)`, readout on
@@ -45,9 +45,9 @@ via `~/.amply/bin/amply_notify <session_id> -`.
   unroll") — each call site keeps its OWN Adam state (m_i,v_i), per-site step,
   merge the UPDATES. flavors: `atan2` (EqR-faithful, epsilon-free) | `adamw`.
 - `dynamic_precision.py`: backward hooks that rescale an underflowing hidden-
-  state grad back to O(1) (preserve direction, revive magnitude). = operator's
-  "dynamic grad scale". `merge_selected_sites`: route grad to only {markers,
-  n_random, n_last} sites (selective-site probe, uses privileged marker pos).
+  state grad back to O(1), preserving direction = operator's "dynamic grad
+  scale". `merge_selected_sites`: route grad to only {markers, n_random, n_last}
+  sites (selective-site probe, uses privileged marker pos).
 
 ## Standing Rules The Operator Has Set (do not regress)
 1. **Never call a variant a "win" without matching STEP-BUDGET and LR for the
@@ -71,17 +71,17 @@ via `~/.amply/bin/amply_notify <session_id> -`.
    t≤50 at T200. merge norm_eps 1e-38. adam_atan2 is eps-free = the natural fit.
 8. **depth_weight direction:** operator wants the LAST loop (near loss) = weight
    1, polynomial (NOT exponential) decay toward the front, so early grads are
-   still "eaten" but the terminal loss is preserved (closer to baseline). That is
-   `poly1_late` (1/r) / `poly2_late` (1/r^2). `poly*_early` (weight 1 on the
-   EARLIEST loop) is BACKWARDS — a bug that invalidated an early 1n/1n² sweep.
+   still "eaten" but the terminal loss is preserved. That is `poly1_late` (1/r) /
+   `poly2_late` (1/r^2). `poly*_early` (weight 1 on the EARLIEST loop) is
+   BACKWARDS — a bug that invalidated an early 1n/1n² sweep.
 9. **Log conclusions to the spreadsheet tab** (not just the notebook).
 
 ## Confirmed Findings (mechanism)
 - **"Solving" = emergent horizon expansion / self-curriculum:** rho(W_hh)
   spectral norm CLIMBS during training (e.g. 1.13→3.23), early-timestep grads
-  grow ~20-35 orders as rho rises, the vanishing wall RECEDES; delayed grokking-
-  like solve (eval sits at 0.16 for thousands of steps then drops). Falsifiable
-  via a cheap rho probe (`torch.linalg.matrix_norm(W_hh, ord=2)`).
+  grow ~20-35 orders as rho rises, the vanishing wall RECEDES; solve is delayed
+  grokking-like (eval sits at 0.16 for thousands of steps then drops).
+  Falsifiable via a cheap rho probe (`torch.linalg.matrix_norm(W_hh, ord=2)`).
 - **FULL unroll (norm_power=1) is uniquely fatal** (0/10 at T100; p=0.011 vs
   baseline) — complete L2-normalization erases the magnitude the optimizer needs.
   **Partial (power≤0.5) matches plain Adam.** Precision/eps/depth-weight alone do
@@ -101,4 +101,4 @@ Queue serially (GPUs shared 12 lanes); launch from an ISOLATED dir (e.g.
 `rnn_unroll_v3`) so edits never contaminate a running scheduler that reads
 `train.py` live. Launch detached as `setsid nohup … >log 2>&1 </dev/null &` (the
 `</dev/null` avoids a gcloud channel-EOF hang). One watcher per sweep, pointed at
-the current owning session id. Record every decision + result in the notebook.
+the owning session id. Record every decision + result in the notebook.

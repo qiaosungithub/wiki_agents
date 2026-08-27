@@ -30,23 +30,22 @@ reports `TPU v5p` / `TPU v6e` / `TPU v4`, and JAX itself special-cases the
 break (`third_party/py/jax/.../pallas/ops/tpu/megablox/common.py`: *"TPU v7 has
 a different pattern (i.e. TPU7x)"*). Any code keying a topology or capability
 table on `"v7"` therefore MISSES, and the miss is usually silent — a lookup
-that falls back to a default rather than raising. This cost a 5.8x slowdown in
-`jax_llava`, undetected for a full production run (the mesh table had no v7
-entry, `get_mesh()` fell back to a flat 1-D mesh, sharding every parameter
-across all devices). **Match on `tpu7`, and assert the mapping against the real
-strings before trusting it.**
+that falls back to a default rather than raising. One silent miss (a mesh table
+with no v7 entry falling back to a flat 1-D mesh) cost a 5.8x slowdown in
+`jax_llava` for a full production run. **Match on `tpu7`, and assert the mapping
+against the real strings before trusting it.**
 
 **v7's slice geometry is identical to v6p** (3-D torus, 4 chips/host):
 `platforms/accelerator_metadata/platforms/ghostfishlite.gcl` declares the same
 static sub-cubes as `ghostfish.gcl`, differing only in the locus name. Registered
 sizes are **4/8/16/32** (`v7-16` → `2x2x4`); 64+ exists only via dynamic slice
-creation through the OCS manager, so it is deliberately not claimed.
+creation through the OCS manager, so it is not claimed.
 
 **v7 is usually the cheapest generation on this pool** — it has cleared at 0.00
-(free pool) in every sample taken, while v6p clears in the single credits/hr and
-moves round to round. Read that as a price difference, not a capacity one: v6p
-is obtainable in tens of thousands of chips at the same moment. Check the market
-before assuming which generation you can get — `tpu money`, or
+(free pool) in every sample taken, while v6p clears in the single credits/hr.
+Read that as a price difference, not a capacity one: v6p is obtainable in tens of
+thousands of chips at the same moment. Check the market before assuming which
+generation you can get — `tpu money`, or
 `prices.<pool>|101|PROD` in `~/.tpu_quota_cache_dir/market.json` (v7 is card code
 101, v6p 92).
 
@@ -79,10 +78,10 @@ differs even where HBM matches** — v6p carries 256 GiB/chip, v7 only
 or heavy input pipeline can fit v6p and OOM the host on v7 despite identical HBM.
 
 **Peak capability is not obtainable throughput.** These ratios hold only while
-you keep the slice. Measured over 18.7 h, v6p-64's median hold was 2.3 min --
-shorter than one checkpoint interval -- so it finished less work than v6e or
-v5p despite 4.34x the per-chip compute. Before choosing a family for a long
-preemptible run, read `research/accelerator_choice.md`.
+you keep the slice: a v6p-64 whose median hold was 2.3 min (shorter than one
+checkpoint interval) finished less work than v6e or v5p despite 4.34x the
+per-chip compute. Before choosing a family for a long preemptible run, read
+`research/accelerator_choice.md`.
 
 ## Converting Between Generations
 
@@ -95,8 +94,8 @@ matching a `v6p-16` needs **`v6e-32`**, `v5p-64`, or `v4-128` (115.7 chips
 rounded up to the next legal v4 shape — the conversion gives a number, the
 legal-shape table decides what you can ask for). Getting this wrong is silent:
 the job runs at half the compute and is compared against siblings as if the
-hardware had been equal; `AGENTS.md` carries it as a hard rule. Three traps in
-using a single scalar:
+hardware were equal; `AGENTS.md` carries it as a hard rule. Three traps in using
+a single scalar:
 
 | Trap | Detail |
 |---|---|
@@ -132,11 +131,11 @@ rules are encoded.
 v7-32.** A `v5e-256` request is rejected outright — `preflight: RED, "v5e-256
 is not a supported slice size (Borg has no legal locus for it). Supported sizes
 for v5e: [8, 16, 32, 64]"` — this is a shape/pool ceiling, NOT a quota or
-credit shortfall (having credit only lets you bid; the topology must be legal
-first). The 256 row above is the physical torus; the obtainable slice in this
-pool is capped lower. Since v7 = 8x v4 = 8x v5e per chip, one v7-32 needs 256
-v5e chips, which is four v5e-64 slices — not power-equivalent as a single job.
-**Treat v5e as unusable for v7-scale training and skip it in surveys.**
+credit shortfall (credit only lets you bid; the topology must be legal first).
+The 256 row above is the physical torus; this pool caps the obtainable slice
+lower. Since v7 = 8x v4 = 8x v5e per chip, one v7-32 needs 256 v5e chips — four
+v5e-64 slices, not power-equivalent as a single job. **Treat v5e as unusable for
+v7-scale training and skip it in surveys.**
 
 **Global batch size must be a non-zero multiple of the chip count**, or the job
 dies with `ValueError: Batch size <B> must be a non-zero multiple of the number

@@ -28,9 +28,9 @@ discipline `../research/result_logging.md`.
 - **`arch.q_head_sg` severs the halt objective from the trunk:** the q head
   reads a `stop_gradient` latent, so the trunk gradient from the q term is
   exactly zero in every `q_readout` mode. It also makes
-  `arch.loss.q_halt_loss_weight` irrelevant, that weight being a no-op on the
-  head itself (`atan2` is scale-invariant) and having only ever scaled the trunk
-  pull `q_head_sg` removes. **`q_head_sg: true` is the best-performing setting:
+  `arch.loss.q_halt_loss_weight` a no-op — `atan2` is scale-invariant on the head
+  itself, and the weight only ever scaled the trunk pull `q_head_sg` removes.
+  **`q_head_sg: true` is the best-performing setting:
   training the head independently of the trunk does not cost the trunk.**
 - **A dataset alias absent from `DATASET_PATHS` becomes a LITERAL path**,
   killing the job at startup with "Dataset split train in <alias> does not
@@ -40,28 +40,24 @@ discipline `../research/result_logging.md`.
 - **`dataset.online_aug` is the SUDOKU symmetry group, not a generic
   augmenter:** it reshapes each batch to `(B, 9, 9)`, so on a 900-cell board it
   raises inside the TRAIN LOADER, after packaging and scheduling are paid for.
-  Inherited from a sudoku scale-up recipe rather than mistyped; refused off
-  sudoku now.
+  Refused off sudoku now.
 - **Size `--tmp_ram_fs_gib` from the payload before launching a 20M-row
   corpus:** `sync_dataset_to_local` mirrors the split into `/tmp`, a Borg RAM
-  disk (default 16 GiB), once per task — and a corpus holds more than the loader
-  reads, Setting-A ones shipping a `shards/` tree as large as the payload (now
-  skipped, with `seeds.npy` and `provenance.json`, by `_UNUSED_BY_TRAINING`).
-  Read `Staged N MB`.
+  disk (default 16 GiB), once per task. A corpus holds more than the loader reads
+  — Setting-A ones ship a `shards/` tree as large as the payload, now skipped
+  with `seeds.npy` and `provenance.json` by `_UNUSED_BY_TRAINING`. Read `Staged N
+  MB`.
 - **A per-metro mirror can be POLLUTED with generation intermediates, and
-  `_UNUSED_BY_TRAINING` does not cover them all.** The settingB-v3 adv corpus
-  mirrors diverged: `nm-d` (tul) and `li-d` (lpp) were clean 69G (arrays only),
-  but `is-d` (cbf metro: `je` + every `yucbf*`) still carried a 78G `parts/`
-  tree plus `shards/` and `fillin*.txt` — 227G total. `_UNUSED_BY_TRAINING`
-  skips `shards/` but NOT `parts/`, so a TRAINING run (which stages the full
-  split, `staging={}`) on a cbf cell copied `parts/` + inputs + labels past the
-  92 GiB RAM disk and died `OSError: [Errno 28] No space left on device` in
-  `sync_dataset_to_local`, at step 0, on every retry — while the identical
-  config trained fine on `yutulpz`. The launcher classifies it "Job terminated
-  in state FAILURE" (NOT "CODE BUG"), so read the attempt log for the ENOSPC
-  before suspecting the arm you changed. Fix: launch on a clean mirror, or add
-  `parts` to `_UNUSED_BY_TRAINING`, or delete the stray intermediates so a
-  mirror matches `nm-d`/`li-d`.
+  `_UNUSED_BY_TRAINING` does not cover them all** — it skips `shards/` but NOT
+  `parts/`. The settingB-v3 adv corpus mirrors diverged: `nm-d` (tul) and `li-d`
+  (lpp) were clean 69G (arrays only), but `is-d` (cbf) carried a 78G `parts/`
+  tree — 227G total. A TRAINING run stages the full split (`staging={}`), so on
+  the cbf cell it copied `parts/` past the 92 GiB RAM disk and died `OSError:
+  [Errno 28] No space left on device` in `sync_dataset_to_local` at step 0, every
+  retry. The launcher classifies this "Job terminated in state FAILURE" (NOT
+  "CODE BUG"), so read the attempt log for the ENOSPC before suspecting the arm
+  you changed. Fix: launch on a clean mirror, add `parts` to
+  `_UNUSED_BY_TRAINING`, or delete the intermediates.
 - **The maze grid is `30 x 30` holding a `29 x 29` perfect maze, padded — not
   cropped:** `_generate_perfect_maze` needs an odd size, so it takes
   `maze_n = n if n % 2 else n - 1` and writes `open_mask[:29, :29]`, leaving row
@@ -69,9 +65,9 @@ discipline `../research/result_logging.md`.
 - **Registers are plain trainable tokens; the knob is `arch.num_registers`.** An
   `(N, hidden)` table in `params` prepends N tokens after `embed_scale`, so
   `register_init_std` is the std the trunk sees. It replaced a `puzzle_emb_*`
-  surface inert three ways over — zero, non-trainable `consts`, keyed by a
-  `puzzle_identifiers` column every dataset fills with 0. Retired names raise
-  and name their successor (pydantic drops unknown fields silently); a
+  surface inert three ways over (zero, non-trainable `consts`, keyed by a
+  `puzzle_identifiers` column every dataset fills with 0). Retired names raise
+  and name their successor — pydantic drops unknown fields silently; a
   `puzzle_emb` checkpoint no longer restores, torch ones convert with
   `--num-registers`.
 - **A zero-initialised register is not a neutral default:** `register_init_std`
@@ -82,11 +78,10 @@ discipline `../research/result_logging.md`.
   logits across `rope`, `rope2d` and `none`, the MLP-T branch never reading the
   table. Every `local_debug*` config and upstream's sudoku recipe set it, so a
   run reported as "rope2d" alongside `mlp_t` measured no position encoding.
-- **`rope2d` with registers is refused at config load:** the flat table that
-  served it was not a rotation (row and column angles in one 2x2 block,
-  orthogonal only on the board diagonal). Rebuilding it needs PaliGemma's
-  half-width `[row(q), col(q)]`-then-DUPLICATE layout; plain 1-D `rope` is fine
-  with a prefix.
+- **`rope2d` with registers is refused at config load:** the flat table it
+  served was not a rotation (row and column angles in one 2x2 block, orthogonal
+  only on the board diagonal). A rebuild needs PaliGemma's half-width `[row(q),
+  col(q)]`-then-DUPLICATE layout; plain 1-D `rope` is fine with a prefix.
 - **Never sync a file between the two checkouts wholesale** (`../engineering.md`
   §Porting Between Related Checkouts). This repo lost `_online_eval` from
   `train.py` that way while nine yamls kept setting `evaluation.online_eval`.
@@ -105,9 +100,9 @@ discipline `../research/result_logging.md`.
   parked HELD, not packaged.
 - **Write the run into `configs/remote_run_config.yml` and launch without a
   config argument** (rule owned by `../jobs.md` §Submission Contract). EqR-jax
-  consequence: `configs/` holds ONLY templates — `local_debug`, `remote_run`,
-  and per-task ones — and a finished experiment's config comes back from its
-  snapshot with `sexy <xid>`. Launching by config name leaves a file behind.
+  consequence: `configs/` holds ONLY templates (`local_debug`, `remote_run`,
+  per-task); recover a finished experiment's config from its snapshot with `sexy
+  <xid>`. Launching by config name leaves a file behind.
 - EqR-jax uses XManager service tiers (`PROD` / `BATCH`), not legacy
   `xm_priority`; resource selection and allocator constraints are `../jobs.md`.
 - Treat the active BUILD target and launcher as authoritative: entry point in
@@ -135,12 +130,12 @@ build proves nothing.
 **JAX startup order. Do not call `jax.distributed.initialize()`:** google3's JAX
 self-initialises on first backend use from the `--jax_port` /
 `--jax_controller_address` flags XManager injects
-(`jax_google.py::_lazy_initialization`), so calling it duplicates that work, or
-without the flags raises `ValueError: coordinator_address should be defined`.
-And **nothing before that point may touch JAX** — `log_for_0` asks
-`jax.process_index()` who it is, booting the backend and making initialisation
-illegal (`RuntimeError: ... must be called before any JAX calls`), so `main.py`
-uses a JAX-free `_boot_log`.
+(`jax_google.py::_lazy_initialization`). Calling it duplicates that work; without
+the flags it raises `ValueError: coordinator_address should be defined`. And
+**nothing before that point may touch JAX** — `log_for_0` asks
+`jax.process_index()` who it is, which boots the backend and makes init illegal
+(`RuntimeError: ... must be called before any JAX calls`), so `main.py` uses a
+JAX-free `_boot_log`.
 
 ## Data And Checkpoint Locality
 
@@ -168,38 +163,38 @@ sync when a cell is added:
 | las | `dl-d` | v4 | **PARTIAL** — maze v4 working set only (64x64-offline + companions + settingA/B); NOT settingB_v3 / 128x128 |
 
 `las`/`dl-d` being partial means `storage.md` §Existence Is Not Completeness
-bites: check `_MIRRORED`/`_SUCCESS` on `dl-d` before pinning a job there rather
-than assuming a dataset exists. `research/v7_storage_placement.md` owns the
-authoritative cell survey and the `las` naming trap (`la-d`/`lb-d` are `lpp`, not
-`las`; only `dl-d` is `las`).
+bites: check `_MIRRORED`/`_SUCCESS` on `dl-d` before pinning a job there.
+`research/v7_storage_placement.md` owns the authoritative cell survey and the
+`las` naming trap (`la-d`/`lb-d` are `lpp`, not `las`; only `dl-d` is `las`).
 
 **Every host must read the checkpoint itself.** The obvious optimisation — rank
 0 reads and `broadcast_one_to_all` rather than N hosts amplifying the read
 N-fold — halts the TPU core with `RuntimeUnexpectedCoreHalt` *after* the read
-succeeded, `ocp.Checkpointer.restore()` being ITSELF a collective ending in a
-`sync_global_processes` barrier; and it is unpatchable as written, non-readers
-being unable to predict the dtype orbax returns. `ckpt_util.py` records the one
+succeeds: `ocp.Checkpointer.restore()` is itself a collective ending in a
+`sync_global_processes` barrier. It is unpatchable as written — non-readers
+cannot predict the dtype orbax returns. `ckpt_util.py` records the one
 construction that would work
 (`MultiprocessingOptions(primary_host=0, active_processes={0})`). Distance has a
 fix here; read amplification does not.
 
 **A host-local single-device model cannot be orbax-saved unchanged on a multi-host
 slice.** The DP-CNN baseline (`dp_train.py`) shards nothing — every host runs an
-identically-seeded replica — so its params are `SingleDeviceSharding` `jax.Array`s, and
-`ocp.StandardCheckpointer.save` REFUSES them when `jax.process_count() > 1`
-(`ValueError: Cannot serialize host local jax.Array ... in multi-host setting`).
-`active_processes={0}` skips the write *barrier* but NOT this check. It trained clean to
-step 90 then crashed at the step_100 save — invisible to any single-process local run or
-hermetic-binary smoke, only on a real ≥2-host Borg slice. Fix: `jax.device_get` the payload
-to host numpy before save, and restore into a numpy target symmetrically. Any replicated
-(non-sharded) model checkpointing from a multi-host slice needs this.
+identically-seeded replica — so its params are `SingleDeviceSharding`
+`jax.Array`s, and `ocp.StandardCheckpointer.save` REFUSES them when
+`jax.process_count() > 1` (`ValueError: Cannot serialize host local jax.Array
+... in multi-host setting`). `active_processes={0}` skips the write *barrier* but
+NOT this check, so it crashes only on a real ≥2-host Borg slice at the first
+save (step_100) — no single-process or hermetic smoke catches it. Fix:
+`jax.device_get` the payload to host numpy before save, and restore into a numpy
+target symmetrically. Any replicated (non-sharded) model checkpointing from a
+multi-host slice needs this.
 
 ## Loader, Sampler State, And Run Length
 
 - **`training.total_steps` is the only run-length input** and the train loader
   is endless. `epochs`, `max_steps` and `train_epochs_per_iter` are retired and
-  raise naming their successor; a fixed-size corpus still prints its epoch
-  budget, as a report and never a stopping rule.
+  raise naming their successor; a fixed-size corpus still prints its epoch budget
+  as a report, never a stopping rule.
   **Default run length is 150k steps for maze-128.**
 - **An "epoch" here was never a pass over the data:** every builder writes
   `mean_puzzle_examples = 1` and every corpus holds 1000 groups, so
@@ -208,21 +203,21 @@ to host numpy before save, and restore into a numpy target symmetrically. Any re
 - **Verify a resume by step progress, not by exit status** (`../jobs.md` §A
   restart loop is not evidence of a crash). The retired
   `epochs / train_epochs_per_iter` design checkpointed an exhausted cursor, so a
-  resume evaluated `while N < N`, yielded zero batches, "finished" without a
-  step and exited 0 — every restart looking like a clean success.
+  resume evaluated `while N < N`, yielded zero batches, and exited 0 — every
+  restart looking like a clean success.
 - **Anything added to sampler state must be O(1) in corpus size; otherwise store
   the seed and replay it.** Persisting `group_order` =
   `rng.permutation(num_groups)` meant 3.8M integers in a 45 MB `extra.json`
-  rewritten every save, and a job deleted mid-write left the resume parsing its
-  own truncated bookkeeping. Replay needs the state from BEFORE the draw, so
-  `epoch_rng_state` is what is stored (`rng_state` has already been advanced)
-  and `_iter_train` replays the permutation.
+  rewritten every save, and a mid-write deletion left the resume parsing its own
+  truncated bookkeeping. Replay needs the state from BEFORE the draw, so
+  `epoch_rng_state` is stored (`rng_state` has already advanced) and `_iter_train`
+  replays the permutation.
 - **Cast a `np.searchsorted` key to the index array's dtype:** the arrays are
-  `int32` and a Python `int` is int64, so NumPy upcasts the *entire* array on
+  `int32` and a Python `int` is int64, so NumPy upcasts the *entire* array
   **every batch** — 364x on `_iter_test`, ~20 hours instead of ~3 minutes per
-  pass over a 20M-row split. Recognise the signature: **throughput pinned at a
-  constant batches/s regardless of batch size** is a fixed per-batch cost, not
-  an I/O problem.
+  pass over a 20M-row split. Signature: **throughput pinned at a constant
+  batches/s regardless of batch size** is a fixed per-batch cost, not an I/O
+  problem.
 - **A batch larger than the split makes the loader spin silently:** the train
   path is drop-last, so it yields nothing, re-shuffles and yields nothing again
   — 100% CPU, no batches, no error, forever. Clamp with `min(batch_size, n)`.
@@ -258,11 +253,11 @@ the larger the corpus; re-check them if either is reverted.
 - The published checkpoint **does** carry an EMA shadow at
   `blob["ema"]["shadow"]` (mu=0.999, ~5e-3 from the raw params), so EMA never
   explains a large gap.
-- **The released sudoku checkpoint was not trained with the released recipe** —
-  though its `pos_encodings: none` against the recipe's `rope` is NOT the
-  deviation, both running `mlp_t: true`. The difference is the puzzle embedding:
-  the checkpoints set `puzzle_emb_ndim/len` 512/16 (hence `seq_len` 97, not 81)
-  with a NON-ZERO table and the reference yaml never mentions the knob, so
+- **The released sudoku checkpoint was not trained with the released recipe.**
+  Its `pos_encodings: none` vs the recipe's `rope` is NOT the deviation (both run
+  `mlp_t: true`, which no-ops position encoding). The difference is the puzzle
+  embedding: the checkpoints set `puzzle_emb_ndim/len` 512/16 (hence `seq_len`
+  97, not 81) with a NON-ZERO table the reference yaml never mentions, so
   reproducing the paper by training requires the checkpoint's arch.
 - **Compare against the right upstream baseline:** upstream `README.md` reports
   both a 2048-example smoke eval (`cumulative_exact_acc_top1` 99.19) and the
@@ -278,9 +273,9 @@ no real external tracker unless current code proves one was created.
 
 - **`import wandb` resolves to a mock** implementing only `init`, `log`,
   `finish`, `Table`, `plot`, `Video`, whose `log()` stores nothing; every other
-  attribute raises **at call time** — on Borg, after packaging and scheduling
-  succeeded. Route calls through `utils/wandb_util.py`, whose `safe_log()`
-  swallows failures; telemetry must not kill a run.
+  attribute raises **at call time** — on Borg, after packaging and scheduling.
+  Route calls through `utils/wandb_util.py`, whose `safe_log()` swallows
+  failures; telemetry must not kill a run.
 - Metrics reach a UI through Datatables via `clu.metric_writers`; URLs and the
   explicit-opt-in trap are `../research/result_logging.md` §Chart Links.
   Specific to this code: only `process_index()==0` may build a writer (all tasks
@@ -289,10 +284,10 @@ no real external tracker unless current code proves one was created.
 - **Anything that builds a logging handler unhooks the remote log mirror**,
   which under Borg is the ONLY log. `main.py` tees stdout/stderr to
   `$CHECKPOINT_BUCKET/logs/rank_<n>.log`, but stdlib handlers capture the stream
-  they were constructed with, so a metric writer steals it back and the log
-  stops dead mid-run. Call `logging_util.reattach_absl_handlers()` afterwards,
-  repointing `get_absl_handler().python_handler` — not the outer object, which
-  has no `setStream`.
+  they were constructed with, so a metric writer steals it back and the log stops
+  dead mid-run. Call `logging_util.reattach_absl_handlers()` afterwards, which
+  repoints `get_absl_handler().python_handler` — not the outer object, which has
+  no `setStream`.
 - Resume uses the experiment identity (`resume_xid`) and its workdir; verify
   checkpoint and config continuity before treating appended charts as one run.
   Checkpoints go to `$CHECKPOINT_BUCKET`, never `workdir`;
@@ -302,11 +297,10 @@ no real external tracker unless current code proves one was created.
   never `EqR-reproduction` (history); `../research/result_logging.md` owns how,
   including which column holds per-token versus whole-board accuracy.
 - **Maze runs use `v7-32`**: the 16-chip half buys half the compute for the same
-  wall clock, and the family's published rows are all v7-32. The arch makes this
-  expensive to get wrong — one ACT step is
-  `H_cycles * (L_cycles + 1) * L_layers` layers (84 at the 3/6/4 default),
-  training unrolls the full `halt_max_steps`, and a 100k-step maze leg already
-  runs ~8 hours at v7-16's measured 3.53 steps/s.
+  wall clock, and the family's published rows are all v7-32. This is expensive to
+  get wrong — one ACT step is `H_cycles * (L_cycles + 1) * L_layers` layers (84
+  at the 3/6/4 default) and training unrolls the full `halt_max_steps`, so a
+  100k-step maze leg already runs ~8 hours at v7-16's measured 3.53 steps/s.
 
 ## Harvesting Final Train Metrics
 
@@ -319,10 +313,10 @@ after a preemption that worker is a different physical log file.** The line to
 grep is `[Info] [<step>/<total> <pct>%] loss=.. lm_loss=.. acc=.. exact=..`; it
 appears only in the `rank_<n>.log` whose banner says `borg task <n> == jax
 process 0`. **That borg-task↔jax-process mapping is reshuffled on every retry**,
-so the rank that carried the curve in `attempt1` almost never carries it in the
-final attempt — which is why `rank_7` (the old "proc0") so often reads empty and
-the metric gets mis-filed as "log rotated". The final segment is not gone; it is
-in a rank you have not looked at yet.
+so the rank carrying the curve in `attempt1` rarely carries it in the final one
+— `rank_7` (the old "proc0") reads empty and the metric gets mis-filed as "log
+rotated". The final segment is not gone; it is in a rank you have not looked at
+yet.
 
 Procedure (the run reached `step_<budget>`, so the curve exists). **The fast
 path is a size sort, not a rank scan** — it sidesteps both traps below in one
@@ -377,15 +371,13 @@ actually logs, not by testing the function that builds it.**
 `D<depth>[B<breadth>]/{ema,online}/...`, and appears exactly once; charts use
 `D16/ema/acc`. The sweep path carries the same point tag as the in-training
 eval, so the two are directly comparable. Two levels are gone from the sink: the
-`eval/depth`-style coordinates, which print to the log, and the dataset `set`
-level, dropped from column, `evaluate()`'s return value and results json alike
-(every corpus declares `sets=["all"]`; a dataset with two sets makes it
-reappear).
+`eval/depth`-style coordinates (they print to the log), and the dataset `set`
+level (dropped from column, `evaluate()`'s return value and results json alike —
+every corpus declares `sets=["all"]`; a dataset with two sets makes it reappear).
 
 **Several keys are called `lm_loss`. Name the one you mean** — they differ in
-split, weights, denominator and cadence, the eval ones being ~30 points against
-~1500, and quoting the train curve at an eval-chart reader has inverted a real
-conclusion.
+split, weights, denominator and cadence (eval ~30 points vs train ~1500).
+Quoting the train curve at an eval-chart reader has inverted a real conclusion.
 
 | Key | Source |
 |---|---|
@@ -409,9 +401,9 @@ real predictions — two runs of one task can differ 53x in denominator. `acc`
   `StepAccumulator` folds every step and the step on the `log_per_step` grid
   drains it, divisor scaled by the interval. The FINAL point is still one
   interval, so **compare runs on a tail-window mean over the logged curve, not
-  the last row**. There is deliberately no smoothing knob — the one that existed
-  averaged the pre-denominator sums, making its "smoothed loss"
-  ~`global_batch_size` times real.
+  the last row**. There is no smoothing knob: the one that existed averaged the
+  pre-denominator sums, making its "smoothed loss" ~`global_batch_size` times
+  real.
 - **`train/lm_loss` is not comparable across runs that halt at different
   depths**: a run pinned at `halt_max_steps` buys its lower loss with more
   compute. Check `train/act_loops_mean` first; if the depths differ, use a
@@ -427,8 +419,8 @@ gates on `valid = loss_counts > 0`, tallies filter through
 `eval_fn._drop_unscorable`, `different_init/total_samples` reports the real
 count), so padding costs compute, not correctness. **Do not apply a hand
 correction on top — that now UNDER-reports.** Before the fix a pad row satisfied
-`((pred == labels) | ~mask).all(-1)` vacuously and counted as a perfect solve
-for every replica, once manufacturing a whole maze accuracy out of 24 pad rows.
+`((pred == labels) | ~mask).all(-1)` vacuously and counted as a perfect solve,
+once manufacturing a whole maze accuracy out of 24 pad rows.
 
 Two cross-checks: **read `total_samples`** to confirm which regime a number came
 from, and check `different_init/avg_pass_rate` against `acc` **of the same
@@ -444,19 +436,16 @@ IRREVERSIBLE.
 
 - **`training.checkpoint_best_metric` promotes the best-scoring step** to
   `checkpoint_best_<metric>_<n>/`, deliberately OUTSIDE the `step_<N>` namespace
-  every retention rule matches on, so the in-job pruner, `tpu gc` and
-  auto-resume all ignore it and no future sweeper must learn about it. Without
-  it the default policy (newest 2 plus a 50k ladder) deletes exactly the
-  checkpoint a peak-reporting row needs: **this family peaks off the ladder** —
-  120k of 150k on maze, 40-45k of 50k on sudoku. **Auto-resume still restores
-  the NEWEST checkpoint, never the best.**
+  every retention rule matches on, so the in-job pruner, `tpu gc` and auto-resume
+  all ignore it. Without it the default policy (newest 2 plus a 50k ladder)
+  deletes exactly the peak a result depends on: **this family peaks off the
+  ladder** — 120k of 150k on maze, 40-45k of 50k on sudoku. **Auto-resume still
+  restores the NEWEST checkpoint, never the best.**
 - **`checkpoint_interval_steps` must DIVIDE `eval_interval_steps`**, so every
   evaluated step has a checkpoint behind it — the peak is promoted from the
-  checkpoint saved at that same step, and there is no substitute source. Report
-  the peak for a family that rises then collapses; a peak with no checkpoint can
-  be neither re-evaluated nor published. Nothing checks the relation at config
-  load: `promote_best_checkpoint` warns and skips, so a violated ratio costs the
-  peak silently, one eval at a time.
+  checkpoint saved at that same step, with no substitute source. Nothing checks
+  the relation at config load: `promote_best_checkpoint` warns and skips, so a
+  violated ratio costs the peak silently, one eval at a time.
 
   | relation | consequence |
   |---|---|
@@ -464,27 +453,26 @@ IRREVERSIBLE.
   | `ckpt` a multiple of `eval` | only every `ckpt/eval`-th eval can promote |
   | otherwise | promotion is sporadic; read the warning, not the curve |
 
-  Both intervals default to the same value in `configs/default.py`, which
-  satisfies the relation; a config that overrides one must re-check the ratio.
-  Verify by reading the two keys in the config you are launching —
-  `grep -n '_interval_steps' configs/<name>_config.yml` — never by assuming the
-  last run's numbers, since `remote_run_config.yml` is overwritten by every
-  launch and the smoke templates run intervals of single digits.
+  Both intervals default to the same value in `configs/default.py`, satisfying
+  the relation; a config that overrides one must re-check the ratio. Verify by
+  reading the two keys in the config you are launching — `grep -n
+  '_interval_steps' configs/<name>_config.yml` — never by assuming the last run's
+  numbers, since `remote_run_config.yml` is overwritten by every launch and the
+  smoke templates run intervals of single digits.
 - **Track SEVERAL metrics: a retention policy driven by ONE inherits that
-  metric's bugs.** The selected step is kept and the rest go on the ladder, so
-  an over-reporting scorer does not merely mis-state a number, it keeps the
-  wrong checkpoint — paid once, when `auto` resolved to the single buggy key
-  `solution_acc`. `auto` now keeps the best under EVERY headline key the run
-  reports (`walk_acc`, `solution_acc`, `acc`), one deduplicated directory each,
-  so a metric fix costs a re-score rather than the run. **Still re-rank the
-  retained steps against the run's own logged curve after ANY metric fix**, and
-  expect pre-change peaks to be unrecoverable.
+  metric's bugs.** The selected step is kept and the rest go on the ladder, so an
+  over-reporting scorer keeps the WRONG checkpoint — paid once, when `auto`
+  resolved to the single buggy key `solution_acc`. `auto` now keeps the best
+  under EVERY headline key the run reports (`walk_acc`, `solution_acc`, `acc`),
+  one deduplicated directory each, so a metric fix costs a re-score rather than
+  the run. **Still re-rank the retained steps against the run's own logged curve
+  after ANY metric fix**, and expect pre-change peaks to be unrecoverable.
 - **`"auto"` resolves against the FIRST REAL METRICS DICT, not the config**,
-  since which accuracy a run reports depends on its dataset and its head.
-  `_BEST_METRIC_PREFERENCE` in `utils/ckpt_util.py` is the list, in headline
-  order; `resolve_best_metrics` in the same file is the resolution. **Read the
-  tuple in the checkout you are launching rather than trusting a copy** — its
-  spelling differs across branches, and the two spellings behave differently:
+  since which accuracy a run reports depends on its dataset and head.
+  `_BEST_METRIC_PREFERENCE` in `utils/ckpt_util.py` is the list in headline
+  order; `resolve_best_metrics` (same file) is the resolution. **Read the tuple
+  in the checkout you are launching rather than trusting a copy** — its spelling
+  differs across branches, and the two spellings behave differently:
 
   | spelling of an entry | how it matches |
   |---|---|
@@ -496,19 +484,17 @@ IRREVERSIBLE.
   it carries the run's real `halt_max_steps` and `online_eval`** — smoke the
   LAUNCHED graph, and read the "tracking …" line the first eval prints.
 - **Never point an eval at a LADDER checkpoint of a job that is still running.**
-  It races that job's `checkpoint_keep_last` and always loses — packaging and
-  scheduling take minutes, in which two more checkpoint intervals delete the
-  named step — and surfaces as `FileNotFoundError` on a path that existed when
-  typed, reading like a typo. Target what retention exempts: a milestone
-  (`checkpoint_milestone_every`) or a `checkpoint_best_*`. A finished run is
-  safe, but keep the habit.
+  It races that job's `checkpoint_keep_last` and loses — packaging and scheduling
+  take minutes, in which two more intervals delete the named step — surfacing as
+  `FileNotFoundError` on a path that existed when typed. Target what retention
+  exempts: a milestone (`checkpoint_milestone_every`) or a `checkpoint_best_*`. A
+  finished run is safe, but keep the habit.
 - **Never sweep a name you do not recognise.** The older single-metric
-  `checkpoint_best_<n>` is still on CNS, and for most runs that have one it
-  names a step no `step_<N>` on the ladder still holds, so the job and `tpu gc`
-  match both shapes and neither deletes an unfamiliar one. When a retention rule
-  cannot PROVE a copy is superseded (unreadable sidecar, no metric named) it
-  keeps it: a kept copy costs disk a tool can report, a deleted one costs
-  weights nobody can reproduce.
+  `checkpoint_best_<n>` is still on CNS, usually naming a step no `step_<N>` on
+  the ladder holds, so the job and `tpu gc` match both shapes and neither deletes
+  it. When a retention rule cannot PROVE a copy is superseded (unreadable
+  sidecar, no metric named) it keeps it: a kept copy costs disk a tool can
+  report, a deleted one costs weights nobody can reproduce.
 
 ## Eval Protocol: Report B=1 First
 
@@ -524,9 +510,9 @@ depends on the dataset:** `acc` on sudoku, `solution_acc` / `walk_acc` on a maze
 scores every `training.eval_interval_steps`, and its default `[16, 64]` at B=1
 on both weight sets IS the protocol above — so a run's result is
 `D16/{ema,online}/acc` (or `walk_acc`) on its own training curve.
-`online_eval: []` restores the old single-point behaviour; each point rebuilds
+`online_eval: []` restores the old single-point behaviour. Each point rebuilds
 the module via `model_copy` (a frozen dataclass cannot be re-depthed in place),
-so it costs a recompile, not a reload. The `EqR-refactored` tab matches:
+costing a recompile, not a reload. The `EqR-refactored` tab matches:
 `Acc B=1 D=16`, `Acc B=1 D=64`, `Acc-any-correct (B=1)`, then
 `additional results`.
 
@@ -549,53 +535,50 @@ hundred times the work on sudoku. Verify sizing in the config: a differing
 product measured a different population, whichever way the number moved.
 
 **An eval batch is only correct against a DEVICE COUNT, and a chip count is not
-one.** `check_eval_batch_layout` refuses a per-process batch that `pmap` cannot
-lay out, at STARTUP: it needs `global_batch / process_count % local_devices ==
-0`. A v6p/v7 chip carries TWO cores, so a `v7-32` is **64 devices over 8 hosts**
-and the natural-looking `500` gives `500/8 = 62`, `62 % 8 != 0` — it raises
-before step 1. An eval batch inherited from another run's config carries that
-run's slice shape with it, and nothing in the yaml records which slice it was
-sized for.
+one.** `check_eval_batch_layout` refuses at STARTUP a per-process batch `pmap`
+cannot lay out: it needs `global_batch / process_count % local_devices == 0`. A
+v6p/v7 chip carries TWO cores, so a `v7-32` is **64 devices over 8 hosts** and
+the natural-looking `500` gives `500/8 = 62`, `62 % 8 != 0` — it raises before
+step 1. A batch inherited from another run carries that run's slice shape, and
+nothing in the yaml records which slice it was sized for.
 
-**Prefer over-feeding to a batch that divides the split**, because on a
-1000-row maze split the two constraints are incompatible: no divisor of 1000 is
-a multiple of 64 (125, 200, 250, 500 all fail). `512 x 2 = 1024` is the maze
-answer — `TEST_POPULATIONS` caps the walk at the split's first 1000 rows
-whatever the batch shape, `_iter_test` pads the tail and `drop_unscorable`
-removes the padding, so the SCORED population is unchanged and the cost is
-compute on pad rows. The comparability rule above is about the *scored* rows,
-not the batch product, whenever a `TEST_POPULATIONS` entry binds.
+**Prefer over-feeding to a batch that divides the split**, because on a 1000-row
+maze split the two constraints are incompatible: no divisor of 1000 is a multiple
+of 64 (125, 200, 250, 500 all fail). `512 x 2 = 1024` is the maze answer —
+`TEST_POPULATIONS` caps the walk at the split's first 1000 rows whatever the
+batch shape, `_iter_test` pads the tail and `drop_unscorable` removes it, so the
+SCORED population is unchanged and the cost is compute on pad rows. When a
+`TEST_POPULATIONS` entry binds, the comparability rule above is about the
+*scored* rows, not the batch product.
 
 ### Breadth, in the same job
 
 **Set `evaluation.final_eval: true` with a non-empty `evaluation.sweep`.** It
-runs the full cartesian product against the final checkpoint after the last
-training step, through the engine a standalone eval uses, so breadth and
-convergence-top-k columns arrive without a second launch to match back by hand.
-Off by default (the sweep is expensive), and an empty sweep with it on is
-rejected at config load rather than ending a long run with a log line.
+runs the full cartesian product against the final checkpoint through the engine a
+standalone eval uses, so breadth and convergence-top-k columns arrive without a
+second launch. Off by default (the sweep is expensive); an empty sweep with it on
+is rejected at config load.
 
 **A breadth eval can silently deliver less breadth than you asked for.** Restart
-latents come from a key broadcast to every device, so a draw is a function of
-the WITHIN-DEVICE row index only and effective breadth is
-`min(per_device_rows, n_init)` — B replicas straddling devices get duplicate
-latents. Nothing in the metrics shows it (`total_samples` stays right,
-`avg_pass_rate` still matches `acc`); only diversity shrinks, so
-`different_init/any_correct` and `convergence_top_k` under-report by that
-factor. Config load refuses such a layout; apply the rule when sizing by hand.
+latents come from a key broadcast to every device, so a draw is a function of the
+WITHIN-DEVICE row index only: effective breadth is `min(per_device_rows,
+n_init)`, and B replicas straddling devices get duplicate latents. Nothing in the
+metrics shows it (`total_samples` stays right, `avg_pass_rate` still matches
+`acc`); only diversity shrinks, so `different_init/any_correct` and
+`convergence_top_k` under-report by that factor. Config load refuses such a
+layout; apply the rule when sizing by hand.
 
 ### What the paper reports for breadth
 
 **The paper's B=128 figure (Maze 93.0) is top-1 convergence accuracy** — the
 restart with the smallest mean residual over the last L=3 iterations — NOT
 majority vote, which the paper never reports. **Do not "improve" a reproduction
-row by swapping in the higher number:** majority vote does score higher
-(released maze checkpoint at D16/B128: 99.2 against conv-top1's 94.9), but the
-weaker selector is the point, conv-top1 testing the paper's own claim that
-latent convergence predicts solution quality. Majority vote here is over the
-ENTIRE token sequence (`tuple(row)` keys `eval_fn._update_di`), not per-token —
-hence its strength on a maze, which has one correct path against many wrong
-ones.
+row by swapping in the higher number:** majority vote does score higher (released
+maze checkpoint at D16/B128: 99.2 against conv-top1's 94.9), but the weaker
+selector is the point — conv-top1 tests the paper's claim that latent convergence
+predicts solution quality. Majority vote here is over the ENTIRE token sequence
+(`tuple(row)` keys `eval_fn._update_di`), not per-token — hence its strength on a
+maze, one correct path against many wrong ones.
 
 **A breadth metric going DOWN as depth goes up is expected, not a bug.**
 `convergence_top_k=4` caps the candidate pool before top-1 is taken and the cap
@@ -633,24 +616,24 @@ read as the solving one: harmless there, badly wrong off it.
 - **Every cell of a grid head's output is an answer, so a cell painted that
   should not be is an ERROR.** `solution_acc` needs both halves — a legal S->G
   route in the painted cells, AND every unpainted cell still equal to the input
-  board — since without the second, a correct route over a board with S painted
-  over scored solved while `acc` said wrong. It constrains cells AROUND the
-  route, never which route was drawn, so `Maze-30x30-multi` still separates the
-  two metrics.
+  board. Without the second, a correct route over a board with S painted over
+  scored solved while `acc` said wrong. It constrains cells AROUND the route,
+  never which route was drawn, so `Maze-30x30-multi` still separates the two
+  metrics.
 - **That rule has NO counterpart in `walk_acc`, and the asymmetry is the
-  format's:** a move sequence has no off-path cells to get wrong (the board is
-  an input the head cannot write to), and a walk may enter a dead end and come
-  back where a painting cannot. So on a unique split `solution_acc` equals `acc`
-  while `walk_acc` is looser.
-- **Both scorers check against the INPUT board, never the label**, which is how
-  the metric demands a whole correct grid without becoming exact match.
+  format's:** a move sequence has no off-path cells to get wrong (the board is an
+  input the head cannot write to), and a walk may enter a dead end and come back
+  where a painting cannot. So on a unique split `solution_acc` equals `acc` while
+  `walk_acc` is looser.
+- **Both scorers check against the INPUT board, never the label** — how the
+  metric demands a whole correct grid without becoming exact match.
   `maze_solution.py` (grid heads) and `maze_walk.py` (AR heads) are one
   definition for two formats — keep them so, minus the rule only one can state.
-- **A longer legal route counts as solved, deliberately** — requiring the
-  shortest path puts the label back into a metric whose purpose is to not need
-  one. `shortest_solution_acc` / `shortest_walk_acc` carry the strict number,
-  their reference BFSed **from the row's own input board**, not the split's spec
-  file; it constrains the ROUTE only, and cannot bite on a `perfect` maze.
+- **A longer legal route counts as solved, deliberately**: requiring the shortest
+  path puts the label back into a metric whose purpose is to not need one.
+  `shortest_solution_acc` / `shortest_walk_acc` carry the strict number, their
+  reference BFSed **from the row's own input board**, not the split's spec file;
+  it constrains the ROUTE only, and cannot bite on a `perfect` maze.
 - **The empty prediction must be rejected explicitly:** a pad row decodes to no
   path, and "the cells form a route from S to G" is vacuously true for the empty
   set when S adjoins G — the trap `_row_exact_correct` guards with
@@ -665,11 +648,11 @@ read as the solving one: harmless there, badly wrong off it.
   numbers are upper bounds that no arithmetic repairs: re-score. On a
   unique-solution split the corrected value is that run's own `acc`, already
   reported.
-- **A `shortest_*` number from before the input-board BFS is a LOWER BOUND:**
-  the spec array is in split order and the scorer indexed it by
-  row-within-batch, aligning only the first batch at breadth 1. A wrong
-  reference can only flip `shortest` True->False, so re-scoring is the only fix;
-  non-strict columns never read it.
+- **A `shortest_*` number from before the input-board BFS is a LOWER BOUND:** the
+  spec array is in split order but the scorer indexed it by row-within-batch,
+  aligning only the first batch at breadth 1. A wrong reference can only flip
+  `shortest` True->False, so re-scoring is the only fix; non-strict columns never
+  read it.
 - **Two one-directional errors in OPPOSITE directions do not compose into a
   bound.** `shortest_solution_acc` from before both the BFS reference and the
   completeness rule is pushed down by one and up by the other: not a bound in
@@ -679,45 +662,42 @@ read as the solving one: harmless there, badly wrong off it.
 ### Periodic-wall (Setting-A) corpora
 
 **`Maze-period-easy` / `Maze-period-hard` are the dynamic-maze corpora** — 20M
-train + 1k test each, mirrored to all four full data metros (cbf/tul/lpp/dfw;
-plus partial `las`) and registered in `_SETTINGA_MIRRORS`, same 30x30 geometry as
-the static corpora and so drop-in
-comparable, plus **period-P blinking walls**, one token per phase (`easy` P=2,
-vocab 8; `hard` P=3, vocab 9). The solution is still a drawable wait-free line,
-so image-to-image is unchanged; full definition in
-`~/work/maze_settingA_data/DATASET_SPEC.md`. Two things do not transfer: the
-score is `2^-floor(e/2)` for `easy` but `2^-e` for `hard` (the parity argument
-behind floor-halving fails at P=3, where one WAIT shifts the residue), and
-**`hard` exists because P=2 admits an O(1) shortcut** — wall lethality is
-`phase == (row+col+parity(S)) % 2`, 100% on `easy` and chance on `hard`.
+train + 1k test each, registered in `_SETTINGA_MIRRORS`, mirrored to all four
+full data metros (cbf/tul/lpp/dfw; plus partial `las`). Same 30x30 geometry as
+the static corpora so drop-in comparable, plus **period-P blinking walls**, one
+token per phase (`easy` P=2, vocab 8; `hard` P=3, vocab 9). The solution is still
+a drawable wait-free line, so image-to-image is unchanged; full definition in
+`~/work/maze_settingA_data/DATASET_SPEC.md`. Two things do not transfer:
+- **Score** is `2^-floor(e/2)` for `easy` but `2^-e` for `hard` — the parity
+  argument behind floor-halving fails at P=3, where one WAIT shifts the residue.
+- **`hard` exists because P=2 admits an O(1) shortcut** — wall lethality is
+  `phase == (row+col+parity(S)) % 2`, 100% on `easy` and chance on `hard`.
 
 **A periodic-wall corpus needs the CLOCKED scorer, and the wrong one scores the
 GROUND TRUTH zero.** Clockless, phase-blind `maze_solution.py` rejects a painted
-phase cell as "not OPEN", scoring the corpus's own labels 0/1000, so
-`eval_fn.maze_scoring` picks `maze_periodic.py` whenever the SPLIT's
-`vocab_size` implies `P = vocab - 6 > 0` — from that number, not from a board,
-which need not use every residue. The symptom is not a crash but `solution_acc`
-at 0.0 all run while `acc` climbs: **check the `[eval] maze solution scoring ON`
-line and the first eval's value against `acc` before believing a zero.**
-`walk_acc` has no timing rule, so an AR head here reports an upper bound and
-says so.
+phase cell as "not OPEN", scoring the corpus's own labels 0/1000. So
+`eval_fn.maze_scoring` picks `maze_periodic.py` whenever the SPLIT's `vocab_size`
+implies `P = vocab - 6 > 0` — from that number, not from a board, which need not
+use every residue. The symptom is not a crash but `solution_acc` at 0.0 all run
+while `acc` climbs: **check the `[eval] maze solution scoring ON` line and the
+first eval's value against `acc` before believing a zero.** `walk_acc` has no
+timing rule, so an AR head here reports an upper bound and says so.
 
 ## Close-Loop: The Headline Scores ONE Decision Point
 
 A close-loop puzzle (`dataset.closeloop`) is an EPISODE. **The default
-`dataset.closeloop_mode: persistent` gives one ROW one whole episode**, the ACT
-latent `z` walking its decision points and KEEPING its value across each world
-timestep, reset only when the episode is exhausted — so training covers every
-decision point of every episode it touches, in order. The older
-flatten-to-independent-rows behaviour, where every timestep started from a fresh
-random `z`, survives only as the ablation arm `closeloop_mode: flat`.
+`dataset.closeloop_mode: persistent` gives one ROW one whole episode**: the ACT
+latent `z` walks its decision points and KEEPS its value across each world
+timestep, reset only when the episode is exhausted, so training covers every
+decision point in order. The older flatten-to-independent-rows behaviour (every
+timestep from a fresh random `z`) survives only as the ablation arm
+`closeloop_mode: flat`.
 
-**The TEST split is FLAT in both modes** (`eval_fn`, `_pad_batch` and the
-rollout all take 2-D rows) and fixes its timestep, an eval having to score the
-same rows every run. So **the reported `acc` describes ONE decision point per
-episode** — the easiest one, since at the first decision the phase rotation
-`(phase - t) % P` is the IDENTITY and the observation is bit-identical to the
-stored board, while every later frame is rotated. Under `flat` that point is
+**The TEST split is FLAT in both modes** (`eval_fn`, `_pad_batch` and the rollout
+all take 2-D rows) and fixes its timestep. So **the reported `acc` describes ONE
+decision point per episode** — the easiest one: at the first decision the phase
+rotation `(phase - t) % P` is the IDENTITY and the observation is bit-identical to
+the stored board, while every later frame is rotated. Under `flat` that point is
 1/18 of the training distribution; under `persistent` training sees all ~18 and
 the eval scores one — a mismatch either way.
 
@@ -739,20 +719,20 @@ episodes.
   GT trajectory into frames no training row contained, whereas every
   periodic-eval frame sits ON it. **Budget the next run against the rollout
   metric, not `acc`.**
-- **`acc ** d` is NOT an estimate of episode success:** it assumes every
-  decision point is as hard as the one measured, and the others have not been
-  measured. Do so with `dataset.test_decision_index` — an INDEX into the
-  episode's own decision points (negative counts from the end), not a world
-  time, since episodes differ in length; it clamps rather than dropping short
-  ones, so every stratum scores one population. **Index `-1` is structurally
-  different, not merely later**: the route runs out and the ground truth paints
-  a PARTIAL segment, so report it separately.
+- **`acc ** d` is NOT an estimate of episode success:** it assumes every decision
+  point is as hard as the one measured. Measure the others with
+  `dataset.test_decision_index` — an INDEX into the episode's own decision points
+  (negative counts from the end), not a world time, since episodes differ in
+  length; it clamps rather than dropping short ones, so every stratum scores one
+  population. **Index `-1` is structurally different, not merely later**: the
+  route runs out and the ground truth paints a PARTIAL segment, so report it
+  separately.
 - **`solution_acc` / `walk_acc` are both refused under close-loop** by
   `eval_fn.maze_scoring`, for one reason covering both formats: a segment stops
   `n_predict` moves along and never reaches G, so "do the emitted cells/moves
-  form a route to G" is false on the CORPUS'S OWN LABEL, and reporting it would
-  print a hard 0.0 for a whole run while `acc` climbed. `acc` and `token_acc`
-  are the columns until the rollout metric lands; say so in the config header.
+  form a route to G" is false on the CORPUS'S OWN LABEL and would print a hard
+  0.0 for a whole run while `acc` climbed. `acc` and `token_acc` are the columns
+  until the rollout metric lands; say so in the config header.
 - **`state_token_acc` has a do-nothing floor of ~0.998 on the P=2 split**, so it
   is not a headline number there: `arch.state_head` predicts the frame
   `k = n_execute = 8` ticks ahead, and a P=2 rotation by 8 ticks is the
@@ -764,10 +744,10 @@ episodes.
   honoured.
 - **`configs/local_debug_closeloop_config.yml` needs `--timeout 5400`**, against
   `scripts/local_debug.sh`'s 300 s default: the template needs ~30 min, nearly
-  all of it the rollout eval, which is slow rather than broken and completes
-  with scoring ON at 5400 s. If the claim under test is only "the pipeline
-  runs", `evaluation.closeloop_scoring: false` finishes in ~7 min; use scoring
-  ON for any number you quote.
+  all of it the rollout eval (slow, not broken), completing with scoring ON at
+  5400 s. If the claim under test is only "the pipeline runs",
+  `evaluation.closeloop_scoring: false` finishes in ~7 min; use scoring ON for
+  any number you quote.
 
 ## RoboTwin DP Baseline
 
@@ -781,11 +761,10 @@ single-host slice runs it at the same speed as a big one. `../storage.md` and
 
 **The 5 ablation tasks are FIXED — always use these five, never re-pick.** Running
 all 50 `clean_50` tasks costs ~26 h of accelerator time (~32 min/task); these 5
-were chosen once to span the
-benchmark's skill families with NO family repeated (RoboTwin 2.0 has no official
-skill taxonomy — the 50 tasks are a flat "dual-arm" list, so this grouping is
-derived and code-verified against `envs/*.py`). Diversity axes: skill family ×
-arm × object type × horizon × difficulty.
+span the benchmark's skill families with NO family repeated. RoboTwin 2.0 has no
+official skill taxonomy (the 50 tasks are a flat "dual-arm" list), so this
+grouping is derived and code-verified against `envs/*.py`. Diversity axes: skill
+family × arm × object type × horizon × difficulty.
 
 | Task | Skill family (unique) | Arm | Object | Horizon (steps) | DP-Easy |
 |---|---|---|---|---:|---:|
@@ -796,8 +775,8 @@ arm × object type × horizon × difficulty.
 | `beat_block_hammer` | tool-use (strike) | single | rigid+tool | 113 (shortest) | 42% |
 
 Why this set: five DISJOINT skills (articulated / handover / stacking / pour /
-tool-use) — deliberately NO plain pick-and-place, which is 15 of the 50 tasks and
-would waste a diversity slot. Object types cover articulated + rigid + granular
+tool-use) with NO plain pick-and-place, which is 15 of the 50 tasks and would
+waste a diversity slot. Object types cover articulated + rigid + granular
 (RoboTwin 2.0 has NO deformable tasks — `dump_bin_bigbin`'s granular pour is the
 closest non-rigid case); the DP-Easy numbers are a real low→mid spread (not
 saturated >95% like `grab_roller`, not dead-0 like `blocks_ranking_rgb`), so an
@@ -807,9 +786,9 @@ ablation has signal.
 `num_workers: 0`).** A `clean_50` task is tiny (~3855 rows, 173 MB JPEG on disk,
 888 MB/camera decoded); the loader decodes the whole split into RAM once (~2.6 s)
 then serves every frame by O(1) index. This beat the worker-pool path outright:
-MEASURED single-process 2.65 → 12.1 batches/s local (the `num_workers=16` spawn
-pool only reached 5.0 — it is IPC-bound, pickling ~88 MB of decoded uint8 per
-batch back to the parent, not CPU-bound). End-to-end on a v7-8 the run holds
+MEASURED single-process 2.65 → 12.1 batches/s local; the `num_workers=16` spawn
+pool only reached 5.0, being IPC-bound (pickling ~88 MB of decoded uint8 per
+batch back to the parent), not CPU-bound. End-to-end on a v7-8 the run holds
 **~10.4 steps/s** (was ~3.1 host-bound), so one task is ~29 min of training +
 ~4 min startup. Leave eager OFF only for a corpus too large to hold in host RAM.
 
@@ -822,22 +801,22 @@ chip/host). yumrnel g9 PROD is the proven-hold cell; its co-located bucket is
 **DP logging matches the EqR `train.py` progress line** on purpose:
 `[step/total pct%] loss=, lr=, steps_per_second=`, throughput as
 `steps_per_second` over the log interval (NOT s/step). Do NOT wrap the train loop
-in `prefetch_to_device`: its background thread runs the loader cursor ahead of the
-trainer, so the checkpoint's `dataloader_state` sidecar records a cursor that far
-ahead and a resume then SKIPS those batches — not bit-identical, breaking the O(1)
-resume contract. The async loss de-sync (defer `float(loss)` to log boundaries)
-already overlaps host work with device compute without touching resume.
+in `prefetch_to_device`: its background thread runs the loader cursor ahead of
+the trainer, so the `dataloader_state` sidecar records a cursor that far ahead
+and a resume then SKIPS those batches — breaking the O(1) resume contract. The
+async loss de-sync (defer `float(loss)` to log boundaries) already overlaps host
+work with device compute without touching resume.
 
 ### Close-loop eval on the A100 (SAPIEN)
 
 **The GPU-side close-loop evaluator is a SEPARATE manual step, not auto-triggered.**
-Training publishes each checkpoint to the GCS rendezvous bucket
+GCS is the only rendezvous — a Borg task cannot open an IPv4 socket to the VM and
+the VM cannot read CNS — so training publishes each checkpoint to the bucket
 (`gs://qiaos-robotwin-eval-us-east4/runs/<xid>/checkpoints/step_<n>/`, state +
-`extra.json` with the normalizer + `dataloader_state`) — a Borg task cannot open
-an IPv4 socket to the VM and the VM cannot read CNS, so GCS is the only
-rendezvous. But nothing runs the eval automatically: it is a worker on the A100
-VM `deepflow-1a100-80gb-jh-baseline` (34.186.64.63, us-east4-c, project
-`viscam-cloud`), code at `~/work/robotwin_eval_bridge`.
+`extra.json` with the normalizer + `dataloader_state`). But nothing runs the eval
+automatically: it is a worker on the A100 VM `deepflow-1a100-80gb-jh-baseline`
+(34.186.64.63, us-east4-c, project `viscam-cloud`), code at
+`~/work/robotwin_eval_bridge`.
 
 - **SSH from a restricted agent shell CANNOT `gcert`** (no ssh-agent socket), but
   the metadata key works: `ssh -i ~/.ssh/google_compute_engine -o
@@ -863,7 +842,7 @@ VM `deepflow-1a100-80gb-jh-baseline` (34.186.64.63, us-east4-c, project
 **Per-task training cost varies ~4.3x** because total_steps = floor(n_windows/128)
 *600 and n_windows spans 5572 (beat_block_hammer) to 23902 (open_microwave). For
 an EQUAL-COST ablation across the 5, cap with `training.max_steps` instead of
-fixed `num_epochs`. Results are logged to the **`RoboTwin-DP` tab** of the EqR
-workbook (`17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0`) — one row per task,
-training metrics + close-loop `success_rate` (50 rollouts, final EMA ckpt); read
-the tab for current numbers, not this file.
+fixed `num_epochs`. Results log to the **`RoboTwin-DP` tab** of the EqR workbook
+(`17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0`) — one row per task, training
+metrics + close-loop `success_rate` (50 rollouts, final EMA ckpt); read the tab
+for current numbers, not this file.

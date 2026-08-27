@@ -32,17 +32,21 @@ names before presenting any number that depends on it**.
 
 **Never pass through a compact notation without expanding it**: a tuple, a
 shorthand like `H/L = 3/6`, or a named configuration means nothing to the
-reader. Expand it into an executable description or explicit timeline, and for a
-nested or repeated structure state what one unit of work at each level changes
-(a state, an output, or the parameters — never the bare word *update* for all
-three), which counts are free hyperparameters versus architectural or learned
-quantities and their concrete value in each reported experiment, where things
-are shared versus duplicated ("two states" is not "two parameter sets"), which
-knob is enlarged for a scaling claim with what held fixed and the resulting
-total in one concrete configuration, and at which boundary the system answers,
-measures convergence, cuts gradients, computes a loss, takes an optimizer step,
-halts, or resets. **Two schedules with equal raw compute are not the same
-protocol when those boundaries differ.**
+reader. Expand it into an executable description or explicit timeline. For a
+nested or repeated structure, state:
+
+- what one unit of work at each level changes (a state, an output, or the
+  parameters — never the bare word *update* for all three);
+- which counts are free hyperparameters vs architectural/learned quantities,
+  and their concrete value in each experiment;
+- what is shared vs duplicated ("two states" is not "two parameter sets");
+- which knob is enlarged for a scaling claim, what is held fixed, and the
+  resulting total in one concrete configuration;
+- at which boundary the system answers, measures convergence, cuts gradients,
+  computes a loss, takes an optimizer step, halts, or resets.
+
+**Two schedules with equal raw compute are not the same protocol when those
+boundaries differ.**
 
 ## Every Figure And Table Needs Its Experimental Setting
 

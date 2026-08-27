@@ -11,10 +11,9 @@ guide.
 
 **The full mirror set is now `cbf`, `tul`, `lpp`, `dfw` — four metros** (was
 three: `dfw` was added to unlock cheap v4). A fifth, `las`, carries a PARTIAL
-mirror (the maze v4 working set only, not every dataset). Each was chosen on the
-intersection of live obtainability, storage headroom, and a verified smoke,
-weighting *breadth of cells* because a metro with one cell is one stockout away
-from useless.
+mirror (the maze v4 working set only, not every dataset). Each was chosen on live
+obtainability, storage headroom, and a verified smoke, weighting *breadth of
+cells* because a one-cell metro is one stockout away from useless.
 
 | metro | v-family | v7 cells live | storage cell | smoke | role |
 |---|---|---|---|---|---|
@@ -36,15 +35,15 @@ any new cell with `mach_locality -k metro <cell>` before trusting its name.
 Live chip and slice counts are not repeated here — the survey table below owns
 them, and they move daily.
 
-**`tul` writes to `oi-d`, NOT `nm-d`.** A metro can hold several storage cells,
-and `nm-d`'s group quota (`deepmind-resources-colossus`) filled to its ceiling
-(47.9P/48.2P), poisoning every write with `over Colossus bytes HDD quota`. The
-fix was NOT to abandon `tul` but to point its bucket at `oi-d`, the same-metro
-sibling with headroom — a lossless swap, because same-metro cross-cell reads are
-free. **When a metro's storage cell fills, check for a second cell in the same
-metro before rejecting the compute** (`../storage.md` §An Over-Quota Cell). Verify
-with `fileutil quota deepmind-resources-colossus <cell>` (the bill is charged to
-the GROUP, so query the group, not your username) and a write probe.
+**`tul` writes to `oi-d`, NOT `nm-d`.** `nm-d`'s group quota
+(`deepmind-resources-colossus`) filled to its ceiling (47.9P/48.2P), poisoning
+every write with `over Colossus bytes HDD quota`. The fix was NOT to abandon
+`tul` but to point its bucket at `oi-d`, the same-metro sibling with headroom (a
+lossless swap — same-metro cross-cell reads are free). **When a metro's storage
+cell fills, check for a second cell in the same metro before rejecting the
+compute** (`../storage.md` §An Over-Quota Cell). Verify with `fileutil quota
+deepmind-resources-colossus <cell>` (the bill is charged to the GROUP, so query
+the group, not your username) and a write probe.
 
 Rejected, with the reason, so this is not re-litigated:
 
@@ -57,29 +56,25 @@ Rejected, with the reason, so this is not re-litigated:
 | ~~`dfw`~~ | **No longer rejected — now the 4th FULL data metro** (`rs-d`), stood up for cheap v4. See the standing-decision table above. |
 
 **The launcher's `_CELL_BUCKETS` maps every v7 cell to a same-metro bucket**, so
-`--cell=<v7 cell>` alone picks the right storage; it prints the choice at
-launch, which is worth reading as confirmation.
+`--cell=<v7 cell>` alone picks the right storage; it prints the choice at launch.
 
 ## Two Rules The Survey Established
 
 **Ask the question at METRO granularity, not per cell** — *"does this cell's
 METRO contain a storage cell with quota"*, never *"does this TPU cell have
-storage quota"*. A cell is one cluster, a metro holds several, and same-metro
-cross-cell reads are effectively free, so the metro is the unit that decides
-co-location; `../storage.md` owns the general statement. Asked narrowly, it
-once produced a plan built on "v7 exists only in `ske`, so a new flex
-registration there is the only way forward" — in fact v7 spans 20 cells in 14
-metros, 10 of which already hold PiB-scale quota, and `ske` is one of only two
-with nothing at all. **Move the compute, do not request the quota.**
+storage quota"*. A metro holds several cells and same-metro cross-cell reads are
+free, so the metro is the unit that decides co-location; `../storage.md` owns the
+general statement. Asked narrowly, it once produced a plan built on "v7 exists
+only in `ske`" — in fact v7 spans 20 cells in 14 metros, 10 already holding
+PiB-scale quota. **Move the compute, do not request the quota.**
 
 **Obtainability, not the quota table, decides whether a job starts — and it
-inverts the storage ranking** (`../jobs.md` states this generally). Here it
-meant: the group-level `tpu quota` view showed v7 fully consumed (477/477) while
-preflight reported ~50k chips obtainable across 10 cells, and `el`, the best
-storage answer, had **zero** obtainable chips during the test while middling
-`cbf` and `sin` each ran a job to completion. **Re-run preflight before
-committing, and prefer a metro currently good on both axes over the best on
-either.**
+inverts the storage ranking** (`../jobs.md` states this generally). Here the
+group-level `tpu quota` view showed v7 fully consumed (477/477) while preflight
+reported ~50k chips obtainable across 10 cells; `el`, the best storage answer,
+had **zero** obtainable chips while middling `cbf` and `sin` each ran a job to
+completion. **Re-run preflight before committing, and prefer a metro currently
+good on both axes over the best on either.**
 
 `sp<N>` in these tables is the spindle commitment: **`sp0` means no throughput
 floor**, the condition behind a 12-hour collapse recorded in
@@ -141,7 +136,6 @@ not repeated per row: `cbf` and `sin` completed 12/12, `tul` was scheduled,
 
 **A chip count cannot see fragmentation, so read the slice column beside it**:
 `tul` carries thousands of obtainable chips and, on this sample, exactly ONE
-placeable v7-32 — a metro can be rich in chips and unable to start your job,
-which is the failure `../jobs.md` describes as a green preflight followed by an
-allocator reject. `atl` is the mirror case worth watching rather than promoting:
+placeable v7-32 — rich in chips yet unable to start your job, the green-preflight
+then allocator-reject failure `../jobs.md` describes. `atl` is the mirror case:
 the deepest spindle commitment anywhere (sp500) with almost no chips.

@@ -18,8 +18,8 @@ worked and only auth failed — do not chase the network.
 
 IAP is **not** the path here: this project's firewall does not admit the IAP
 range `35.235.240.0/20` on tcp:22, so `gcloud ... --tunnel-through-iap` fails
-with "Connection closed". The SUP range `172.253.30.0/23` *is* allowed, so
-`corp-ssh-helper` works. Ignore advice to "grant iap.tunnelResourceAccessor".
+with "Connection closed". The SUP range `172.253.30.0/23` *is* allowed. Ignore
+advice to "grant iap.tunnelResourceAccessor".
 
 ## Connecting
 
@@ -42,8 +42,8 @@ ssh -i ~/.ssh/google_compute_engine \
 ```
 
 **The login user depends on which key path the VM uses** (see next section):
-metadata keys log in as `qiaos@`; OS Login logs in as `qiaos_google_com@`.
-Using the wrong one is an instant `Permission denied`.
+metadata keys log in as `qiaos@`, OS Login as `qiaos_google_com@`. The wrong one
+is an instant `Permission denied`.
 
 ### From a personal/corp Mac
 Same relay model; the Mac must be a corp machine with `corp-ssh-helper` and
@@ -65,7 +65,7 @@ Symptoms and meaning, read from the **serial console**:
 | Serial log line | Meaning | Fix |
 |---|---|---|
 | `OS Login user <u> does not have login permission` / `Could not grant access to organization user` | OS Login path is active and rejecting you. For an **external-org** user this is org-level OS Login, *not* the project IAM binding. | Confirm the corp SSH groups (below). If OS Login itself is broken, switch to metadata keys. |
-| `oslogin_cache_refresh: Failure getting users, quitting` (every ~6h) | The VM's **OS Login guest agent cannot enumerate users** — usually the instance **service account scope is too narrow** (no `cloud-platform`). OS Login will reject *everyone*; a serial log where no user ever logs in via OS Login confirms it. | VM owner fixes the VM: set instance SA scope to `cloud-platform`, or disable OS Login and use metadata keys. Adding groups to the user cannot fix a VM-side failure. |
+| `oslogin_cache_refresh: Failure getting users, quitting` (every ~6h) | The VM's **OS Login guest agent cannot enumerate users** — usually the instance **service account scope is too narrow** (no `cloud-platform`). OS Login then rejects *everyone*. | VM owner fixes the VM: set instance SA scope to `cloud-platform`, or disable OS Login and use metadata keys. Adding groups to the user cannot fix a VM-side failure. |
 
 **The metadata-key workaround (fastest, needs the VM owner):**
 1. Owner sets `enable-oslogin=FALSE` on the instance (else keys are ignored).
@@ -76,8 +76,8 @@ Symptoms and meaning, read from the **serial console**:
    clobbered.
 3. **Verify the key is actually yours**: the metadata line's comment and the
    base64 body must match your local `~/.ssh/google_compute_engine.pub`. A key
-   filed under `qiaos:` whose comment is someone else's (`junhwahur@…`) is that
-   person's key mislabelled — you have no matching private key and auth fails.
+   filed under `qiaos:` whose comment is someone else's (`junhwahur@…`) is their
+   key mislabelled — you have no matching private key and auth fails.
 
 Note: per-user login is instance-level here; other users reach these VMs via
 **project-level** metadata keys, so editing one instance's `enable-oslogin` or
@@ -105,8 +105,8 @@ you know you lack (e.g. `compute.instances.setIamPolicy` → empty) so a false
 
 - **A restricted-LOAS shell (e.g. an agent worker) cannot self-serve Ganpati /
   aclcheck / F1.** They fail with `go/loas-restricted-credentials`. `aclcheck`
-  also only covers **prod** groups, never `.corp` ones. To read a `.corp`
-  membership you need a normal cert or the group owner. Don't burn turns
-  retrying these from a restricted shell.
+  also only covers **prod** groups, never `.corp` ones. Reading a `.corp`
+  membership needs a normal cert or the group owner; don't retry from a
+  restricted shell.
 - **Ganpati / AccessNow web pages need SSO**; `curl` gets 302, `gbrowser --corp`
   gets ÜberProxy 403. Ask the owner for a screenshot instead of scraping.

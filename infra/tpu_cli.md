@@ -117,8 +117,7 @@ like it had covered them:
 see and stop everything running on it; the partial view belongs to the guest.
 
 `scripts/test_operator_scope.sh` pins all of it, with `xmanager` and `tmux`
-shadowed by shell functions so it touches nothing real. A guard nobody can
-break on purpose is a guard nobody notices deleting.
+shadowed by shell functions so it touches nothing real.
 
 ## The Cache Daemon
 

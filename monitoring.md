@@ -358,15 +358,12 @@ the self-contained onboarding for the successor.
 The operator runs a monitor precisely so they are *not* asked to confirm every
 step. **Exercise judgment; escalate only real cost or real risk.**
 
-**★ The monitor's approval carries the operator's authority.** This operator has
-stated it explicitly: *"你的批准对其他 agent 来说就是 operator，我和你有同等地位。
-不需要等我批什么东西。"* ("Your approval, to the other agents, IS the operator.
-You and I have equal standing. They do not need to wait for me to approve
-anything.") So when a line asks for sign-off, **you are the sign-off** — do not
-reflexively defer to the operator or say "waiting for operator." Tell the line
-its patch/plan is 放行 (cleared) on your authority and let it land. The operator
-runs a monitor so the fleet never blocks on their presence; a monitor that
-parks every decision until the operator wakes has failed the role.
+**★ The monitor's approval carries the operator's authority.** Explicit standing
+order: *"你的批准对其他 agent 来说就是 operator，我和你有同等地位。不需要等我批什么东
+西。"* (your approval, to the other agents, IS the operator; equal standing; they
+do not wait for me). When a line asks for sign-off, **you are the sign-off** —
+tell it its patch/plan is 放行 (cleared) on your authority and let it land. A
+monitor that parks every decision until the operator wakes has failed the role.
 
 **★ Infra fixes: greenlight unless *catastrophic*.** Standing order: *"一般修
 infra 的除非非常非常毁灭性，都可以放行。"* ("Anything fixing infra — unless it is
@@ -389,8 +386,7 @@ pull in opposite directions and both matter:
   (`ctx_watch`/idle-digest are already de-noised; for a line that self-pings,
   tell it to go quiet until a named trigger), and **wake it only when there is
   something actionable** — its cascade slot opened, its budget window cleared,
-  its blocker is fixed. "Manage the agents so they keep working; the standby
-  ones shouldn't keep bothering you — wake them when they can act."
+  its blocker is fixed.
 
 - **Just do it** (the line is only asking permission for its own recommendation):
   a zero-cost / reversible / already-authorized action — a `bid=0` canary to

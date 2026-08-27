@@ -4,7 +4,7 @@ Read this before a VLM result reaches the shared spreadsheet, or when a
 benchmark number looks wrong. This file owns *which number* each benchmark name
 means; `../research/result_logging.md` owns the write mechanics, the "settle the
 protocol first" rule, and every column map — rebuild that map from the live
-header each time rather than from either file.
+header each time.
 
 ## One Benchmark Name, Several Numbers
 
@@ -23,20 +23,20 @@ final metrics, as two adjacent rows even when one run covers both stages.
 | DocVQA | ANLS per `vlm_data.md`; Stage-3 training already includes DocVQA-train through the OV1.5 grouped stream, so this is in-domain supervised evaluation, **never zero-shot document generalization** | — |
 | RefCOCOg valid answers | a diagnostic: note it when already logged, else `n/a`; never open result data solely to compute it | — |
 
-**Red on a metric means strictly below its OWN floor above** — each follows from
-its benchmark's protocol, so one borrowed from a neighbour raises false alarms —
-while **red on a label means a verified encoder misconfiguration.** Two
-different signals; inserting a row inherits both, so clear inherited backgrounds
-before reapplying either. A result produced under a superseded protocol is
-marked protocol-invalid instead, never scored against a floor.
+**Red on a metric means strictly below its OWN floor above** — each floor is
+protocol-specific, so one borrowed from a neighbour raises false alarms — while
+**red on a label means a verified encoder misconfiguration.** Two different
+signals; inserting a row inherits both, so clear inherited backgrounds before
+reapplying either. A result under a superseded protocol is marked
+protocol-invalid instead, never scored against a floor.
 
 ## The Colour Table Of The VLM Tab
 
 **This file is the canonical owner of what a background colour means on the
 VLM tab**; `../research/result_logging.md` owns the write mechanics and the
 "clear inherited formatting first" rule. **Read this table before applying any
-colour, and never take a free one without adding it here** — a colour applied
-loosely destroys it for every row that used it correctly.
+colour, and never take a free one without adding it here** — a loosely applied
+colour destroys it for every row that used it correctly.
 
 | Colour | Scope | Meaning |
 |---|---|---|
@@ -50,8 +50,8 @@ loosely destroys it for every row that used it correctly.
 
 **Scope the job-level signals to the identity column and the value-level
 signals to the metric cell**, so two true statements never contend for one
-background: red says something about a number, blue says something about the
-run that produced it, and `WandB / run` is the cell that already identifies the
-run. Verify a colour by reading it back — exporting the workbook to xlsx and
-resolving each cell's `fillId` against `styles.xml` shows every colour actually
-in use, which is how you check a colour is free before claiming it.
+background: red is about a number, blue is about the run that produced it, and
+`WandB / run` already identifies the run. Verify a colour by reading it back —
+export the workbook to xlsx and resolve each cell's `fillId` against
+`styles.xml` to see every colour in use, and to check one is free before
+claiming it.
