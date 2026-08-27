@@ -173,6 +173,19 @@ RDMA — legal, but not faster for comms-bound work. So the largest *full-speed*
 single slice is `h100-8` / `b200-8` (8-GPU HGX/Neutron domain) and `gb200-72` /
 `gb300-72` (72-GPU Oberon NVL72 rack). `a100`-40G is the odd one at 16.
 
+**Why 72 is not a power of two — GPU NVLink is NOT a torus.** A TPU slice is a
+dimensional torus (`2x4x4`), so its sizes are products of small factors. A GPU
+NVLink domain is the opposite: the platform GCL declares
+`connectivity = 'FULLY_CONNECTED'`, `locus_type = 'locus:SCALE_NVLINK_DOMAIN'`
+(`platforms/accelerator_metadata/platforms/templates/nvl.gcl`) — every GPU in
+the domain reaches every other through an NVSwitch fabric, so there is **no
+shape**, just a flat count. `gb200-8` means "8 mutually-connected GPUs", not a
+`2x2x2` cube. The ceiling is 72 because that is the physical GPU count of one
+Oberon **NVL72** rack (the unit the switch layer spans); any count up to 72 in
+one rack is a legal fully-connected slice — 72 is a hardware maximum, not a
+torus dimension. (H100/B200 are the same idea at a smaller ceiling: one 8-GPU
+HGX/Neutron NVLink board, flat all-to-all, so `[1,2,4,8]`.)
+
 - **Legal shapes** are `[1,2,4,8]` for the 8-domain cards (`h100-16` is RED at
   preflight, "supported [1,2,4,8]"). GB200/GB300 go up to 72 in principle, but
   NVL72 large slices are frequently "not approved for borg scheduling" — treat
@@ -194,6 +207,21 @@ same as TPU).
 | a100 | 0.68 | 5 (v5p tier) |
 | h100 / h200 | 2.15 | 10 (v6e tier) |
 | b200 / b300 / gb200 / gb300 | 4.90 | 20 (v6p/v7 tier) |
+
+**Round to the NEAREST legal slice when converting, and re-derive both ways.**
+The scalar (`v5p=1`) gives a chip-count *estimate*; the legal-shape table (GPU
+`[1,2,4,8]` per NVLink board, TPU torus sizes) decides what you can actually
+ask for, so round the estimate to the nearest legal count — do not floor it and
+silently buy less compute (the same trap as the TPU §Converting rule). Worked
+examples: **h100=2.15**, so one v6p/v7 chip (4.34) ≈ **2× H100** — matching a
+`v7-8` (34.7 v5p-units) needs ~16 H100, i.e. **two h100-8 NVLink boards**
+(16 rounds to 2×8, since h100 has no legal 16-in-one-domain slice). **b200=4.90**
+≈ one v6p chip, so `gb200-8 ≈ v7-8` in raw compute; a `v7-32` (139 v5p-units)
+≈ **28 B200/GB200**, round to the nearest legal slice **gb200-32** (not 28).
+**a100=0.68**: a `v5p-16` (16 units) ≈ 24 A100 → round to a100 legal shapes.
+Always cross the rounded count with a live `tpu preflight` — the legal ceiling
+(H100 board = 8) may force MULTIPLE boards + network RDMA between them, which is
+not the same as one fully-connected slice (see NVLink Domain above).
 
 **Price inverts the TPU intuition:** GPU PROD is cheap (H100 ~0.36–0.46
 cr/chip-hr; A100 ~0.42; GB200/GB300/H200 free pool; B200 ~11) and most GPUs have
