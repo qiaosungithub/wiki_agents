@@ -191,22 +191,19 @@ verification is safe.
 ## Mirroring A Live Tree To Another Metro
 
 **A long-running copy driver runs the script it read at startup; editing the file
-on disk changes nothing until you relaunch.** Mirroring ~15 TB to two v4 metros,
-a driver launched a day earlier held an *intermediate* version of the row list in
-memory: later edits that split one row into a small needed subset and skipped the
-1M-small-file siblings never took effect, so it copied the whole directory
-(easy/mid test junk included) instead of the 69 GB subset. `bash` slurps the
-script at exec and never re-reads it. After editing any driver, **kill and
-relaunch** — do not assume a running loop picked up the change.
+on disk changes nothing until you relaunch.** `bash` slurps the script at exec
+and never re-reads it: a driver launched a day earlier held a stale in-memory row
+list and copied the whole directory instead of the intended 69 GB subset,
+ignoring every later edit. After editing any driver, **kill and relaunch** — do
+not assume a running loop picked up the change.
 
 **A driver that stalls mid-list silently skips every row after it; its own "ALL
-DONE" counts skips as done.** The same stale driver wedged on the whole-directory
-copy and, once killed, the rows after it — including the 1.5 TB core training
-data and four eval dirs — **were never attempted**. The completion tally lied
-because opt-out skips and real copies both increment it. **The `_MIRRORED`
-marker inventory on the destination is the only authority on what landed** — walk
-it and diff against the intended row list; never trust the driver's progress
-print or a `(31/33)` counter.
+DONE" counts skips as done.** Once the wedged driver was killed, the rows after
+the stall — including 1.5 TB core training data and four eval dirs — **were never
+attempted**, yet the tally read done (opt-out skips and real copies both
+increment it). **The `_MIRRORED` marker inventory on the destination is the only
+authority on what landed** — walk it and diff against the intended row list; never
+trust the driver's progress print or a `(31/33)` counter.
 
 **A fresh, idempotent driver is the cheapest repair.** Rather than hand-copy the
 missing rows, relaunch the corrected script: with a per-row marker gate it
@@ -223,11 +220,11 @@ failure.** Two benign classes broke an otherwise-correct mirror check, each
 | `dst_files` is always `src_files + 1` | The `_MIRRORED` marker lives in dst, not src | Join on path and count crc mismatches + real missing; the extra marker is neither |
 
 **A source tree can change AFTER you finish mirroring it; only a final re-verify
-catches it.** A 656 MB model file was added to the source *hours after* both
-metros copied that directory, so both were correctly complete at copy time and
-both missed it. A closing DoD sweep — re-diff every row source-vs-dest — is what
-surfaced it; the per-row marker (written at copy time) never will. Mirror status
-is a claim about a moment, not a standing fact.
+catches it.** A file added to the source *after* both metros copied that
+directory left both correctly-complete-at-copy-time yet missing it; only a
+closing DoD sweep (re-diff every row source-vs-dest) surfaced it — the per-row
+marker, written at copy time, never will. Mirror status is a claim about a
+moment, not a standing fact.
 
 **`fileutil cp` does not create multiple missing parent levels.** After deleting
 a directory to re-copy a subset, `cp src .../a/b/c` fails `no parent directory`;
@@ -322,14 +319,14 @@ retention in the writer too, or the backlog rebuilds.
 
 **Assemble large payloads with SERVER-SIDE concatenation, in resumable units,
 and never let two writers share an output path.** Producing three 20M-row
-corpora (27-37 GB per array) turned every one of these into a lost night.
+corpora (27-37 GB per array) turned every rule below into a lost night.
 
 **The unit must fit the preemption window, and the whole must be resumable.**
 `jobs.md` states the sizing rule for a work unit; an *output file* needs the
-same treatment. A 2.5-hour single-task merge wrote all 27,200,000,128 bytes --
-the final byte -- and was preempted twice, each time restarting from zero. Cut
-the merge into contiguous PARTS written by separate tasks (each ~10 min, run
-concurrently), then concatenate. A part costs one retry, not the corpus.
+same treatment. A 2.5-hour single-task merge writing all 27,200,000,128 bytes was
+preempted twice, each time restarting from zero. Cut the merge into contiguous
+PARTS written by separate tasks (each ~10 min, run concurrently), then
+concatenate. A part costs one retry, not the corpus.
 
 **The destination's SIZE is a resume ledger.** With a fixed header and parts of
 known length, `header + sum(len(part[:k]))` identifies "the first k parts
@@ -380,17 +377,16 @@ damage into two more metros and stamped each copy verified.
 ## Two Writers On One Output Path
 
 **Before writing a large artifact, kill everything that writes that path — not
-just the thing you started.** A finished payload silently truncated to a fraction
-of its size because a *previous* generation of the pipeline was still alive and
-rewriting it from byte 0 — four failures at the identical offset that looked
-exactly like a flaky storage layer under concurrency. Enumerate live writers by
-name at the cluster layer (a launcher log is unreliable — a wiped `/tmp` loses
-the job-id-to-purpose mapping), and **retire a keepalive when its work is done**
-(a `/tmp` marker file is not enough on a box that wipes `/tmp`; delete the
-entry). The arithmetic names the culprit: a size that grew from zero, or sits
-*below* the boundary you expect, is not a torn append onto a large prefix — an
-append cannot shrink a file, so it means another writer, and the two have
-opposite fixes.
+just the thing you started.** A finished payload silently truncated because a
+*previous* generation of the pipeline was still alive and rewriting it from byte
+0 — four failures at the identical offset that looked exactly like a flaky
+storage layer under concurrency. Enumerate live writers by name at the cluster
+layer (a launcher log is unreliable — a wiped `/tmp` loses the job-id-to-purpose
+mapping), and **retire a keepalive when its work is done** (a `/tmp` marker is
+not enough on a box that wipes `/tmp`; delete the entry). The arithmetic names
+the culprit: a size that grew from zero, or sits *below* the expected boundary,
+is not a torn append — an append cannot shrink a file, so it means another
+writer, and the two have opposite fixes.
 
 ## A Wedged CitC Workspace Is Server-Side, Not Yours To Restart
 

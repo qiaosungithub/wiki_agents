@@ -21,11 +21,10 @@ Measured: `is-d` (cbf) and `li-d` (lpp) carry the full stage-1 set
 `data/_SUCCESS`; `go-d` (cmh) is a PARTIAL replica — it has visual_genome and
 the Qwen model but is MISSING laion-aesthetic / BLIP3o-Short /
 openimages-detection and has no `data/_SUCCESS`, so a from-scratch stage-1 run
-launched there fails on a missing dataset. Consequence for placement: an
-accelerator whose only co-located candidate cells sit in cmh is not actually
-ready without a data copy first. Confirm `_SUCCESS` plus each required dataset
-dir on the specific data cell (`fileutil ls /cns/<cell>-d/home/qiaos/data`)
-before committing a job there.
+launched there fails on a missing dataset. So an accelerator whose only
+co-located candidate cells sit in cmh is not ready without a data copy first.
+Confirm `_SUCCESS` plus each required dataset dir on the specific data cell
+(`fileutil ls /cns/<cell>-d/home/qiaos/data`) before committing a job there.
 
 ## Dataset Uploads
 

@@ -1,9 +1,9 @@
 # TPU Quick Reference
 
-Naming, memory, legal shapes, and per-chip equivalence, plus the invariants that
-make them safe to use. Every layer of the stack calls the same chip a different
-name, so all the aliases live in one table. Launching is `jobs.md`, pool and CLI
-internals `infra/tpu_cli.md`, prices `infra/quota_market.md`.
+Naming, memory, legal shapes, and per-chip equivalence. Every layer of the
+stack calls the same chip a different name, so all the aliases live in one
+table. Launching is `jobs.md`, pool and CLI internals `infra/tpu_cli.md`,
+prices `infra/quota_market.md`.
 
 ## Name Mapping
 
@@ -31,11 +31,10 @@ break (`third_party/py/jax/.../pallas/ops/tpu/megablox/common.py`: *"TPU v7 has
 a different pattern (i.e. TPU7x)"*). Any code keying a topology or capability
 table on `"v7"` therefore MISSES, and the miss is usually silent — a lookup
 that falls back to a default rather than raising. This cost a 5.8x slowdown in
-`jax_llava`, undetected for a full production run: the mesh table had no v7
-entry, `get_mesh()` fell back to a flat 1-D mesh, and under HSDP that shards
-every parameter across all devices so each matmul pays a full-mesh collective.
-Training still converged — only throughput complained. **Match on `tpu7`, and
-assert the mapping against the real strings before trusting it.**
+`jax_llava`, undetected for a full production run (the mesh table had no v7
+entry, `get_mesh()` fell back to a flat 1-D mesh, sharding every parameter
+across all devices). **Match on `tpu7`, and assert the mapping against the real
+strings before trusting it.**
 
 **v7's slice geometry is identical to v6p** (3-D torus, 4 chips/host):
 `platforms/accelerator_metadata/platforms/ghostfishlite.gcl` declares the same

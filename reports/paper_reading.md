@@ -22,8 +22,7 @@ authorship, and keep the paper's claims distinct from the report's inference.
 
 ## Kill Ambiguity Before Reporting Any Result
 
-**The report's job is to be unambiguous, not merely complete**; both rules below
-are that one applied.
+**The report's job is to be unambiguous, not merely complete.**
 
 **Define an overloaded term on first use** — *task*, *step*, *update*,
 *iteration*, *cycle*, *segment*, *world model* have no shared meaning, so say

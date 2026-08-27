@@ -4,8 +4,7 @@ A SCIENCE line probing gradient propagation in a vanilla RNN on the **adding
 problem** (long-range credit assignment). Not a product; the deliverable is a
 falsifiable answer + a clean notebook. The operator drives pivots; keep runs
 patient (no compute churn). Native lab notebook `~/work/rnn_unroll/research/
-AUTORESEARCH_LOG.md` is the SOURCE OF TRUTH — read it end-to-start first; this
-guide is the durable frame that keeps a fresh session from getting lost.
+AUTORESEARCH_LOG.md` is the SOURCE OF TRUTH — read it end-to-start first.
 
 ## The Question
 Adding problem at sequence length T: two marked positions, output = sum of the
@@ -98,8 +97,8 @@ poly*_late!) ⏳ · partial norm_power ✅champ · spectral/Muon ⏳ · selectiv
 whitening, only-normalize-nonzero, magnitude-floor/hybrid, RMS vs L2) = survey.
 
 ## Working Rhythm
-Patient line. Queue serially (GPUs shared 12 lanes); launch from an ISOLATED dir
-(e.g. `rnn_unroll_v3`) so edits never contaminate a running scheduler that reads
+Queue serially (GPUs shared 12 lanes); launch from an ISOLATED dir (e.g.
+`rnn_unroll_v3`) so edits never contaminate a running scheduler that reads
 `train.py` live. Launch detached as `setsid nohup … >log 2>&1 </dev/null &` (the
 `</dev/null` avoids a gcloud channel-EOF hang). One watcher per sweep, pointed at
 the current owning session id. Record every decision + result in the notebook.

@@ -37,11 +37,11 @@ pool, while on a static pool asking for more of it is meaningless.
 | Reclaim | not preemption-proof; same-priority defragmentation evicts it | above floor by construction, so first reclaimed |
 
 So a batch job runs fine with a floor of zero, and **"batch quota" is a
-meaningless number**: only live pool headroom matters, waiting does not help,
-asking for more helps even less, and an empty batch allotment is a designed
-state, not a broken allocation. The one lever trading schedulability for
-immunity — forcing within-floor placement so you are never reclaimed — **is
-unavailable on dynamic pools.**
+meaningless number**: only live pool headroom matters, neither waiting nor
+asking for more helps, and an empty batch allotment is a designed state, not a
+broken allocation. The one lever trading schedulability for immunity — forcing
+within-floor placement so you are never reclaimed — **is unavailable on dynamic
+pools.**
 
 ## An Adjusted Ceiling Is A Pool Cap, Not A Cell Shortage
 
@@ -160,11 +160,10 @@ reason can never fire.
 **Use `tools/limit_order.sh`; it is read-first and refuses group scope by
 default.** `status [accel]` prints the live clearing price beside every cap in
 force and marks each `BLOCKING` or `ok`, which answers "is a cap even the
-problem?" before anything is changed — the question that matters, because a
-cap that is not firing is not the reason your job is pending. `show-xid <xid>`
-resolves which group and accelerator a cap would attach to. Writes are dry-run
-unless `--apply`, and `set-group` additionally demands
-`--i-understand-group-scope`.
+problem?" before anything is changed — a cap that is not firing is not the
+reason your job is pending. `show-xid <xid>` resolves which group and
+accelerator a cap would attach to. Writes are dry-run unless `--apply`, and
+`set-group` additionally demands `--i-understand-group-scope`.
 
 **Permission, verified 2026-08-10:** the experiment level (`--xid`) is
 available — a real idempotent commit returned `Success`. Group level is

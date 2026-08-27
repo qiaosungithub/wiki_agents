@@ -440,7 +440,7 @@ solution metric and `acc` must also agree exactly (§Maze Scoring).
 
 **The retained set is the result.** A peak whose weights were deleted cannot be
 re-evaluated, published, or recovered by re-scoring — retention loss is
-IRREVERSIBLE, which makes every rule here load-bearing.
+IRREVERSIBLE.
 
 - **`training.checkpoint_best_metric` promotes the best-scoring step** to
   `checkpoint_best_<metric>_<n>/`, deliberately OUTSIDE the `step_<N>` namespace
@@ -797,11 +797,11 @@ arm × object type × horizon × difficulty.
 
 Why this set: five DISJOINT skills (articulated / handover / stacking / pour /
 tool-use) — deliberately NO plain pick-and-place, which is 15 of the 50 tasks and
-would waste a diversity slot. Arm mix 3 single / 2 dual; object types cover
-articulated + rigid + granular (RoboTwin 2.0 has NO deformable tasks —
-`dump_bin_bigbin`'s granular pour is the closest non-rigid case); horizon 113→537;
-known DP-Easy 10/42/49% is a real low→mid spread (not saturated >95% like
-`grab_roller`, not dead-0 like `blocks_ranking_rgb`), so an ablation has signal.
+would waste a diversity slot. Object types cover articulated + rigid + granular
+(RoboTwin 2.0 has NO deformable tasks — `dump_bin_bigbin`'s granular pour is the
+closest non-rigid case); the DP-Easy numbers are a real low→mid spread (not
+saturated >95% like `grab_roller`, not dead-0 like `blocks_ranking_rgb`), so an
+ablation has signal.
 
 **Dataloader is eager-decode-to-RAM (`dataset.eager_images: true`,
 `num_workers: 0`).** A `clean_50` task is tiny (~3855 rows, 173 MB JPEG on disk,

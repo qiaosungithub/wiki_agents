@@ -26,9 +26,9 @@ final metrics, as two adjacent rows even when one run covers both stages.
 **Red on a metric means strictly below its OWN floor above** — each follows from
 its benchmark's protocol, so one borrowed from a neighbour raises false alarms —
 while **red on a label means a verified encoder misconfiguration.** Two
-different signals, and inserting a row inherits both, so clear inherited
-backgrounds before reapplying either. A result produced under a superseded
-protocol is marked protocol-invalid instead, never scored against a floor.
+different signals; inserting a row inherits both, so clear inherited backgrounds
+before reapplying either. A result produced under a superseded protocol is
+marked protocol-invalid instead, never scored against a floor.
 
 ## The Colour Table Of The VLM Tab
 

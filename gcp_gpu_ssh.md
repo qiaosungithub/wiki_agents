@@ -51,7 +51,7 @@ Same relay model; the Mac must be a corp machine with `corp-ssh-helper` and
 (`scp qiaos@<cloudtop>:~/.ssh/google_compute_engine* ~/.ssh/` then
 `chmod 600`), `gcert`, then use the `gcloud compute ssh` form above, or an
 `~/.ssh/config` block whose `ProxyCommand` is `corp-ssh-helper` and whose
-`User` is `qiaos`. Do not hardcode the IP if you can avoid it.
+`User` is `qiaos`.
 
 ## OS Login vs Metadata Keys — The Trap That Cost A Day
 

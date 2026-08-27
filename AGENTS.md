@@ -97,6 +97,13 @@ careful which branch to push.
 
 **Jobs** — On this SHARED workstation, submit through `tpu enqueue` + one serial `tpu build-worker` (the default that dodges the concurrent-build zombie XID); `tpu queue` one-shot only when no other build is in flight. Never call `xm launch` / `xmanager launch` directly (`jobs.md` §Submission Contract).
 
+**BATCH tier is EVAL-ONLY** — Every TRAINING job passes `--tier=PROD`
+explicitly; `BATCH` is only ever for eval jobs. `BATCH` is a *paying*
+best-effort tier (it bills the group, it is not the free option), and any PROD
+demand preempts it the instant a slot is contested — so a training run on BATCH
+is silently starved AND still costs. Never train on BATCH (`jobs.md`
+§Requirements And Runtime).
+
 **A chip count is not a size** — Per chip, `v7 = v6p ≈ 2x v6e ≈ 4x v5p ≈
 8x v4`, so matching a `v6p-16` needs a **`v6e-32`**. Asking for `v6e-16`
 silently buys HALF the compute, and the run is then compared as if the hardware

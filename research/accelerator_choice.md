@@ -26,9 +26,9 @@ was shorter than one checkpoint interval.
 ## There Is No Fixed Ranking — Decide Live, Every Time
 
 **Which card holds best flips day to day and hour to hour; never carry a
-ranking between runs.** Any list of "use X, then Y" in this file — including
-the one this section replaced — is stale within a day. Before every long run,
-run these live checks and let *them* pick, in this order:
+ranking between runs.** Any list of "use X, then Y" in this file is stale within
+a day. Before every long run, run these live checks and let *them* pick, in this
+order:
 
 1. **Which cards a limit order is blocking RIGHT NOW** — `tools/limit_order.sh
    status` (or read `tpu money`). A card whose pool-wide clearing price sits

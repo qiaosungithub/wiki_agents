@@ -30,27 +30,23 @@ infrastructure.
   codes, attempt identity, failure counters, any shutdown marker the program
   writes itself — and opposite fixes.
 - **A log's last LINE is not proof of life; its last WRITE TIME is.** A remote
-  job's log file persists after the job is preempted or dies, so `cat`-ing it
-  and reading the final `[step N/T]` reports the step where it STOPPED, not
-  where it IS — and re-reading the same static file confirms the same stale
-  number, which reads as "healthy, unchanged" when it means "dead". A monitor
-  once reported a training run "healthy ~11%" three times off a log whose mtime
-  was two hours old; the run had been preempted at that step. Before trusting a
-  progress number, check the log's mtime (`fileutil ls -l`) against now, or read
-  the authoritative scheduler state (`tpu check` / borg BCL), never the log body
-  alone. A step that has not advanced AND an mtime older than a few minutes mean
-  preempted, not progressing.
+  job's log persists after the job is preempted or dies, so the final `[step
+  N/T]` reports where it STOPPED, not where it IS; re-reading the same static
+  file confirms the stale number and reads as "healthy, unchanged" when it means
+  "dead" (a monitor reported a run "healthy ~11%" three times off a log whose
+  mtime was two hours old — preempted at that step). Check the log's mtime
+  (`fileutil ls -l`) against now, or read authoritative scheduler state (`tpu
+  check` / borg BCL), never the log body alone. Not advanced AND mtime older than
+  a few minutes = preempted.
 - **A cause that does not move when the suspect moves is not the cause.**
   Correlate the symptom's period or magnitude with the thing you suspect before
   acting on it.
-- **A serial pipeline does not bound memory; standing servers do.** "The build
-  is serial, so why is memory low?" mis-locates the cost: each workspace's blaze
-  server holds a multi-GB JVM heap for its whole `max_idle_secs` (days),
-  whether or not a build is running, and one per checkout. Under pressure
-  `--shutdown_on_low_sys_mem` evicts it, so the next build is a cold heavy
-  respawn that deepens the dip. Enumerate the resident heaps (`ps` by RSS) before
-  blaming concurrent builds — the memory is held by idle servers, not by
-  overlap.
+- **A serial pipeline does not bound memory; standing servers do.** Each
+  workspace's blaze server holds a multi-GB JVM heap for its whole
+  `max_idle_secs` (days), one per checkout, whether or not a build runs; under
+  pressure `--shutdown_on_low_sys_mem` evicts it and the next build is a cold
+  heavy respawn that deepens the dip. Enumerate resident heaps (`ps` by RSS)
+  before blaming concurrent builds — idle servers hold the memory, not overlap.
 - **Two broken things can be true at once.** A real, measurable problem standing
   next to the failure is not automatically its explanation.
 - **Absence of evidence is evidence.** No log, no status message, and no
@@ -68,13 +64,12 @@ nonexistent destination. So for every checker, break exactly one property —
 truncate the payload, duplicate a key, shorten an index array, flip one byte
 while keeping the length — and require the verdict to flip.
 
-**The fault you inject is itself a measurement.** Chasing four identical
-failures at one offset, two hours of log-reading produced only a plausible story
-("the storage layer is flaky under concurrency"). Writing the retry test took
-minutes: the injected fault left the destination *smaller* than the boundary,
-the code refused it with the arithmetic spelled out, and that made the real
-cause obvious — an append cannot shrink a file, so another process was writing.
-A test that encodes what must be true converts a guess into a contradiction.
+**The fault you inject is itself a measurement.** Two hours of log-reading on
+four identical failures yielded only a plausible story ("storage flaky under
+concurrency"); the retry test took minutes and made the real cause obvious — the
+injected fault left the destination *smaller* than the boundary, an append
+cannot shrink a file, so another process was writing. A test that encodes what
+must be true converts a guess into a contradiction.
 
 Corollaries worth the line:
 
@@ -96,20 +91,17 @@ check that can crash a run has negative value.
 
 **A monitor that hardcodes an endpoint reports a false mass-death when that
 endpoint moves.** The amply UX gateway (the `:PORT` server behind the web UI and
-all cross-run query tools) is not on a stable port: when it crashes — e.g. on
-LOAS2 expiry — it relaunches on a *fresh* port and rewrites the new URL into
-`~/.amply/dashboard_url`. The worker processes are reparented to init and keep
-running across this (verify with `pgrep -af 'amply worker|claude-amply.py
-resume'` and `ps -o ppid` — a worker whose PPID=1 is independent of the
-gateway). A watcher that hardcodes the old port then probes a dead socket and
-notifies every session DEAD in the same second — a false alarm, not an outage.
-Two defenses: (1) read the live base URL from `~/.amply/dashboard_url` instead
-of hardcoding a port; (2) treat a *simultaneous* all-sessions DEAD with a
-`Connection refused` on resolve as gateway-down-until-proven-otherwise —
-confirm the workers are alive before touching anything, and NEVER `amp
-start`/kill a worker to "recover" (that is what actually kills a live session).
-The gateway self-heals onto the new port; the fix is repointing the observer,
-not restarting the observed.
+cross-run query tools) has no stable port: on crash (e.g. LOAS2 expiry) it
+relaunches on a *fresh* port and rewrites `~/.amply/dashboard_url`. Workers are
+reparented to init and survive (verify `pgrep -af 'amply worker|claude-amply.py
+resume'` + `ps -o ppid`: PPID=1 = independent of the gateway). A watcher
+hardcoding the old port probes a dead socket and pages every session DEAD in one
+second — false alarm. Defenses: (1) read the base URL from
+`~/.amply/dashboard_url`, never hardcode a port; (2) treat a *simultaneous*
+all-sessions DEAD with `Connection refused` as gateway-down-until-proven, confirm
+workers alive first, and NEVER `amp start`/kill a worker to "recover" (that is
+what kills a live session). The gateway self-heals; repoint the observer, not the
+observed.
 
 **While diagnosing a stuck healer, read its state — do not invoke it.** A probe
 that runs the self-heal script (even `--help`) can trigger its side effect: a
@@ -208,16 +200,13 @@ shared deletion.
 
 **Never kill by pattern.** `pkill -f` / `killall` signal every process whose
 command line contains the string — including the shell running the command,
-which on a workstation is a pane of the operator's tmux. On 2026-08-17 a
-`pkill -f 'AGENT_WEB_PORT=8891'` aimed at one throwaway test server matched
-its own invocation, and the operator's entire tmux server went down in the
-same moment: every daemon, every agent session, every attached terminal. The
-cleanup of a five-minute experiment cost more than the experiment. Resolve to
-PIDs first (`ss -ltnp` for a port, `pgrep -a` / `/proc/<pid>/cmdline` to read
-back what each one actually is), confirm each is what you think, then signal
-those PIDs. `fuser -k` on a port is the same trap wearing a different hat:
-check who holds it before killing it, and never assume a port number is
-unused — 8891 in this incident was a real service someone else had added.
+which on a workstation is a pane of the operator's tmux. A `pkill -f
+'AGENT_WEB_PORT=8891'` aimed at one test server matched its own invocation and
+took down the operator's entire tmux server — every daemon, session, and
+terminal. Resolve to PIDs first (`ss -ltnp` for a port, `pgrep -a` /
+`/proc/<pid>/cmdline` to confirm what each is), then signal those PIDs. `fuser
+-k` on a port is the same trap: check who holds it first, and never assume a port
+is unused (8891 was a real service someone else had added).
 
 **A process wedged in uninterruptible-D on a FUSE call is immune to SIGKILL and
 to its siblings dying — only an srcfs restart's EIO-bounce frees it.** A holder
@@ -256,12 +245,10 @@ a call verbatim into prose.
   in the thread; the row is in the table; nmsg advanced). Do not report "sent"
   or "approved" from intent alone.
 - **A call you wrote as text is poison in your own history.** It stays in the
-  transcript and reads as an example to copy: one session that slipped once
-  went on to do it in 96 of its next 187 turns, stalling each time until
-  something poked it — a median of 24.7 minutes idle per occurrence. If you
-  catch yourself having done it, re-issue the call immediately as a real one,
-  and do not quote the bad output back while explaining. That only adds
-  another example.
+  transcript and reads as an example to copy: one session that slipped once did
+  it in 96 of its next 187 turns, stalling each time (median 24.7 min idle). If
+  you catch it, re-issue the call as a real one immediately, and do not quote the
+  bad output back — that only adds another example.
 - **Highest stakes for safety-critical and cross-agent actions.** A dropped
   `send_message` leaves a peer blocked or a decision unmade; a dropped resume /
   `kill -CONT` can leave someone's process frozen. Treat an un-confirmed

@@ -56,14 +56,13 @@ why run logs reach hundreds of MB.
 ## `amp` Sends Operator Messages While The Agent Works
 
 **A message typed at the `amp` spinner is SENT immediately, mid-turn — not
-queued until the turn ends.** The backend always supported this: `/chat/send`
-appends a `MessageEvent` and wakes the session at once, and a busy chatbot's
-`run()` loop re-reads its context every iteration, so the message folds into
-the running turn at the agent's **next tool-call boundary** (seconds), surfaced
-as the `[STATUS]` **NEW OPERATOR MESSAGE** banner. The old lag was purely the
-TUI deferring the send to a post-idle drain. So the injection point is a tool
-boundary, NOT preemption: a long in-flight tool (or the current LLM
-generation) must finish first; it is not a hang.
+queued until the turn ends.** `/chat/send` appends a `MessageEvent` and wakes
+the session at once, and a busy chatbot's `run()` loop re-reads its context
+every iteration, so the message folds into the running turn at the agent's
+**next tool-call boundary** (seconds), surfaced as the `[STATUS]` **NEW
+OPERATOR MESSAGE** banner. The injection point is a tool boundary, NOT
+preemption: a long in-flight tool (or the current LLM generation) must finish
+first; it is not a hang. (The old TUI lag was purely a post-idle send drain.)
 
 **Slash commands are the one exception — still deferred to the idle prompt.**
 `/status`, `/help`, `/compact`, `/quit` print to the screen or mutate turn
@@ -109,7 +108,7 @@ records, name only the crash handler** — `bt` shows nothing but
 `FailureSignalHandler`. The real frames are the OUTERMOST ones, so read
 `bt -45`.
 
-Nothing outside amply prevents it. `amp watchdog` is the mitigation: it
+`amp watchdog` is the mitigation (nothing outside amply prevents it): it
 restarts `ongoing` runs whose worker is dead **and** whose last heartbeat sits
 within seconds of an `amply` coredump in `/var/lib/systemd/coredump`
 (heartbeat 02:49:17, core 02:49:18). That correlation is the whole design —
@@ -118,11 +117,10 @@ without it overrides the operator every 60 seconds.
 
 ## A Turn That WROTE A Tool Call Instead Of Making One
 
-Second way a session stops going anywhere, and it looks identical from
-outside: the worker is up, the run is `Running`, and nothing happens. The
-model wrote its tool call out as XML-ish markup in the message text
-(`invoke` / `parameter` tags) and issued no actual call, so the turn ended
-with nothing executed.
+Another way a session stops, identical from outside: the worker is up, the run
+is `Running`, and nothing happens. The model wrote its tool call out as XML-ish
+markup in the message text (`invoke` / `parameter` tags) and issued no actual
+call, so the turn ended with nothing executed.
 
 **It is the model, not amply.** Amply drives tools through structured
 `tool_calls`; `invoke name=` appears **nowhere** in the amply tree and nowhere
@@ -163,9 +161,10 @@ then restart the server. **Workers are reparented to init and survive the UX
 server dying**, so a run that looks lost usually needs the server back, not
 `amp start`.
 
-**A useful util function for fixing infra issues: Any agent can self-restart the gateway with `~/.amply/bin/restart-amply-ux.sh`
-(bashrc: `amp-restart-ux`), without going through `amp`.** It mirrors the exact
-tmux sequence `amp` uses internally (`claude-amply.py:_launch_ux_in_tmux`):
+**Any agent can self-restart the gateway with
+`~/.amply/bin/restart-amply-ux.sh` (bashrc: `amp-restart-ux`), without going
+through `amp`.** It mirrors the exact tmux sequence `amp` uses internally
+(`claude-amply.py:_launch_ux_in_tmux`):
 settle, `tmux kill-session -t amply_ux`, fresh detached session at the
 workspace, wait for `~/.bashrc`, then `send-keys` `cd <ws> && amply-launch`.
 The indirection is mandatory, not stylistic: `amply-launch` is a bashrc ALIAS
@@ -215,8 +214,9 @@ stole it → two winners (3/30 concurrent races still doubled). `os.link` publis
 the already-written payload atomically, so there is no empty window. Two more
 subtleties the tests pin: on lock-clear a waiter must RE-CHECK `dashboard_url`
 before taking over (the peer usually just succeeded), and the winner re-checks
-once more under the lock (double-checked locking) before spending a launch. See `claude-amply.py`
-`_try_acquire_launch_lock` / `_wait_for_peer_launch` / `ensure_ux_server`, tests
+once more under the lock (double-checked locking) before spending a launch. See
+`claude-amply.py` `_try_acquire_launch_lock` / `_wait_for_peer_launch` /
+`ensure_ux_server`, tests
 in `agent-island/tests/test_launch_lock.py` (incl. a 3-way-race E2E asserting
 exactly one gateway launches). Independently, `amp stop <id|latest>` now exists
 (resumable pause, mirrors the web Stop button) for shedding a worker's RAM/CPU
@@ -225,15 +225,15 @@ without losing state.
 **`amp new` / `amp resume` 500 with `FileNotFoundError: .../amply` is the
 gateway's spawn path gone stale after a concurrent build — restart the gateway,
 don't blame version skew.** The ux server caches the worker binary path at
-import time; historically that was `sys.argv[0]`, which points into the
-checkout's blaze `execroot/.../blaze-out` symlink. That symlink is **republished
-to a fresh objfs namespace (and the old one GC'd) whenever ANY `blaze build`
-runs under the same `$AMPLY_WORKSPACE` checkout** — a build-worker draining a
-sweep, or any line building there. The gateway's cached path then dangles, and
-every spawn (`_spawn_new_run_subprocess` → `subprocess.Popen`) dies with
-`FileNotFoundError`, 500ing `/api/run/new` and `/api/run/start` while the READ
-path (`/api/chat`, `/chat/messages`) stays 200 — so only "open/restart a line"
-breaks, and existing lines are untouched. Tell it apart from the version-skew
+import time; historically that was `sys.argv[0]`, pointing into the checkout's
+blaze `execroot/.../blaze-out` symlink. That symlink is **republished to a fresh
+objfs namespace (and the old one GC'd) whenever ANY `blaze build` runs under the
+same `$AMPLY_WORKSPACE` checkout** — a build-worker draining a sweep, or any
+line building there. The gateway's cached path then dangles, and every spawn
+(`_spawn_new_run_subprocess` → `subprocess.Popen`) dies with `FileNotFoundError`,
+500ing `/api/run/new` and `/api/run/start` while the READ path (`/api/chat`,
+`/chat/messages`) stays 200 — so only "open/restart a line" breaks, and existing
+lines are untouched. Tell it apart from the version-skew
 500 (`engineering.md` §Gateway Version Skew, which 500s the *read/status* path
 on new runs): grep the server log for the endpoint + traceback
 (`E.... Exception on /api/run/new [POST]` in
@@ -246,15 +246,15 @@ already running with the old cached path must still be RESTARTED once — the
 value was captured at its import time and the patch only helps future boots.**
 
 
-*Update*: A direct patch has been added to `third_party/py/simply/amply/agents/event_loop.py` in the local CitC workspace to detect tool call leaks inline (`TOOL_MARKUP_RE.search(content)`) and immediately append a system correction without sleeping, eliminating the idle time entirely.
+*Update*: a patch in `third_party/py/simply/amply/agents/event_loop.py` (local CitC workspace) detects tool-call leaks inline (`TOOL_MARKUP_RE.search(content)`) and immediately appends a system correction without sleeping, eliminating the idle time.
 
 ## Host Quick-Stats Utils (`memavail` / `cpuload` / `hstat`)
 
 **One-line host health from `~/.bashrc`, read straight from `/proc` (no deps,
-work in any shell).** Added because this SHARED workstation overloads (load has
-hit 102; see `engineering.md` §Do Not Let A Diagnostic Kill The Thing It
-Watches for the amply-gateway-restart-loop that causes it), and an agent needs
-to check pressure before launching work.
+work in any shell)** — check pressure before launching work on this SHARED
+workstation, which overloads (load has hit 102; see `engineering.md` §Do Not
+Let A Diagnostic Kill The Thing It Watches for the amply-gateway-restart-loop
+that causes it).
 
 | Util | Shows |
 |---|---|

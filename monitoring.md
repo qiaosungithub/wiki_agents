@@ -13,11 +13,9 @@ harness guarantees. Everything durable lives on disk — see §Live Memory.
 ## The Monitor Owns One Directory: `~/work/.monitor_watch/`
 
 **Keep every monitor asset in ONE version-agnostic directory, never in `/tmp`
-and never in a name with a version number.** History: the watcher lived in
-`.monitor_v14_watch/` across many monitor generations; a `v14` in the name reads
-as stale and an operator eventually `rm`'d it mid-shift, taking the death
-detector down. The current home is `~/work/.monitor_watch/` — do not re-version
-it. Layout:
+and never in a name with a version number.** A prior `.monitor_v14_watch/` read
+as stale and an operator `rm`'d it mid-shift, taking the death detector down. The
+current home is `~/work/.monitor_watch/` — do not re-version it. Layout:
 
 | Path | What |
 |---|---|
@@ -54,13 +52,12 @@ On inheriting the role from a prior monitor, before anything else:
 ## Maintain A Live-Memory File Every Turn
 
 **Your context is compacted; only `~/work/.monitor_watch/AGENT_STATUS.md`
-survives.** Write it as a past-tense narrative and overwrite it each turn: the
-9-line status table (tail → semantic state → health), the handoff ledger (which
-line went to which new run-id, what's left), open decisions awaiting the
-operator, the memory/disk readings, and the gotchas hit this shift. A monitor
-that only keeps state in context *will* forget it after the first compaction.
-The lesson is earned: a prior monitor stopped updating it after one compaction
-and coasted on luck for hours.
+survives.** Overwrite it each turn (past-tense narrative): the 9-line status
+table (tail → semantic state → health), the handoff ledger (which line → which
+new run-id, what's left), open decisions awaiting the operator, memory/disk
+readings, gotchas hit this shift. A monitor that keeps state only in context
+*will* forget it after the first compaction (a prior monitor stopped updating it
+and coasted on luck for hours).
 
 ## Track Every Request In The Todo List (mandatory)
 
@@ -211,10 +208,9 @@ it is far more accurate than a monitor writing it from the outside.** Protocol:
 
 **★ `do_handoff_generic.py` starts a NEW run but does NOT stop the OLD one.**
 Telling the old line "you're retired" only makes it *self-declare* standby — its
-amply **worker process keeps running** (dashboard still shows it `ongoing`, ~300MB
-RAM each). Across a shift these zombie workers pile up and eat RAM (bit us on
-2026-08-24: 7 retired runs still live = ~2GB during a swap=0 crunch). Retiring a
-line **requires killing its worker**:
+amply **worker process keeps running** (dashboard still `ongoing`, ~300MB RAM
+each). These zombie workers pile up and eat RAM (7 retired runs still live =
+~2GB during a swap=0 crunch). Retiring a line **requires killing its worker**:
 - Map run-id → pid **reliably via `lsof ~/.amply/logs/<OLD_rid>.log`** (the writer
   is the worker). Do NOT trust `pgrep -f <rid>` (matches your own command line) or
   `/proc/<pid>/environ` (AMPLY_RUN_ID is often unreadable/empty).
@@ -252,16 +248,14 @@ landed); patch it before shipping.
 
 **Concurrent launches that share a build root corrupt each other — route a batch
 through the serial build-worker, do not hand-orchestrate it.** Two `blaze` builds
-running at once under one checkout race on the **blaze output layer**: `blaze-bin`'s
+at once under one checkout race on the **blaze output layer**: `blaze-bin`'s
 second symlink hop (`blaze-out → /google/obj/workspace/namespace/<uuid>/blaze-out`)
 is republished by every build under the same checkout root, so one build's outputs
 land in a namespace the other isn't looking at → a `found []` zombie work-unit
-(XManager snapshots the code but blaze produced no output for the target; this bit
-a parallel elt+parcae v6e migration). A second failure mode compounds it: a burst
-of concurrent stage-writes drains the CitC CreateSnapshot token bucket →
-truncated stagedir, `.par` crash. **Neither is a stagedir-name collision** — that
-was fixed separately (`eqr_run_<ts>_<6hex-urandom>` + atomic `mkdir`, after the
-2026-08-17 "4 XIDs → 1 stagedir" incident).
+(bit a parallel elt+parcae v6e migration). Compounding it: a burst of concurrent
+stage-writes drains the CitC CreateSnapshot token bucket → truncated stagedir,
+`.par` crash. **Neither is a stagedir-name collision** — that was fixed separately
+(`eqr_run_<ts>_<6hex-urandom>` + atomic `mkdir`).
 
 **The fix is now a tool, not a monitor chore: `tpu build-worker` (serial
 build-worker).** A batch is `tpu enqueue`'d and one worker drains it one build at
@@ -446,11 +440,11 @@ watcher (which re-resolves the worker address).
 ## Memory And Disk Wake Criteria
 
 The box runs hot with many concurrent lines. **A single tight reading is noise;
-wake the operator only on a sustained signal.** Steady state seen in practice:
-`available` 12–35G, `swap used` 70–86G, zero OOM-kills (self-heals in minutes).
-Escalate only if `available` < 10G on 3–4 consecutive probes with nonzero
-`si/so`, or `swap used` breaks ~84G without receding, or the OOM-killer fires.
-Each large build (eval/canary/mirror) spikes memory for 1–2s — do not panic.
+wake the operator only on a sustained signal.** Steady state: `available`
+12–35G, `swap used` 70–86G, zero OOM-kills (self-heals in minutes). Escalate only
+if `available` < 10G on 3–4 consecutive probes with nonzero `si/so`, or `swap
+used` breaks ~84G without receding, or the OOM-killer fires. Each large build
+(eval/canary/mirror) spikes memory for 1–2s — do not panic.
 `/tmp` is tmpfs (counts against RAM): each heartbeat, `df -h /tmp`; over ~90%,
 `du -sh /tmp/* | sort -rh | head` and report (never `rm -rf /tmp/*` — the
 monitor's own tools historically lived there).

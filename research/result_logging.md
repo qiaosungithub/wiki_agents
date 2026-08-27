@@ -25,13 +25,13 @@ scraping the URL.
 
 **Only a run that reaches a conclusion is logged**; one that exposed a code bug
 or a packaging failure belongs in the commit message. **Preemption is not such a
-failure**: a job that was preempted but still reached its step budget produced a
-real result, and its final metrics — train loss included — must be harvested and
+failure**: a job preempted but still reaching its step budget produced a real
+result, and its final metrics — train loss included — must be harvested and
 logged, never waved off as "see chart (log rotated)". The rotation is a place to
 look harder (§Every Row Carries Its Train Metrics), not a licence to leave the
 columns blank. **Every row carries the chart link plus the `logdir` / `stagedir`
 pointers**: they recover the exact code, command, and resolved config, which is
-what lets the cells stay short, and a row without a chart makes every reader
+what lets the cells stay short; a row without a chart makes every reader
 rebuild the URL by hand (§Chart Links).
 
 ## Which Tab
@@ -90,8 +90,8 @@ comparison that makes the number mean anything.
 interpret the number, never explains how the run got that way. The test: *does a
 reader need this sentence to USE the number?* If it only explains history it
 belongs in the commit message or the project guide, and **a bug is never
-explained in a cell**. The tab is then read at a glance by someone scanning for
-a comparison, so **a row that looks different reads as if it means something
+explained in a cell**. The tab is read at a glance by someone scanning for a
+comparison, so **a row that looks different reads as if it means something
 different** — match the conventions of the block you write into.
 
 | Rule | Detail |

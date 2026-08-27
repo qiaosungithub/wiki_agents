@@ -18,7 +18,7 @@ Current code and native configs outrank this file.
 - **Name the concern before changing code** — model semantics, mesh/batch, data
   stream, checkpoint transaction, stage transition, final eval — then exercise
   it with the smallest smoke hitting the real path and read the logs and
-  produced state. A clean process exit proves nothing.
+  produced state. **A clean process exit proves nothing.**
 
 ## Mesh, Model, And Data Stream
 
@@ -79,12 +79,12 @@ result was wrong — the worst shape, because nothing fails.
   rank silently scored `out_strs[0:local_B]` — always **process 0's answers**.
   Rank 0 is right by coincidence; ranks 1..N score at chance, and the pooled
   number collapses (VQAv2 read 16.84 vs 67.63) *while train acc — teacher-forced,
-  so unaffected — still matches to -0.0003*. That exact combination (eval
-  collapses, training curve perfect) IS the diagnosis: the bug is in the
-  autoregressive path, not the model. The probe that separates it is **per-rank
-  accuracy**; a global offset-shift test cannot express "rank r read rows 0..B-1"
-  and reads as "alignment fine". Invert the placement from the sharding and RAISE
-  on a row-count mismatch — a misaligned batch is invisible downstream.
+  so unaffected — still matches to -0.0003*. That combination (eval collapses,
+  training curve perfect) IS the diagnosis: the bug is in the autoregressive
+  path, not the model. The probe that separates it is **per-rank accuracy**; a
+  global offset-shift test cannot express "rank r read rows 0..B-1" and reads as
+  "alignment fine". Invert the placement from the sharding and RAISE on a
+  row-count mismatch — a misaligned batch is invisible downstream.
 - **An unknown accelerator in the mesh table must fail loud, not fall back to a
   flat 1-D mesh.** `get_mesh()` looked `device_kind` up in a `TOPOLOGIES` table
   and, on no match, silently built a `(N,)` mesh meant for CPU/GPU debug; v7 was

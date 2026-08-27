@@ -45,8 +45,8 @@ is non-empty" guard — which is correct — keeps the last good board forever.
 
 **The symptom is not an error, it is plausibility**: `tpu check` renders every
 job as `SUBMITTED`, the cache-miss fallback, so the board looks like a queue
-that has not started rather than a board that stopped updating. The process is
-alive, the loop is turning, and the log is scrolling the whole time.
+that has not started rather than a board that stopped updating — process alive,
+loop turning, log scrolling the whole time.
 
 **Diagnose by timestamp, not by liveness**: `ls -la ~/.tpu_check_cache.txt`
 against `date`. A `.tmp` file that is newer than the cache AND zero bytes is

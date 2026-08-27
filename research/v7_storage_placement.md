@@ -33,8 +33,8 @@ there. `dfw`/`rs-d` is the complete 4th mirror.
 `la-d`/`lb-d` resolve to `lpp`, and `mg-d` (looks like `cmh`) is `ckv`. Verify
 any new cell with `mach_locality -k metro <cell>` before trusting its name.
 
-Live chip and slice counts are deliberately not repeated here — the survey table
-below owns them, and they move daily.
+Live chip and slice counts are not repeated here — the survey table below owns
+them, and they move daily.
 
 **`tul` writes to `oi-d`, NOT `nm-d`.** A metro can hold several storage cells,
 and `nm-d`'s group quota (`deepmind-resources-colossus`) filled to its ceiling
