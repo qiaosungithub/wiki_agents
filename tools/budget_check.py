@@ -5,6 +5,34 @@ import re
 import sys
 import os
 
+# ---- Groups EXEMPT from the G9 income/10 credit cap -----------------------
+# g3 (gdm-viscam-interns-dynamic) and g5 (vqfree-xm) are separate dynamic pools
+# with their OWN credit balance; they do NOT draw on G9's income, so the 1/10-
+# of-G9 gate must not ration them. Two consequences, both handled below:
+#   1. a NEW job whose group is g3/g5 is admitted regardless of the G9 aggregate;
+#   2. an already-running g3/g5 job is NOT summed into `current_cost` (it never
+#      spent G9 credit, so counting it would falsely inflate the G9 total).
+# Matched against the registry's `alloc` string and the g3/g5 id/`gN` forms the
+# wrapper may pass. (router._GROUP_PREF is the sibling that ROUTES here first.)
+_EXEMPT_ALLOC_FRAGMENTS = ('gdm-viscam-interns-dynamic', 'vqfree-xm')
+_EXEMPT_GROUP_IDS = {'3', '5', 'g3', 'g5'}
+
+
+def is_exempt_group(group_or_alloc):
+    """True if the group/alloc is a G9-cap-exempt pool (g3/g5).
+
+    Accepts a bare id ('3', 'g5'), or a full alloc string
+    ('group:deepmind-dynamic/vqfree-xm'). Empty/None -> not exempt (fail-closed:
+    an unknown caller is treated as drawing on the capped G9 budget).
+    """
+    s = str(group_or_alloc or '').strip().lower()
+    if not s:
+        return False
+    if s in _EXEMPT_GROUP_IDS:
+        return True
+    return any(frag in s for frag in _EXEMPT_ALLOC_FRAGMENTS)
+
+
 def get_income():
     money_file = os.path.expanduser("~/.tpu_quota_cache_dir/money.txt")
     if not os.path.exists(money_file):
@@ -178,7 +206,13 @@ def main():
     new_tpu_type = sys.argv[1]
     new_tier = sys.argv[2]
     new_lo_price = sys.argv[3] if len(sys.argv) > 3 else None
-    
+    # Optional 4th arg (or TPU_NEW_GROUP env) = the new job's group/alloc. Lets
+    # the gate exempt a g3/g5 launch (own balance, not the G9 cap). Optional and
+    # forward-compatible: absent -> treated as capped G9 (fail-closed), so the
+    # gate is unchanged until the wrapper is taught to pass it.
+    new_group = (sys.argv[4] if len(sys.argv) > 4
+                 else os.environ.get('TPU_NEW_GROUP', ''))
+
     income = get_income()
     if income <= 0:
         print("\033[33m[budget check] Warning: Could not read G9 income, skipping budget limit check.\033[0m")
@@ -213,8 +247,19 @@ def main():
                 for xid, info in jobs.items():
                     # Only count active jobs (SUBMITTED or RUNNING)
                     if info.get('status') in ['SUBMITTED', 'RUNNING']:
-                        # Cross-reference with the UI table cache to ignore zombies
-                        if xid in cache_status and cache_status[xid] not in ['running', 'pending', 'queued']:
+                        # Bill only what actually BURNS credit: a job in the live
+                        # check cache counts only when its state is `running`.
+                        # A pending/queued job holds ZERO Borg tasks -> zero
+                        # chip-hours -> spends nothing, so it must not inflate the
+                        # aggregate (operator 2026-08-27: the over-credit ENFORCER
+                        # already kills real overspend, so the launch gate should
+                        # reserve budget only for genuinely-running load).
+                        if xid in cache_status and cache_status[xid] != 'running':
+                            continue
+                        # g3/g5 draw on their own balance, not G9's income, so a
+                        # running job there never spends the budget this gate
+                        # protects -- exclude it from the G9 aggregate.
+                        if is_exempt_group(info.get('alloc', '')):
                             continue
                         cost = get_job_cost(info.get('tpu_type', ''), info.get('tier', 'PROD'))
                         if xid not in cache_status:
@@ -244,6 +289,17 @@ def main():
     print(f"\033[36m[budget check] {agent_name} agent current cost: {current_cost:.1f} credits/hr\033[0m")
     print(f"\033[36m[budget check] new job cost: {new_cost:.1f} credits/hr\033[0m")
     print(f"\033[36m[budget check] total projected: {total_cost:.1f} (Limit: {limit:.1f} = 1/10 of G9 income {income:.1f})\033[0m")
+
+    # A g3/g5 launch draws on that pool's OWN credit balance, not G9's income,
+    # so the 1/10-of-G9 cap does not apply to it. Admit regardless of the G9
+    # aggregate (mirrors the BATCH/CPU hatches below). Only fires when the group
+    # is actually known -- an unknown/absent group falls through to the capped
+    # G9 path (fail-closed). The wrapper passes it as argv[4] / TPU_NEW_GROUP.
+    if is_exempt_group(new_group):
+        print(f"\033[32m[budget check] new job group '{new_group}' is g3/g5 "
+              f"(own balance, exempt from the G9 income/10 cap) -- admitted "
+              f"regardless of the G9 aggregate.\033[0m")
+        sys.exit(0)
 
     # A BATCH-tier job draws from the free BATCH pool (clears at 0) and does NOT
     # consume the PROD income/10 budget this gate protects, so it must never be

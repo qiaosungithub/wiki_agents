@@ -72,8 +72,16 @@ def active_prod_jobs(jobs_file, cache_file):
             continue
         if e.get('status') not in ('SUBMITTED', 'RUNNING'):
             continue
-        # zombie filter: absent from live cache AND older than STALE_HOURS
-        if xid in cache_status and cache_status[xid] not in ('running', 'pending', 'queued'):
+        # Bill only what actually BURNS credit: count a cached job only when its
+        # live state is `running`. A pending/queued gang holds zero Borg tasks
+        # (zero chip-hours), so it spends nothing and must not be a cancel
+        # candidate -- mirrors budget_check's launch-gate accounting.
+        if xid in cache_status and cache_status[xid] != 'running':
+            continue
+        # g3/g5 draw on their own balance, not G9's income, so they are exempt
+        # from the G9 income/10 cap this enforcer defends -- never count or
+        # cancel them here (mirrors budget_check).
+        if bc.is_exempt_group(e.get('alloc', '')):
             continue
         tpu_type = e.get('tpu_type', '')
         tier = e.get('tier', 'PROD')
