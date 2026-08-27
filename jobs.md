@@ -136,6 +136,10 @@ seconds.
   Borg truth: a `-` means "untagged, so it ran the PROD default", NOT
   "non-PROD" — read the work unit/allocator for ground truth. Only ever run
   evals on BATCH.
+  **GPU is the one nuance:** most GPUs have a free (0.00) BATCH pool and GPU PROD
+  is cheap, so a short GPU *smoke* on BATCH is fine — but BATCH still preempts
+  (`guarantee reclaim`), so use `--tier=PROD` the moment a GPU run must actually
+  finish. `gpu_on_borg.md` §Tiers owns this.
 - **Priority <= 25 charges the person; above it charges the group.** The free
   tiers simply do not touch the team's GCU allocation. `BATCH` reads like the
   cheap option and is the opposite: a *paying* best-effort tier billing the

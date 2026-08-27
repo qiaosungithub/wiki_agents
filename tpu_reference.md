@@ -140,3 +140,62 @@ v7-scale training and skip it in surveys.**
 **Global batch size must be a non-zero multiple of the chip count**, or the job
 dies with `ValueError: Batch size <B> must be a non-zero multiple of the number
 of chips`. Check against the *slice* you requested, not the one you meant to.
+
+## NVIDIA GPUs
+
+Running a GPU job on Borg is `gpu_on_borg.md`; this section is the naming +
+shape + capability reference (the GPU analogue of the tables above). GPUs go
+through the same `tpu enqueue` path but with an explicit `--tpu_type=<gpu>-<n>`
+and `--archs=<gpu>` (never the `--power` router — `gpu_on_borg.md` Rule 1).
+
+### Name Mapping
+
+`xm.ResourceType` is case-insensitive and the kwarg name IS the lowercase enum
+name, so `JobRequirements(h100=8)` works directly. Card codes key the GQM /
+market Spanner tables (`infra/quota_market.md`).
+
+| Arch token (`--tpu_type`) | `xm.ResourceType` | Card code | HBM | NVLink domain |
+|---|---|---:|---:|---:|
+| `a100` | `A100` | 46 | 40 GB | 16 |
+| `a100_80gib` | `A100_80GIB` | 66 | 80 GB | 8 |
+| `h100` | `H100` | 70 | 80 GB | 8 |
+| `h200` | `H200` | 86 | 141 GB | 8 |
+| `b200` | `B200` | 87 | 180 GB | 8 |
+| `b300` | `B300` | 112 | 288 GB | 8 |
+| `gb200` | `GB200` | 89 | 186 GB | 72 |
+| `gb300` | `GB300` | 100 | 288 GB | 72 |
+
+### NVLink Domain = The Largest Fully-Connected Single Slice
+
+The **NVLink domain** (device_group in the platform GCL) is the biggest slice
+whose GPUs are all NVLink-connected; beyond it, chips communicate over network
+RDMA — legal, but not faster for comms-bound work. So the largest *full-speed*
+single slice is `h100-8` / `b200-8` (8-GPU HGX/Neutron domain) and `gb200-72` /
+`gb300-72` (72-GPU Oberon NVL72 rack). `a100`-40G is the odd one at 16.
+
+- **Legal shapes** are `[1,2,4,8]` for the 8-domain cards (`h100-16` is RED at
+  preflight, "supported [1,2,4,8]"). GB200/GB300 go up to 72 in principle, but
+  NVL72 large slices are frequently "not approved for borg scheduling" — treat
+  `gb200-8/16/32` as the safe obtainable shapes and prove larger with a real
+  enqueue (`gpu_on_borg.md`).
+- **A GPU chip is one device** — no two-cores-per-chip subtlety (unlike v6p/v7
+  TPU). `JobRequirements(h100=8)` → 8 devices, `torch.cuda.device_count()==8`,
+  one Borg task. Batch size must divide the device count.
+
+### Per-Chip Capability (v5p-normalised)
+
+From the `vle` field in `gxus_by_platform_ga.textproto` (same source as the TPU
+table). Use it for the credit-limit cap tiers and rough cross-family sizing —
+NOT as an obtainability or price signal (read `tpu money` / `tpu preflight` live,
+same as TPU).
+
+| Chip | Compute (v5p=1) | Cap tier (`tpu_wrapper.sh`) |
+|---|---:|---|
+| a100 | 0.68 | 5 (v5p tier) |
+| h100 / h200 | 2.15 | 10 (v6e tier) |
+| b200 / b300 / gb200 / gb300 | 4.90 | 20 (v6p/v7 tier) |
+
+**Price inverts the TPU intuition:** GPU PROD is cheap (H100 ~0.36–0.46
+cr/chip-hr; A100 ~0.42; GB200/GB300/H200 free pool; B200 ~11) and most GPUs have
+a **free (0.00) BATCH pool** — but BATCH is preemptible (`gpu_on_borg.md`
+Rule 6). Caps are blast-radius bounds far above market, not trackers.
