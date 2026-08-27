@@ -252,12 +252,21 @@ warning is near-permanent and low-signal.
 
 The router ranks surviving candidates by cap-blocked status (a blocked
 combination is kept and explained rather than silently dropped), verdict,
-headroom, cost, and accelerator preference. **Headroom differs by tier on
-purpose**: the guaranteed tier uses remaining quota, the batch tier obtainable
-chips, because the batch pass never consults a floor. Market data comes from a
-cache the money checker writes each daemon round, so the router stays offline
-and fast; when that cache is missing or stale it says so loudly and falls back
-to price-blind ranking rather than failing.
+**group preference**, headroom, cost, and accelerator preference. **Group
+preference (`_GROUP_PREF`) puts g3/g5 ahead of g9** at PROD: g3/g5 are small
+dynamic pools with their own credit balance and are exempt from the G9
+income/10 budget cap, so spending them first preserves the regulated G9 budget.
+It sits above the economics (headroom/cost) but below blocked+verdict, so it
+never promotes a non-runnable or lower-confidence placement to save budget, and
+is neutral at BATCH (one free pool). **Headroom differs by tier on purpose**:
+the guaranteed tier uses remaining quota, the batch tier obtainable chips,
+because the batch pass never consults a floor. **A `--metros` allow-list is a
+hard data-locality filter** applied before ranking: only cells in the named
+metro(s) survive, and a combo with no in-metro cell drops out entirely (so
+`--power --metros` fails closed rather than roaming to a no-data cell). Market
+data comes from a cache the money checker writes each daemon round, so the
+router stays offline and fast; when that cache is missing or stale it says so
+loudly and falls back to price-blind ranking rather than failing.
 
 **Per-allocation minimum-slice rules are pool policy, not physical law** — a
 slice below the minimum is a valid hardware topology, disallowed by the
@@ -290,6 +299,7 @@ pins a `--cell` onto it. Modules in the google3 half, each a
 | `route_lib.py` | Pure scheduling core: queue schema (`QueueEntry`), placement, priority + seeded-random fairness, cell ranking by placeable slices, effective-price type selection (raw price discounted by a pool-size bonus), topology lock. No I/O, no RPC — unit-tested in full. |
 | `avail_provider.py` | Wraps `GetCellAvailability` (the same RPC as `slice_probe`) plus the money `market.json` cache into `(avail_by_cell, arch_price, arch_pool)`. Free chips (`max_available_chips`) decide; `obtainable_capacity` is never read for a decision — it lies. |
 | `pick_cell.py` | **The default-path picker.** One RPC for the requested type, ranks with `best_cell_for_shape`, prints the single best cell (or nothing). `tpu queue` pins `--cell=<that>` unless the user pinned a cell / used `--power` / passed a comma type / set `TPU_NO_SMART_CELL=1`. Accepts `--metros` (the wrapper forwards `tpu queue --metro/--metros`) so a data-locality-locked run stays in its storage metro while still dodging the oversold cells inside it. FAIL-SAFE by contract: any failure prints nothing and the wrapper lets the allocator choose. |
+| `preflight/router.py` + `router_cli.py` | **The `--power` path** (`tpu route`, and `tpu queue --power`). Expands a power class to (arch, chips) options, runs preflight per (group, cell), and ranks (see the ranking section above). Now accepts **`--metros`** — a hard data-locality filter over `cap.cells_ok`, so `--power` and metro co-locality COMPOSE (they did not before 2026-08). Cell→metro resolution is the shared `metro_util` leaf, identical to the smart-cell path. `rank()` also applies `_GROUP_PREF` (g3/g5 before g9). |
 | `route_check.py` | The tick AND the serial build-worker. `--reroute` cancels jobs stuck PENDING past the deadline and re-queues. `--worker` runs the serial build loop (below). Binary + library share the source; the binary target just re-exports it. |
 | `queue_cli.py` | `tpu enqueue` / `queue-status` / `dequeue`. Reuses route_check's queue persistence and a dry-run planning tick for the live status view. |
 

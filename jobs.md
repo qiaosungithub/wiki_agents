@@ -784,4 +784,10 @@ this guide whenever implementation details change.
 
 ## Budget Checking
 
-Before launching a job, the launcher logic automatically invokes `tools/budget_check.py` to ensure that the projected GQM credits spent by this job plus all active jobs in the queue does not exceed one-third of the total available G9 income. If the budget is exceeded, the job launch is halted automatically. The `npu` aliases are subject to their own separate identical budget check.
+Before launching a job, the launcher automatically invokes `tools/budget_check.py`: the projected GQM credits/hr of this job **plus all active jobs** must not exceed **1/10 of G9 income** (boss directive, tightened from 1/3). Over the bar, the launch is halted. The `npu` aliases run their own separate identical check.
+
+What counts toward the bar, and what is exempt:
+- **Active = running, pending, or queued** (option B): a job the scheduler has committed to the XM queue reserves budget even before its Borg gang is RUNNING, so a backlog of pending jobs cannot each look free. The reroute lane (pending >10 min → auto-cancel) bounds how long a pending job holds that reservation. Only terminal zombies are dropped.
+- **g3/g5 are exempt**: they draw on their own credit balance, not G9's income, so a g3/g5 job neither counts toward the aggregate nor is refused by it. The router (`tpu route`/`--power`) also *prefers* g3/g5 over g9 for the same reason (`infra/tpu_cli.md`).
+- **BATCH and CPU-only are exempt** (free pool / no chips).
+- On over-bar the gate prints `[[BUDGET_DEFERRED]]` and exits 3; the local-queue worker reads that marker and parks the job **BUDGET_DEFERRED** (auto-retried when headroom opens), never as a build failure. A running-job enforcer (`tools/budget_enforcer.py`) separately cancels over-cap RUNNING jobs.

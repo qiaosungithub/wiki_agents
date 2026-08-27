@@ -108,14 +108,22 @@ cell/group in the same window.
 Cheap and worth it before any long run on a preemptible tier:
 
 ```bash
-tpu enqueue --power=<type> \
-  --launch=group=<g>,tier=PROD,cell=<cell>,bucket=<co-located CNS path>,exp_name=<probe-name>
+tpu enqueue --power=<type> --metros=<data-metro[,metro2]> \
+  --launch=group=<g>,tier=PROD,bucket=<co-located CNS path>,exp_name=<probe-name>
 tpu build-worker start   # serial worker drains it (the default path — ../jobs.md)
 ```
 
+- **Data-locality is `--metros`, not a hand-pinned `cell=`.** `--power` picks
+  the cheapest obtainable (arch, chips, cell) for you; `--metros=<m>` constrains
+  that pick to your data's metro(s) — pass a comma list to allow several — and
+  refuses rather than roaming to a no-data cell when the metro is full
+  (fail-closed). Only pin an explicit `cell=` in `--launch` when you must target
+  one exact cell; for storage locality `--metros` is the right, less brittle
+  tool. (Before 2026-08, `--power` ignored `--metro` and you HAD to hand-pin a
+  cell; that is fixed — `--power`+`--metros` now compose. See `../infra/tpu_cli.md`.)
 - Use the **real workload**, not a trivial one. A sleep loop cannot show whether
   preemption is interrupting useful work, nor give comparable throughput.
-- Pick a bucket in the **compute cell's own metro** (`../storage.md`); a
+- Pick a bucket in the compute metro you named (`../storage.md`); a
   cross-metro checkpoint path silently costs 4-5x and can get the job pruned.
 - Judge from **Borg** (`borg --borg=<cell> findjobs --user_re=<user>`), whose
   `state:` and `started` are authoritative. XManager reported RUNNING for jobs no
