@@ -198,10 +198,109 @@ def get_job_cost(tpu_type, tier, override=None):
     price, _basis = chip_price(tpu_type)
     return chips * price
 
+def compute_current_cost(jobs_file, cache_file, warn=None):
+    """Sum the credits/hr of jobs that count against the G9 bar (option B).
+
+    Counts status in {running, pending, queued} (drops terminal zombies), skips
+    g3/g5 (own balance, exempt). Single owner of the billing caliber, shared by
+    the launch gate (main) and the --query planning path so route_check never
+    recomputes it. `warn` is an optional callback(str) for non-fatal notices.
+    Returns (current_cost, stale_rows, stale_cost).
+    """
+    cache_status = {}
+    if os.path.exists(cache_file):
+        try:
+            cf_content = re.sub(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])', '',
+                                open(cache_file).read())
+            for m in re.finditer(r'│\s*(\d{8,11})\s*│\s*([A-Za-z0-9_-]+)\s*│', cf_content):
+                cache_status[m.group(1)] = m.group(2).lower()
+        except Exception as e:
+            if warn:
+                warn(f"Error parsing {cache_file}: {e}")
+    current_cost, stale_rows, stale_cost = 0.0, 0, 0.0
+    if os.path.exists(jobs_file):
+        try:
+            jobs = json.load(open(jobs_file))
+        except Exception as e:
+            if warn:
+                warn(f"Error parsing {jobs_file}: {e}")
+            return current_cost, stale_rows, stale_cost
+        for xid, info in jobs.items():
+            if info.get('status') not in ('SUBMITTED', 'RUNNING'):
+                continue
+            # Option B: count running+pending+queued; drop only terminal zombies.
+            if xid in cache_status and cache_status[xid] not in ('running', 'pending', 'queued'):
+                continue
+            # g3/g5 draw on their own balance -> not part of the G9 aggregate.
+            if is_exempt_group(info.get('alloc', '')):
+                continue
+            cost = get_job_cost(info.get('tpu_type', ''), info.get('tier', 'PROD'))
+            if xid not in cache_status:
+                age = job_age_hours(info)
+                if age is not None and age > STALE_HOURS:
+                    stale_rows += 1
+                    stale_cost += cost
+                    continue
+            current_cost += cost
+    return current_cost, stale_rows, stale_cost
+
+
+def _run_query(new_tpu_type, new_tier, new_lo_price, new_group):
+    """Machine-readable headroom probe for route_check's greedy loop.
+
+    Prints ONE line of JSON to stdout and exits: 0 = the job fits (or is
+    exempt), 3 = over the G9 bar (budget-deferred). No ANSI, no other stdout, so
+    the caller can json.loads() it directly. Reads the registry live every call,
+    so a greedy loop that calls this per candidate sees each just-submitted job
+    reflected in `current` -- no in-memory headroom cache needed (and none should
+    be kept: that is the B x greedy double-spend trap).
+    """
+    income = get_income()
+    jobs_file = os.environ.get('TPU_JOBS_FILE', os.path.expanduser('~/.tpu_jobs.json'))
+    cache_file = os.environ.get('TPU_CHECK_CACHE_FILE', os.path.expanduser('~/.tpu_check_cache.txt'))
+    exempt = (is_exempt_group(new_group)
+              or new_tier.upper() == 'BATCH'
+              or new_tpu_type.strip().lower().startswith('cpu'))
+    new_cost = get_job_cost(new_tpu_type, new_tier, new_lo_price)
+    if income <= 0:
+        # Cannot read income -> cannot enforce; report unknown but admit (fits),
+        # matching main()'s fail-open-on-no-income behaviour.
+        out = {"income": 0.0, "bar": 0.0, "current": 0.0, "headroom": 0.0,
+               "new_cost": new_cost, "exempt": exempt, "fits": True,
+               "note": "income unreadable; gate skipped"}
+        print(json.dumps(out))
+        sys.exit(0)
+    bar = income / 10.0
+    current_cost, _sr, _sc = compute_current_cost(jobs_file, cache_file)
+    headroom = bar - current_cost
+    fits = exempt or (current_cost + new_cost) <= bar
+    out = {"income": round(income, 1), "bar": round(bar, 1),
+           "current": round(current_cost, 1), "headroom": round(headroom, 1),
+           "new_cost": round(new_cost, 1), "exempt": exempt, "fits": fits}
+    print(json.dumps(out))
+    sys.exit(0 if fits else 3)
+
+
 def main():
     if len(sys.argv) < 3:
-        print("Usage: budget_check.py <new_tpu_type> <new_tier> [new_lo_price]")
+        print("Usage: budget_check.py <new_tpu_type> <new_tier> [new_lo_price] [group]")
+        print("       budget_check.py --query <new_tpu_type> <new_tier> [new_lo_price] [group]")
         sys.exit(1)
+
+    # --query: machine-readable headroom probe (route_check's greedy loop). Emits
+    # one JSON line, exit 0=fits / 3=over-bar. Must be parsed BEFORE the normal
+    # gate so the flag never lands in the positional slots.
+    if sys.argv[1] == '--query':
+        if len(sys.argv) < 4:
+            print("Usage: budget_check.py --query <new_tpu_type> <new_tier> [new_lo_price] [group]")
+            sys.exit(1)
+        q_tpu = sys.argv[2]
+        q_tier = sys.argv[3]
+        q_lo = sys.argv[4] if len(sys.argv) > 4 else None
+        q_group = (sys.argv[5] if len(sys.argv) > 5
+                   else os.environ.get('TPU_NEW_GROUP', ''))
+        _run_query(q_tpu, q_tier, q_lo, q_group)
+        return  # _run_query exits; defensive
         
     new_tpu_type = sys.argv[1]
     new_tier = sys.argv[2]
@@ -225,64 +324,19 @@ def main():
     limit = income / 10.0
     jobs_file = os.environ.get('TPU_JOBS_FILE', os.path.expanduser('~/.tpu_jobs.json'))
     agent_name = "npu" if "npu" in jobs_file else "tpu"
-    
-    current_cost = 0.0
     cache_file = os.environ.get('TPU_CHECK_CACHE_FILE', os.path.expanduser('~/.tpu_check_cache.txt'))
-    cache_status = {}
-    if os.path.exists(cache_file):
-        try:
-            with open(cache_file, 'r') as f:
-                cf_content = f.read()
-                cf_content = re.sub(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])', '', cf_content)
-                for m in re.finditer(r'│\s*(\d{8,11})\s*│\s*([A-Za-z0-9_-]+)\s*│', cf_content):
-                    cache_status[m.group(1)] = m.group(2).lower()
-        except Exception as e:
-            print(f"\033[33m[budget check] Warning: Error parsing {cache_file}: {e}\033[0m")
 
-    if os.path.exists(jobs_file):
-        try:
-            with open(jobs_file, 'r') as f:
-                jobs = json.load(f)
-                stale_rows, stale_cost = 0, 0.0
-                for xid, info in jobs.items():
-                    # Only count active jobs (SUBMITTED or RUNNING)
-                    if info.get('status') in ['SUBMITTED', 'RUNNING']:
-                        # Count SUBMITTED-and-PENDING as well as RUNNING against
-                        # the bar (operator 2026-08-27, option B): a job the
-                        # scheduler has committed to the XM queue reserves budget
-                        # even before its Borg gang is RUNNING, so the drainer
-                        # cannot flood the queue with an unbounded backlog of
-                        # pending jobs that each look free. The reroute lane
-                        # (pending > 600s -> auto-cancel + requeue) bounds how
-                        # long any one pending job can hold that reservation, so
-                        # it can never occupy the bar permanently. We still drop
-                        # ZOMBIES: a row whose live check-cache state is terminal
-                        # (not running/pending/queued) is no longer real load.
-                        if xid in cache_status and cache_status[xid] not in ['running', 'pending', 'queued']:
-                            continue
-                        # g3/g5 draw on their own balance, not G9's income, so a
-                        # job there never spends the budget this gate protects --
-                        # exclude it from the G9 aggregate. (Kept from the earlier
-                        # change; operator has not revisited the g3/g5 exemption.)
-                        if is_exempt_group(info.get('alloc', '')):
-                            continue
-                        cost = get_job_cost(info.get('tpu_type', ''), info.get('tier', 'PROD'))
-                        if xid not in cache_status:
-                            age = job_age_hours(info)
-                            if age is not None and age > STALE_HOURS:
-                                # Absent from the live cache AND older than any real
-                                # job here runs: a never-migrated corpse, not load.
-                                stale_rows += 1
-                                stale_cost += cost
-                                continue
-                        current_cost += cost
-                if stale_rows:
-                    print(f"\033[33m[budget check] Warning: excluded {stale_rows} stale registry row(s) "
-                          f"(status never migrated, >{STALE_HOURS:.0f}h old, absent from check cache) "
-                          f"worth {stale_cost:.1f} credits/hr -- reconcile the registry.\033[0m")
-        except Exception as e:
-            print(f"\033[33m[budget check] Warning: Error parsing {jobs_file}: {e}\033[0m")
-                
+    # Single owner of the billing caliber (shared with --query): option B
+    # accounting -- running+pending+queued, g3/g5 excluded, zombies dropped.
+    def _warn(msg):
+        print(f"\033[33m[budget check] Warning: {msg}\033[0m")
+    current_cost, stale_rows, stale_cost = compute_current_cost(
+        jobs_file, cache_file, warn=_warn)
+    if stale_rows:
+        print(f"\033[33m[budget check] Warning: excluded {stale_rows} stale registry row(s) "
+              f"(status never migrated, >{STALE_HOURS:.0f}h old, absent from check cache) "
+              f"worth {stale_cost:.1f} credits/hr -- reconcile the registry.\033[0m")
+
     new_cost = get_job_cost(new_tpu_type, new_tier, new_lo_price)
     total_cost = current_cost + new_cost
     
@@ -341,9 +395,18 @@ def main():
         sys.exit(0)
 
     if total_cost > limit:
+        # Stable, ANSI-free, stdout, own line: route_check's submit path greps
+        # THIS marker (the exit code is swallowed by the wrapper's `return 1`, so
+        # the marker -- not the code -- is the primary signal there). A budget
+        # refusal is a transient fleet state, NOT a build failure: seeing this,
+        # route_check parks the job BUDGET_DEFERRED (auto-retried), never HELD.
+        print("[[BUDGET_DEFERRED]]")
         print(f"\033[31m[budget check] ERROR: Budget exceeded for {agent_name} check! Total projected cost ({total_cost:.1f}) exceeds the 1/10 limit ({limit:.1f}) of G9 income.\033[0m")
-        sys.exit(2)
-        
+        # exit 3 = budget-deferred (distinct from exit 2 = other refusal). Direct
+        # callers (budget_check --query, or anyone not behind the wrapper) can
+        # branch on it; the wrapper collapses it to non-zero either way.
+        sys.exit(3)
+
     sys.exit(0)
 
 if __name__ == '__main__':
