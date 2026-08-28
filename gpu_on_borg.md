@@ -212,8 +212,13 @@ logic to fix it without operator/monitor sign-off (it is a fleet-global lever).
 - `tpu preflight --tpu_type=h100-8 --group=9 --tier=BATCH` → GREEN + candidate
   cells with chips obtainable. GPU topology is validated too: `h100-16` is RED
   ("supported [1,2,4,8]") because 16 exceeds the 8-GPU H100 NVLink domain.
-- `tpu queue-status` shows `PLACEABLE now: h100-8 -> <cell> (<n> free slice(s))`
-  once enqueued — that IS the live proof the GPU availability path works.
+- `tpu queue-status` showing `PLACEABLE now: h100-8 -> <cell> (<n> free slice(s))`
+  proves only that the availability RPC returned a cell — NOT that the job will
+  run. It is a status query about capacity; it does not test the budget gate
+  (Rule 7), the IMEX grant (GB200), or preemption (Rule 6). A GB200 job sat
+  `PLACEABLE` for hours while budget-deferred, then crashed on IMEX. **The only
+  proof the end-to-end path works is a real job reaching RUNNING and writing its
+  own success verdict** — treat PLACEABLE as necessary, never sufficient.
 - **`obtainable` vs live-free** is the same distinction as TPU (`jobs.md`,
   `research/accelerator_choice.md`): the capacity table is a forecast; a real
   short enqueue is the only 100%-accurate placement test. GB200 is the sharp
