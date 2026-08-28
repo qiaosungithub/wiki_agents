@@ -192,6 +192,45 @@ local build + `--help` (do this FIRST — `jobs.md` §Debugging):
 | `from ml_collections import config_flags` with only the base `ml_collections` dep | `ImportError: cannot import name 'config_flags'` | Add `//third_party/py/ml_collections/config_flags` — it is a separate target; the JAX side only gets it transitively via flax/optax |
 | Using `//learning/brain/research/jax:gpu_support` for "CUDA runtime" | drags JAX's CUDA plugins into a torch-only job | Use `//third_party/gpus/cuda:cuda_runtime` — pure CUDA runtime, no JAX |
 
+### The Dependency Versions Come From The Staging Workspace, Not From You
+
+**Which `torch` your job links against is decided by the CitC workspace the
+build happens in — so changing `STAGE_WS_ROOT` silently changes your
+dependencies.** Workspaces sync to different google3 revisions and their
+`third_party` trees drift apart; the same `BUILD` file, same `main.py` and same
+workdir produced `torch 2.15.0a0` from one staging root and `torch 2.13.0` from
+another on the same day. **A two-minor-version move is enough to change NCCL and
+`torch.distributed` behaviour**, so a job that worked yesterday can hang today
+with nothing in your own code touched.
+
+```bash
+# what a workspace actually pins (semantic version AND upstream commit)
+grep -m1 -A2 'version:' \
+  /google/src/cloud/<user>/<workspace>/google3/third_party/py/<pkg>/METADATA
+```
+
+- **Record the runtime version from inside the job**, e.g. write `torch.__version__`
+  into the first heartbeat. That is what makes this diagnosable at all: two runs
+  of one binary disagreeing is invisible until each says which library it got.
+- **Do not read `third_party/py/torch/torch_version.py` to compare workspaces** —
+  it is a template, identical everywhere, and gives a confident "no difference"
+  for two trees that differ. `METADATA` carries the real value.
+- **Not every package moves together**: in the same pair of workspaces `torch`
+  differed while `numpy` was identical. Check the package you actually depend
+  on rather than assuming the whole tree shifted — or that it did not.
+
+### FlashAttention Is Available, With Two Conditions
+
+**`//third_party/py/flash_attn` exists and builds against the in-tree torch, but
+its `py_library` is visibility-restricted and its version also drifts per
+workspace.** Requirements and caveats, in the order they bite:
+
+| | |
+|---|---|
+| arch floor | **sm80 and up** — the build explicitly drops `sm_60`/`sm_70` as unsupported stubs, so A100 (sm80), H100 (sm90) and B200 (sm100) all qualify |
+| visibility | the `flash_attn` target is limited to a `friends` package group; **an experimental target is not in it and will fail at analysis time** — getting added is a review request to the package owner, not a build flag |
+| version skew | it moves with the workspace exactly like torch does (two staging roots differed by several beta revisions), so pin the same expectations here as above |
+
 ## The Startup Contract — Failures Before Your Code Runs
 
 **A failure that happens before your code runs measures your launch, not your
