@@ -849,6 +849,26 @@ Key facts:
   the wrong direction and fails differently. Worth noting the probe was written
   without reading Rule 5, which already documented this exact trap: the rule
   existed and still cost a run.
+- **After that fix the probe stopped failing and started *hanging* instead —
+  still UNTESTED, and the location of the hang is unknown.** The job wrote its
+  `start` record and then nothing for tens of minutes while the task stayed
+  scheduled. The reason nobody can say where it stopped is a design gap worth
+  copying the fix for: **the probe logged only its result, never its entry into
+  each step**, so "blocked inside the collective" and "died on the line before
+  it" produce byte-identical evidence. **Instrument entry into every blocking
+  step before you re-run** — re-running an uninstrumented probe buys another
+  round of the same silence.
+- **A tempting explanation that the evidence does not support: the torch version
+  changed underneath it.** The build did move from one staging workspace to
+  another and the linked torch really did go backwards by two minor versions
+  (§The Dependency Versions Come From The Staging Workspace) — that part is
+  confirmed. But the probe's whole API surface is
+  `dist.{init_process_group,all_reduce,barrier,destroy_process_group}` plus
+  `torch.cuda.*`, **all present in both versions**, so the version is a
+  *variable that was left uncontrolled*, not a diagnosis. **Treat it as
+  something to hold fixed while you look elsewhere**, and if you do want to
+  settle it, run the identical probe from both workspaces rather than reasoning
+  about changelogs.
 
 ## Accelerator Names, NVLink Domains, Capability
 
