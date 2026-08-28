@@ -182,24 +182,34 @@ default, and the default is somebody else's idea of what you meant.** Omitting
 `--config` does not reliably kill the job — the launcher supplies its own
 default and assembles it into a full `configs/load_config.py:<name>` path, so
 the binary receives something syntactically valid either way. What happens next
-depends entirely on **your** checkout:
+depends entirely on **the checkout the entry packages** — which is the one named
+in its `workdir`, not necessarily the one you are standing in:
 
-| your `configs/` | outcome | how you find out |
+| the packaged `configs/` | outcome | how you find out |
 |---|---|---|
 | no file matching the default | dies loading the config | loudly, at startup |
 | a file matching the default, but not your arm | **runs the wrong experiment to completion** | only by reading which config it loaded |
+| the binary never declares `config` at all | `FATAL: Unknown command line flag` before `main()` | exit 1, zero CNS bytes, empty log — reads as hardware or permissions |
 | the file you wanted | fine | — |
 
-**The middle row is the expensive one, and every state-based check calls it
+**The second row is the expensive one, and every state-based check calls it
 green**: the work unit does not fail, the task reaches RUNNING, a logdir
 appears, checkpoints grow. Nothing distinguishes it from success except the
-identity of the config. So verify a defaulted flag in four steps and finish all
-four — read the launcher's `DEFINE_string` default, assemble the path it will
-build, `ls` that path in **your own** checkout, and if it exists, open it and
-confirm it is the run you meant. **Stopping after step three yields "there is a
-default, so it is fine", and "fine" is precisely the bad row.** Whether the same
-omission is fatal or silent differs per checkout, so another line's answer to
-this question is not evidence about yours.
+identity of the config. So verify a defaulted flag in five steps, and finish all
+five:
+
+| step | do | why it is not optional |
+|---|---|---|
+| 0 | read the queue entry's **`workdir`** — every `ls` below happens *there* | that directory is what gets packaged; your own checkout may be a different tree entirely, and an entry built from a stub `workdir` has no `configs/` at all |
+| 1 | read the launcher's `DEFINE_string` default for `config` | it changes; read it, do not recall it |
+| 2 | assemble the full path the launcher will build from it | the launcher composes `configs/load_config.py:<name>`; you are not passing a bare name |
+| 3 | `ls` that **exact filename** | `grep`-ing the directory returns near-misses — at the level of names, **similar is more dangerous than absent** |
+| 4 | open it and confirm it is *this* run | existence, then correct content, then **the version carrying your edits** — otherwise the config is right and the code is stale, and everything still reports green |
+
+**Stopping after step three yields "there is a default, so it is fine", and
+"fine" is precisely the bad row.** Whether the same omission is fatal or silent
+differs per checkout, so another line's answer to this question is not evidence
+about yours.
 
 **Symmetrically: disproving a stated cause of death does not prove survival.**
 When the reason given for "this will fail" turns out to be wrong, what has been
@@ -266,9 +276,13 @@ only change was how the producer opened the file.
 
 **Every job binary launched through the shared launcher must parse flags with
 `known_only=True`; a bare `app.run(main)` is a latent job-killer.** The launcher
-forwards its own selectors (`--xm_resource_alloc`, `--cell`, ...) to every
-binary it starts. A binary that has not declared them dies inside absl's flag
-parser:
+passes flags the binary never declared — both its own selectors
+(`--xm_resource_alloc`, `--cell`, ...) and, unconditionally, `--config` and
+`--workdir`, which it injects into every job's `executable_args` **without
+checking whether the binary defines them**. So this is not a defensive habit for
+large binaries: a self-contained 200-line probe that declares three flags of its
+own and wants nothing to do with the config system is killed by `--config`
+alone. A binary that has not declared them dies inside absl's flag parser:
 
 ```python
 # WRONG — dies on the launcher's own flags
