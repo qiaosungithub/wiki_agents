@@ -44,18 +44,36 @@ export STAGE_WS_ROOT=/google/src/cloud/<user>/<workspace>/google3
 S=$STAGE_WS_ROOT/experimental/qiaos/eqr_jax_final_stages
 mkdir -p "$S" && echo probe-$$ > "$S/__probe" && sleep 5 && cat "$S/__probe"
 # prints the payload -> usable; "No such file" after rc=0 -> drained, pick another
+# and probe a KNOWN-BAD root too: if both look fine, the probe is what is broken
 ```
 
-Three things this does and does not buy you:
+What this does and does not buy you:
 
+- **The export only reaches a launch your own shell performs.** A job drained
+  from the queue is staged by the long-lived build-worker, which uses the
+  environment frozen at *its* start — so exporting in your shell changes
+  nothing for a queued entry, and neither does editing the wrapper without
+  restarting the worker. Check `/proc/<worker-pid>/environ`, not your own.
+- **A failed write needs a cause, exactly like a successful one.** `rc=1` on a
+  fresh root usually means the staging subdir does not exist yet (`mkdir -p`
+  and it works), not that the workspace is unhealthy — identical observation,
+  opposite remedy. Conversely `rc=0` is the drained case's signature.
 - **Which workspace is healthy is a fact with a shelf life — probe, never
   inherit.** The wrapper's default was itself switched after the previous
   default was found dropping writes, and defaults go stale the same way; the
   comment recording one as verified healthy is a log entry, not a guarantee.
+  The same applies to "this directory does not exist": someone may have created
+  it a minute after you looked.
 - **Every CitC workspace lives on the same `fuse.srcfsd` mount, so the hatch
   changes workspaces, not filesystems.** It does nothing about an srcfs restart
   cutting the staging→launch window (that yields a task with no work units);
   the only lever there is keeping the window short.
+- **Moving workspaces does not buy you quota, only distance from a workspace
+  that is already broken.** The CreateSnapshot token bucket is **per-user**, so
+  concurrent stage-writes drain the same bucket whichever workspaces they target
+  — which is why the wrapper serializes stage-writes under a per-user lock, and
+  why staging in parallel across roots reproduces the storm rather than
+  escaping it.
 - **Staging is checked when you enqueue, but consumed after the build lock
   releases — minutes to hours later.** Re-verify the stagedir (`config.sh`
   present and non-empty, checked twice a few seconds apart) *after* acquiring
