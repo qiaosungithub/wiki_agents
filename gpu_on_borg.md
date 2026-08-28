@@ -110,19 +110,25 @@ absent on a GPU job, the binary is CPU-only and will report
 covers the GCP `python_container` path; a Borg job gets CUDA from the build flag,
 not the image.
 
-**Side effect worth knowing, because it lands on other lanes: building a GPU
-target repoints the `blaze-bin` convenience symlink at the cuda output tree, and
-any script holding a hardcoded `blaze-bin/...` path silently stops finding its
-binary.** CPU and CUDA builds write to sibling trees
-(`blaze-out/k8-fastbuild/bin` vs `.../k8-fastbuild-cuda/bin`), only one is
-linked at a time, and a GPU-only tree contains none of the CPU-side tools.
-Nothing is deleted — they are still on disk in the other tree.
+**Side effect worth knowing, because it lands on other lanes: running
+`blaze build --config=cuda` yourself in a shared workspace repoints that
+workspace's `blaze-bin` symlink at the cuda output tree, and any script holding
+a hardcoded `blaze-bin/...` path silently stops finding its binary.** CPU and
+CUDA builds write to sibling trees (`blaze-out/k8-fastbuild/bin` vs
+`.../k8-fastbuild-cuda/bin`), only one is linked at a time, and a GPU-only tree
+contains none of the CPU-side tools. Nothing is deleted — they are still on disk
+in the other tree.
 
-**No one performs this, which is why it has no owner.** The build is run by the
-shared build-worker on whatever it drains next, so the symlink flips whenever a
-GPU entry reaches the head of a queue — no human action, nothing to review, and
-the lane that submitted the entry never sees it. `blaze-bin` encodes "the config
-**I** built last", and on a shared build lane there is no *I*.
+**Enqueueing a GPU job does NOT do this — measured, and the distinction is the
+whole point.** A queued job is packaged into its own stagedir and built through
+xmanager from there, so it never runs `blaze` in the shared workspace and the
+symlink does not move (verified across a full claim → build → XID cycle on a
+GPU entry). **The hazard is the interactive build you run by hand while
+debugging**, which is also the one that feels private: your own target, your own
+shell, a flag the docs told you to pass, no shared file touched — and `blaze`
+rewrites the symlink on your behalf. Hence the containment: **do hand-run CUDA
+builds in a workspace of your own**, and treat `blaze-bin` in a shared checkout
+as belonging to whoever built there last.
 
 Two properties make the damage quiet:
 
