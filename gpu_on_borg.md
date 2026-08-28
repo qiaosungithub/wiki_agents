@@ -10,7 +10,8 @@ the word "GPU").
 `--tpu_type=<gpu>-<n>` (e.g. `h100-8`) and `--archs=<gpu>`; the launcher
 recognises the GPU arch and builds a CUDA binary. Everything below is the set of
 places where "GPU" and "TPU" diverge — get these wrong and the failure is
-usually a silent pre-`main()` death behind the Borg log wall.
+usually a silent pre-`main()` death behind the Borg log wall (§The Startup
+Contract classifies that whole family).
 
 ## The Submission, End To End
 
@@ -94,6 +95,37 @@ local build + `--help` (do this FIRST — `jobs.md` §Debugging):
 | `from ml_collections import config_flags` with only the base `ml_collections` dep | `ImportError: cannot import name 'config_flags'` | Add `//third_party/py/ml_collections/config_flags` — it is a separate target; the JAX side only gets it transitively via flax/optax |
 | Using `//learning/brain/research/jax:gpu_support` for "CUDA runtime" | drags JAX's CUDA plugins into a torch-only job | Use `//third_party/gpus/cuda:cuda_runtime` — pure CUDA runtime, no JAX |
 
+## The Startup Contract — Failures Before Your Code Runs
+
+**A failure that happens before your code runs measures your launch, not your
+hardware.** Three separate rules below are the same trap at three different
+moments of startup, and all three mimic a hardware, capacity, or permission
+problem — which is why they are expensive. Name the phase first, then read the
+rule that owns it:
+
+| startup phase | what happens there | how it fails | rule |
+|---|---|---|---|
+| module import | imports run before `InitGoogle` finishes | SIGABRT / exit 134, empty app log | Rule 4 |
+| flag parsing, inside `app.run` | absl parses argv — including the launcher's own selectors | `Task exited with code 1`, **zero** bytes on CNS, output dir never created | Rule 4b |
+| process fan-out, before the first collective | your own multi-GPU spawn/fork | a google3 assertion (e.g. on `fork`) | Rule 5, trap (i) |
+
+Two consequences worth stating separately:
+
+- **A step that never ran proves nothing about the step after it — record that
+  as UNTESTED, never as FAILED.** A probe killed at fan-out says nothing about
+  NCCL; a binary killed at flag parsing says nothing about the card. The two
+  words send the next reader in opposite directions: *failed* abandons the
+  path, *untested* fixes the harness.
+- **The cheap discriminator is whether the job wrote its own first line to
+  CNS.** No output dir at all means the death precedes user code, so look here;
+  a `start` record followed by silence means the hardware stage was reached and
+  the rules below do not apply. Run the launcher's argv shape on the
+  workstation first (Rule 4b) — the whole class is reproducible in seconds
+  without a build+queue cycle.
+
+A startup failure this table does not name belongs **here**, next to its phase,
+not appended to whichever rule happened to catch it.
+
 ## Rule 4 — No File/RPC At Module Import (InitGoogle Not Done)
 
 **Any CNS/file/RPC op at MODULE-LOAD time aborts the task before `main()`** with
@@ -146,7 +178,7 @@ What the failure looks like, and why it is so expensive to diagnose:
 hardware or permission problem.** Two B200 jobs from two completely different
 binaries — one importing a training stack, one a self-contained 200-line soak —
 died identically this way, which briefly looked like "B200 is broken". It was
-not: a pre-`main()` death measures your launch, never your hardware.
+not — this is the startup contract above, at the flag-parsing phase.
 
 **Verify it locally in ten seconds** rather than spending a build+queue cycle:
 
@@ -167,8 +199,10 @@ is not a TPU multi-task job; the launcher's `is_tpu_job` is False for GPU, so it
 injects no JAX-coordination flags). Multi-GPU coordination is YOURS: for a
 single-host job, spawn one process per GPU yourself. Two non-obvious traps here,
 both of which every GPU-multicard torch line hits:
-- **Use `fork`, and take it from STDLIB `multiprocessing`, not
-  `torch.multiprocessing`.** google3 patches `torch.multiprocessing` to
+- **(i) Use `fork`, and take it from STDLIB `multiprocessing`, not
+  `torch.multiprocessing`.** This one kills the process at fan-out, before any
+  collective — §The Startup Contract, last phase. google3 patches
+  `torch.multiprocessing` to
   `g3lib.multiprocessing`, which *asserts* on `get_context("fork")` and whose
   `absl_spawn`/`absl_forkserver` replacements demand the process be started by
   `g3_multiprocessing.handle_main()` (not `app.run()`) and die in the bazel
@@ -306,6 +340,7 @@ logic to fix it without operator/monitor sign-off (it is a fleet-global lever).
 | `device_count()==0` on a GPU host | `--config=cuda` missing (Rule 2) — CPU-only build |
 | SIGABRT / exit 134, empty app log, "InitGoogle has not finished" | file/RPC at import time (Rule 4) |
 | `ImportError: config_flags` pre-main | missing `ml_collections/config_flags` dep (Rule 3) |
+| anything that dies before the job's own first CNS line | a startup-phase failure, not the hardware — §The Startup Contract |
 | job silently a TPU when you asked GPU (or vice versa) | used `--power` without pinning `--archs` (Rule 1) |
 | reached RUNNING then died `guarantee reclaim` | BATCH preemption (Rule 6) — resubmit PROD |
 | `analog` / `borg tasklog` = `PERMISSION_DENIED` (restricted-LOAS) | expected here; the log wall means the app MUST self-write evidence to CNS (Rule 4) — read state via `tpu check`, not the Borg log |
