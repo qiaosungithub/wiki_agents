@@ -188,6 +188,17 @@ checked the other's *downstream* reasoning, the faulty *premise* is what nobody
 re-examines. A self-correcting process beats an infallible one — but only while
 each round re-checks premises rather than conclusions.
 
+**And when you act on something you were told rather than something you saw, go
+back to the source first.** Hedges do not survive relay: whoever passes a
+finding along copies the conclusion and drops the "(unverified)", so a claim
+gets *more* confident the further it travels from the person who knows how weak
+it is. One round trip to the original — did they mark this unproven? — costs
+seconds, and is worth it whenever the next step is hard to walk back: editing
+shared docs, changing a config, killing something. **Agreement is not
+corroboration when it is the same evidence arriving twice**, and neither is it
+when several people ran the same incomplete checklist — count distinct methods,
+not distinct agreers.
+
 ## Maintaining Memory
 
 **Record a rule only when a future agent cannot cheaply infer it from the code,
