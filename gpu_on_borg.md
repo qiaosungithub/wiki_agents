@@ -490,6 +490,21 @@ both of which every GPU-multicard torch line hits:
   rejects it — the job dies at startup, before any step. Set `RANK`/`LOCAL_RANK`/
   `WORLD_SIZE` per forked child (and `MASTER_ADDR`/`MASTER_PORT` for NCCL init)
   the same way the smoke does.
+- **These GPU hosts are IPv6-only, so the rendezvous address must be `::1`, not
+  `127.0.0.1`** — a loopback-v4 `MASTER_ADDR` fails every non-zero rank at
+  `init_process_group` with `DistNetworkError ... errno: 97 - Address family not
+  supported by protocol`, while rank 0 sits in the store waiting for clients
+  that can never connect, so the symptom presents as a hang on rank 0 and only
+  the other ranks carry the real error. Measured on B200: with `::1` all eight
+  ranks reach `init_process_group_ok`. Make the address an env-overridable
+  default rather than a literal, and read the error off a *non-zero* rank.
+- **Split the probe into tiers so a coordination bug cannot masquerade as a NCCL
+  verdict.** Tier 0 is `torch.cuda.nccl.all_reduce` over all N devices from ONE
+  process — no rendezvous, no TCP store, no rank handshake; tier 1 is the real
+  N-process path. Tier 0 answers "do the cards talk to each other at all" in
+  seconds, and every failure it survives is then known to live in the
+  coordination layer, not in NCCL. Bank each tier's verdict to the durable log
+  the moment it is known, or a tier-1 wedge takes the tier-0 result down with it.
 - **Bound the collective, and bound it once for the whole probe — a per-rank
   timeout multiplies.** Collecting results with a per-worker deadline
   (`q.get(timeout=T)` in a loop over N ranks) gives a worst case of `N x T`,
@@ -751,6 +766,8 @@ are out of budget" are simultaneously true all the time.
 | `analog` / `borg tasklog` = `PERMISSION_DENIED` (restricted-LOAS) | expected here; the log wall means the app MUST self-write evidence to CNS (Rule 4) — read state via `tpu check`, not the Borg log |
 | enqueued PROD, placeable, but never builds; `BUDGET_DEFERRED` | budget gate: `new_cost > headroom` (Rule 7) — wait for a window / size down |
 | `gb200` build never starts, worker claims→releases fast | almost always Rule 7 budget, NOT ARM build failure — check `.tpu_local_queue.json` `last_reason` for `over bar` |
+| `init_process_group` fails `errno: 97 - Address family not supported`, rank 0 appears to hang | `MASTER_ADDR=127.0.0.1` on an IPv6-only host — use `::1` (Rule 5) |
+| a collective raises `ncclRemoteError ... Connection closed by remote peer` | usually a *victim's* view of another rank dying — find the child the parent never had to kill (Rule 5, and the B200 notes) |
 
 ## GB200 Is ARM (Grace) — The Build Cross-Compiles To aarch64
 
@@ -838,26 +855,35 @@ Key facts:
   inference.** Note the evidence is the job's OWN heartbeat on CNS, not a status
   query — that is the only class of evidence that survives both the Borg log
   wall and a broken CLI.
-- **Still untested on B200: multi-GPU NCCL.** The soak's NCCL probe reported
-  `nccl_all_ok: false`, but the error was `AssertionError: Use of 'fork' is
-  discouraged in Google3 (go/python-tips/018)` — the probe was killed by a
-  google3 assertion before it reached NCCL. **A probe that fails to run proves
-  nothing about what it was going to measure**, so this is UNTESTED, not failed.
-  The cause is trap (i) of Rule 5 and the fix is there: import STDLIB
-  `multiprocessing`, not `torch.multiprocessing`. **Do NOT follow the
-  assertion's own advice** to switch to `absl_spawn`/`absl_forkserver` — that is
-  the wrong direction and fails differently. Worth noting the probe was written
-  without reading Rule 5, which already documented this exact trap: the rule
-  existed and still cost a run.
-- **After that fix the probe stopped failing and started *hanging* instead —
-  still UNTESTED, and the location of the hang is unknown.** The job wrote its
-  `start` record and then nothing for tens of minutes while the task stayed
-  scheduled. The reason nobody can say where it stopped is a design gap worth
-  copying the fix for: **the probe logged only its result, never its entry into
-  each step**, so "blocked inside the collective" and "died on the line before
-  it" produce byte-identical evidence. **Instrument entry into every blocking
-  step before you re-run** — re-running an uninstrumented probe buys another
-  round of the same silence.
+- **NCCL collectives across all 8 B200s WORK — measured, single-process (tier
+  0); the 8-process path (tier 1) is a separate, still-open question.** Tier 0
+  ran `torch.cuda.nccl.all_reduce` over 8 devices and got the arithmetically
+  correct result on every card (NCCL 2.29.7), **13 seconds** after process
+  start. So the cards, the driver, the NCCL build and the fabric are all
+  cleared; whatever remains is in the multi-process layer above them. Keep the
+  two claims apart when quoting this — the tier-0 result does not depend on
+  tier 1 and must not be walked back with it.
+- **Getting there took three runs, and each one moved the failure earlier in the
+  stack — that progression, not any single verdict, is what to copy.** First
+  the probe never reached NCCL at all (`AssertionError: Use of 'fork' is
+  discouraged in Google3` — trap (i) of Rule 5, whose fix is stdlib
+  `multiprocessing`; **do NOT follow the assertion's own advice** to switch to
+  `absl_spawn`/`absl_forkserver`, which fails differently). Then it *hung* with
+  no way to say where, because **the probe logged only its result, never its
+  entry into each step**, so "blocked inside the collective" and "died on the
+  line before it" produced byte-identical evidence. Then, once every blocking
+  step wrote a breadcrumb on entry, the same run named its own failure in one
+  read. **Instrument entry into every blocking step before you re-run** —
+  re-running an uninstrumented probe buys another round of the same silence.
+- **A dead child and a hung child are indistinguishable unless the parent
+  records which ones it had to kill.** Have the parent log a breadcrumb before
+  it kills a still-running child and again when it reaps each one, with the
+  exit code: a child the parent never had to kill, carrying a negative exit
+  code, died on its own — a `-11` there is a SIGSEGV from the kernel and is a
+  *cause*, whereas its peers' `Connection closed by remote peer` is only the
+  *consequence* of it going away. Without that distinction the loudest error
+  message in the log belongs to a victim, and the investigation starts one
+  layer too high.
 - **A tempting explanation that the evidence does not support: the torch version
   changed underneath it.** The build did move from one staging workspace to
   another and the linked torch really did go backwards by two minor versions
