@@ -152,10 +152,18 @@ recipient's stream, confirm the job reached `RUNNING` and wrote its own verdict.
 
 **Then check that the value you read came from the command you ran.** A shell
 pipeline reports the exit status of its *last* stage, so `cmd | head` reads
-`head`'s success and hides `cmd`'s failure; use `out=$(cmd 2>&1); rc=$?` or
-`${PIPESTATUS[0]}`. Having performed X is not enough if the reading instrument
-is measuring something else — that mistake survives review, because the number
-is real and reproducible.
+`head`'s success and hides `cmd`'s failure. Capture instead with
+`out=$(cmd 2>&1); rc=$?`, or redirect to a file — **`${PIPESTATUS[0]}` is itself
+a trap**: any intervening statement, including the `rc=$?` assignment meant to
+save it, resets the array. Having performed X is not enough if the reading
+instrument measures something else; that mistake survives review, because the
+number is real and reproducible.
+
+**When someone corrects you, verify the method their correction rests on, not
+just its conclusion.** Once a claim has passed through two people who each only
+checked the other's *downstream* reasoning, the faulty *premise* is what nobody
+re-examines. A self-correcting process beats an infallible one — but only while
+each round re-checks premises rather than conclusions.
 
 ## Maintaining Memory
 
