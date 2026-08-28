@@ -177,6 +177,36 @@ Two consequences worth stating separately:
 A startup failure this table does not name belongs **here**, next to its phase,
 not appended to whichever rule happened to catch it.
 
+**And one phase fails without failing: a flag you did not pass takes its
+default, and the default is somebody else's idea of what you meant.** Omitting
+`--config` does not reliably kill the job — the launcher supplies its own
+default and assembles it into a full `configs/load_config.py:<name>` path, so
+the binary receives something syntactically valid either way. What happens next
+depends entirely on **your** checkout:
+
+| your `configs/` | outcome | how you find out |
+|---|---|---|
+| no file matching the default | dies loading the config | loudly, at startup |
+| a file matching the default, but not your arm | **runs the wrong experiment to completion** | only by reading which config it loaded |
+| the file you wanted | fine | — |
+
+**The middle row is the expensive one, and every state-based check calls it
+green**: the work unit does not fail, the task reaches RUNNING, a logdir
+appears, checkpoints grow. Nothing distinguishes it from success except the
+identity of the config. So verify a defaulted flag in four steps and finish all
+four — read the launcher's `DEFINE_string` default, assemble the path it will
+build, `ls` that path in **your own** checkout, and if it exists, open it and
+confirm it is the run you meant. **Stopping after step three yields "there is a
+default, so it is fine", and "fine" is precisely the bad row.** Whether the same
+omission is fatal or silent differs per checkout, so another line's answer to
+this question is not evidence about yours.
+
+**Symmetrically: disproving a stated cause of death does not prove survival.**
+When the reason given for "this will fail" turns out to be wrong, what has been
+refuted is that mechanism, not the outcome — the job can still die of something
+else, and it can also succeed at the wrong thing. Withdraw the mechanism and
+re-derive the outcome; they are separate claims.
+
 ## Rule 4 — No File/RPC At Module Import (InitGoogle Not Done)
 
 **Any CNS/file/RPC op at MODULE-LOAD time aborts the task before `main()`** with
