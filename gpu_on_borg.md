@@ -106,6 +106,16 @@ whose comment claimed "after imports is safe" — the rule is after `app.run`.)
 Parse flags with `known_only=True` for the same class of reason: the launcher
 forwards selectors the binary never declares.
 
+**A GPU job MUST write its own evidence (verdict / heartbeat with device_count +
+NCCL result) to CNS — the Borg log is behind restricted-LOAS and `analog` is
+blocked too** (`PERMISSION_DENIED owner=analog-rdl-engine`, same LOAS class as
+`aclcheck`/`ganpati`). So on this workstation you cannot read a GPU task's stdout
+after the fact by any means; if the job did not write to CNS, a failure leaves
+you with nothing but the one-line `tpu check` reason. Write the proof from inside
+`main()` (post-InitGoogle, per above) and flush it EARLY — a soak/train job
+should land `start` (with `device_count`) and a first NCCL-probe within the first
+minute, so a later preemption still leaves the evidence on disk.
+
 ## Rule 5 — GPU Topology: One Task, N Local GPUs, You Own NCCL
 
 A single `--tpu_type=h100-8` is **one Borg task with 8 local GPUs in one
@@ -255,7 +265,7 @@ logic to fix it without operator/monitor sign-off (it is a fleet-global lever).
 | `ImportError: config_flags` pre-main | missing `ml_collections/config_flags` dep (Rule 3) |
 | job silently a TPU when you asked GPU (or vice versa) | used `--power` without pinning `--archs` (Rule 1) |
 | reached RUNNING then died `guarantee reclaim` | BATCH preemption (Rule 6) — resubmit PROD |
-| `analog`/`borg tasklog` = `PERMISSION_DENIED` (restricted-LOAS) | expected on this workstation; make the app write its own diagnostics to CNS (`jobs.md` §Debugging), or read state via `tpu check` |
+| `analog` / `borg tasklog` = `PERMISSION_DENIED` (restricted-LOAS) | expected here; the log wall means the app MUST self-write evidence to CNS (Rule 4) — read state via `tpu check`, not the Borg log |
 | enqueued PROD, placeable, but never builds; `BUDGET_DEFERRED` | budget gate: `new_cost > headroom` (Rule 7) — wait for a window / size down |
 | `gb200` build never starts, worker claims→releases fast | almost always Rule 7 budget, NOT ARM build failure — check `.tpu_local_queue.json` `last_reason` for `over bar` |
 
