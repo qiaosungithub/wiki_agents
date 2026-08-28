@@ -894,8 +894,11 @@ Key facts:
   channels — and NCCL itself logs zero WARN and reports `Init COMPLETE` first.**
   Reproduced every time it was tried, always rank 0, always signal 11, 3-7 s
   after the collective begins; **two processes on two GPUs reproduce it**, so
-  iterate at that size rather than at eight. Ruled out, each by a run that
-  varied only that one thing: the device (rank 0 moved to `cuda:1` still died,
+  iterate at that size rather than at eight — but **a reproducer shrunk to speed
+  up the hunt is a tool for FINDING a bug, never for VERIFYING the fix: the
+  dimension you shrank is precisely the one it can no longer answer for you**,
+  so confirm the repair at full size before anyone ships it. Ruled out, each by
+  a run that varied only that one thing: the device (rank 0 moved to `cuda:1` still died,
   while the rank holding `cuda:0` survived), the store implementation (dropping
   a hand-built `TCPStore` for torch's own rendezvous changes nothing, and
   neither does `use_libuv=False`), NVLS (`32 nvls channels` -> `0`, still dies),
