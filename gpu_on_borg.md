@@ -561,12 +561,25 @@ floor and when the allocation holds no floor for that chip at all (typically:
 it does not participate in that market); preflight says `Cannot verify
 headroom` in the second case, but a summary that prints `0/32 = 0x` erases the
 distinction — **an "I don't know" rendered as a confident zero.** Do not size or
-reroute off that number. Read the reason text instead, which does separate them:
-`your group is 99% full` is real exhaustion, `Could not read ... quota` is an
-unverifiable allocation, and `Excluded by a triggered limit order` is the price
-gate — **and moving cells fixes only the first of the three.** The cheapest
-cross-check costs nothing: **if another job of the same arch and tier is
-currently RUNNING, the capacity exists**, whatever the headroom column says.
+reroute off that number; read the reason text, which does separate the cases:
+
+| reason says | what is true | what helps |
+|---|---|---|
+| `your group is 99% full` | the pool is exhausted | wait; another cell may help |
+| `Could not read ... quota ... Cannot verify` | **nothing is known** | cross-check (below) |
+| `Excluded by a triggered limit order` | the price gate stopped it | **another cell will not help** |
+| `quota=N, used=N, remaining=0` | **your own alloc is spent** | **another cell will not help** — this is per-allocation, not per-cell; wait for your own jobs, or others on the same alloc, to release |
+
+**The last two rows share an opening phrase with the second (`PROD quota
+headroom is thin`), so reading only the first clause puts you in the wrong
+row** — read on until you see either concrete `quota=/used=/remaining=` numbers
+(your alloc really is spent) or the words `Cannot verify` (nothing was read).
+
+The cross-check for the unreadable case is free but narrower than it looks: **a
+RUNNING job proves capacity only if it belongs to your own group/alloc.** Quota
+is granted per allocation, so someone else's job of the same arch and tier shows
+that the fleet has the chips, not that you may have any — "in stock" and "you
+are out of budget" are simultaneously true all the time.
 
 ## Preflight, Placement, Capacity (Same Tools, GPU-Aware)
 
