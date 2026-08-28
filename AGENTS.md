@@ -144,11 +144,20 @@ what the claim actually asks.
 | This capacity is usable | the router shows the shape `PLACEABLE` | that an availability RPC answered; not the budget gate, the authorization, or preemption |
 | That agent still exists | a writer holds its log, or a dashboard says `ongoing` | that some process writes a file; dashboards go stale and are not authoritative |
 | My alert reached the on-call | the notify call returned `rc=0` | that *a* worker accepted it — possibly a retired session nobody reads |
+| This will never finish / never be released | it is making no progress now, and the ways it could finish are all ruled out | that it is stuck **at this instant** — a very slow counterpart can still return, and ruling out the exits you thought of is not ruling out the ones you did not |
 
-The last row is the general trap: **a silent success is more dangerous than a
-clean failure**, because failure leaves a trace and `rc=0` makes every check
-look green. Close the loop at the far end — confirm the message arrived in the
-recipient's stream, confirm the job reached `RUNNING` and wrote its own verdict.
+The last row is the trap in its **time** form, and it is the one that reads as a
+verdict: the reading is correct, and it is a reading of *now* answering a
+question about *later*. Say "I do not know when it will be released", never "it
+will not be released" — and when a fix or a fresh sample proves it wrong,
+recognise that the observation was never wrong, only its tense. Everything above
+it is the trap in its **space** form: the query measured the neighbouring thing.
+
+The `rc=0` row is the general case of that: **a silent success is more dangerous
+than a clean failure**, because failure leaves a trace and `rc=0` makes every
+check look green. Close the loop at the far end — confirm the message arrived in
+the recipient's stream, confirm the job reached `RUNNING` and wrote its own
+verdict.
 
 **Then check that the value you read came from the command you ran.** A shell
 pipeline reports the exit status of its *last* stage, so `cmd | head` reads
@@ -158,6 +167,20 @@ a trap**: any intervening statement, including the `rc=$?` assignment meant to
 save it, resets the array. Having performed X is not enough if the reading
 instrument measures something else; that mistake survives review, because the
 number is real and reproducible.
+
+**A pipe truncates the answer as well as the status.** `| head -N` silently
+drops content, and it drops it invisibly — the output still looks complete,
+because it was always meant to be several lines. An item that vanishes from a
+windowed listing has not necessarily vanished; it may have been pushed out by a
+new one. **A disappearance is only evidence once you know the total** — count
+first, or read it whole.
+
+**And a failed reproduction only refutes when it reproduces the conditions.**
+Running the check somewhere else, or on a shorter timescale than the effect,
+turns a refutation into an unrelated success: the same probe against a different
+workspace, or a 3-second window against a 30-minute one, cannot see the thing it
+claims to rule out. State what the negative result covers, not what it feels
+like.
 
 **When someone corrects you, verify the method their correction rests on, not
 just its conclusion.** Once a claim has passed through two people who each only

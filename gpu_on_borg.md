@@ -29,6 +29,39 @@ The chain is identical to TPU (`enqueue → local queue → route_check worker �
 tpu queue → preflight → xm_launcher → Borg`). What the GPU arch changes at each
 stage is the rest of this doc.
 
+**A GPU job stages through the same shared CitC workspace as every TPU job, so
+probe that workspace before you enqueue — a drained one accepts your writes and
+discards them.** A CitC workspace can enter a state where a write returns `rc=0`
+and reads back correctly for a few seconds, then is gone; the stagedir is left
+empty (or is `mkdir`-ed and never filled) and the launch dies looking for its
+`config.sh`. This is **per-workspace, not per-filesystem** — the fix is to stage
+somewhere else, via the wrapper's escape hatch:
+
+```bash
+# the wrapper reads ${STAGE_WS_ROOT:-<its default>}, so export overrides it,
+# no edit to the shared wrapper needed. The staging subdir must already exist.
+export STAGE_WS_ROOT=/google/src/cloud/<user>/<workspace>/google3
+S=$STAGE_WS_ROOT/experimental/qiaos/eqr_jax_final_stages
+mkdir -p "$S" && echo probe-$$ > "$S/__probe" && sleep 5 && cat "$S/__probe"
+# prints the payload -> usable; "No such file" after rc=0 -> drained, pick another
+```
+
+Three things this does and does not buy you:
+
+- **Which workspace is healthy is a fact with a shelf life — probe, never
+  inherit.** The wrapper's default was itself switched after the previous
+  default was found dropping writes, and defaults go stale the same way; the
+  comment recording one as verified healthy is a log entry, not a guarantee.
+- **Every CitC workspace lives on the same `fuse.srcfsd` mount, so the hatch
+  changes workspaces, not filesystems.** It does nothing about an srcfs restart
+  cutting the staging→launch window (that yields a task with no work units);
+  the only lever there is keeping the window short.
+- **Staging is checked when you enqueue, but consumed after the build lock
+  releases — minutes to hours later.** Re-verify the stagedir (`config.sh`
+  present and non-empty, checked twice a few seconds apart) *after* acquiring
+  the lock. A one-shot check cannot see a failure mode whose whole signature is
+  "correct for a few seconds".
+
 ## Rule 1 — Explicit `--tpu_type`, NEVER `--power` Router For The Arch
 
 **Give a GPU job an explicit `--tpu_type=<gpu>-<n>` and pin `--archs=<gpu>` to
