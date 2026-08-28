@@ -402,10 +402,13 @@ Key facts:
   `nccl_all_ok: false`, but the error was `AssertionError: Use of 'fork' is
   discouraged in Google3 (go/python-tips/018)` — the probe was killed by a
   google3 assertion before it reached NCCL. **A probe that fails to run proves
-  nothing about what it was going to measure.** Use `absl_forkserver` /
-  `absl_spawn`, never `mp.get_context("fork")`, in any google3 multi-process GPU
-  probe (a `fork`-based sanity path can sit unnoticed for a long time if
-  something else kills the job earlier).
+  nothing about what it was going to measure**, so this is UNTESTED, not failed.
+  The cause is trap (i) of Rule 5 and the fix is there: import STDLIB
+  `multiprocessing`, not `torch.multiprocessing`. **Do NOT follow the
+  assertion's own advice** to switch to `absl_spawn`/`absl_forkserver` — that is
+  the wrong direction and fails differently. Worth noting the probe was written
+  without reading Rule 5, which already documented this exact trap: the rule
+  existed and still cost a run.
 
 ## Accelerator Names, NVLink Domains, Capability
 
