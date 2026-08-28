@@ -150,6 +150,13 @@ clean failure**, because failure leaves a trace and `rc=0` makes every check
 look green. Close the loop at the far end — confirm the message arrived in the
 recipient's stream, confirm the job reached `RUNNING` and wrote its own verdict.
 
+**Then check that the value you read came from the command you ran.** A shell
+pipeline reports the exit status of its *last* stage, so `cmd | head` reads
+`head`'s success and hides `cmd`'s failure; use `out=$(cmd 2>&1); rc=$?` or
+`${PIPESTATUS[0]}`. Having performed X is not enough if the reading instrument
+is measuring something else — that mistake survives review, because the number
+is real and reproducible.
+
 ## Maintaining Memory
 
 **Record a rule only when a future agent cannot cheaply infer it from the code,
