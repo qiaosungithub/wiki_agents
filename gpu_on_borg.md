@@ -554,6 +554,20 @@ logic to fix it without operator/monitor sign-off (it is a fleet-global lever).
 | `BUDGET_DEFERRED … over bar` | budget gate: `new_cost > headroom` | wait for window / size down / free own headroom |
 | reached RUNNING then `Preempted` | BATCH lost chips to higher prio | `--tier=PROD` (Rule 6) |
 
+**A quota headroom of `0` does not mean "no capacity" — it also renders "could
+not read the quota", and the two need opposite responses.** The router computes
+it from a floor lookup that returns 0 both when an allocation has spent its
+floor and when the allocation holds no floor for that chip at all (typically:
+it does not participate in that market); preflight says `Cannot verify
+headroom` in the second case, but a summary that prints `0/32 = 0x` erases the
+distinction — **an "I don't know" rendered as a confident zero.** Do not size or
+reroute off that number. Read the reason text instead, which does separate them:
+`your group is 99% full` is real exhaustion, `Could not read ... quota` is an
+unverifiable allocation, and `Excluded by a triggered limit order` is the price
+gate — **and moving cells fixes only the first of the three.** The cheapest
+cross-check costs nothing: **if another job of the same arch and tier is
+currently RUNNING, the capacity exists**, whatever the headroom column says.
+
 ## Preflight, Placement, Capacity (Same Tools, GPU-Aware)
 
 - `tpu preflight --tpu_type=h100-8 --group=9 --tier=BATCH` → GREEN + candidate
