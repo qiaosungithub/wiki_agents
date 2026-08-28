@@ -219,6 +219,16 @@ Two consequences worth stating separately:
   the rules below do not apply. Run the launcher's argv shape on the
   workstation first (Rule 4b) — the whole class is reproducible in seconds
   without a build+queue cycle.
+- **"RUNNING with no output yet" is not in this table, and no status query can
+  place it there.** A task that XManager calls healthy while nothing has
+  appeared on CNS is equally consistent with an ordinary slow startup and with a
+  death in one of the phases above — XM state records that the task was
+  scheduled, not that it is progressing. **Waiting is the correct action, and
+  the honest description of it is "waiting", not "diagnosing".** The only thing
+  that converts the wait into an answer is the job emitting something of its
+  own, which is why the heartbeat has to be the first thing `main()` does. And
+  judge the wait against a **measured** startup time for this binary: **the
+  first ever run of a job has no baseline, so "it feels slow" is not evidence.**
 
 A startup failure this table does not name belongs **here**, next to its phase,
 not appended to whichever rule happened to catch it.
