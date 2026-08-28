@@ -768,7 +768,7 @@ are out of budget" are simultaneously true all the time.
 | `gb200` build never starts, worker claims→releases fast | almost always Rule 7 budget, NOT ARM build failure — check `.tpu_local_queue.json` `last_reason` for `over bar` |
 | `init_process_group` fails `errno: 97 - Address family not supported`, rank 0 appears to hang | `MASTER_ADDR=127.0.0.1` on an IPv6-only host — use `::1` (Rule 5) |
 | a collective raises `ncclRemoteError ... Connection closed by remote peer` | usually a *victim's* view of another rank dying — find the child the parent never had to kill (Rule 5, and the B200 notes) |
-| rank 0 dies with SIGSEGV in its first collective; NCCL logs `Init COMPLETE` and no WARN | the open multi-process B200 failure — reproduce with 2 processes, not 8 (B200 notes) |
+| rank 0 dies with SIGSEGV in its first collective; NCCL logs `Init COMPLETE` and no WARN | torch's `LOG(INFO)` hitting a broken debug-log sink, not NCCL — raise absl `minloglevel` in each child before the first collective (B200 notes) |
 | a `faulthandler` dump file is created but stays 0 bytes | absl owns SIGSEGV from import time; capture fd 2 with `dup2` instead (B200 notes) |
 
 ## GB200 Is ARM (Grace) — The Build Cross-Compiles To aarch64
@@ -858,13 +858,37 @@ Key facts:
   query — that is the only class of evidence that survives both the Borg log
   wall and a broken CLI.
 - **NCCL collectives across all 8 B200s WORK — measured, single-process (tier
-  0); the multi-process path (tier 1) does NOT, and that blocks DDP.** Tier 0
+  0); the multi-process path (tier 1) works too, but only with the logging
+  workaround below.** Tier 0
   ran `torch.cuda.nccl.all_reduce` over 8 devices and got the arithmetically
   correct result on every card (NCCL 2.29.7), **13 seconds** after process
   start. So the cards, the driver, the NCCL build and the fabric are all
   cleared; whatever remains is in the multi-process layer above them. Keep the
   two claims apart when quoting this — the tier-0 result does not depend on
   tier 1 and must not be walked back with it.
+- **The multi-process failure is NOT NCCL: torch's own `LOG(INFO)` inside
+  `ProcessGroupNCCL::initNCCLComm()` reaches a Remote Debug Logging sink that
+  segfaults, and the fix is to silence INFO before the first collective.** The
+  symbolized stack, read bottom-up, is `allreduce() -> initNCCLComm() ->
+  LogMessage::Flush() -> LogToSinks() -> BatchingRemoteDebugLogSink::Send() ->
+  absl::Mutex::UnlockSlow()`. NCCL never misbehaves — which is exactly why its
+  own log shows zero WARN and an `Init COMPLETE` immediately before the death,
+  why the dying rank has built none of its P2P channels, and why `barrier` dies
+  too: **`initNCCLComm()` is lazy, so whichever collective runs first triggers
+  it.** Rank 0 is special only because that log line is one rank 0 alone emits.
+  Workaround, applied in each child after fork and before the first collective:
+  raise absl's `minloglevel` (`absl.flags._cpp_flags.set_flag('minloglevel',
+  '1')`), which short-circuits `LogMessage::Flush()` on its first line, upstream
+  of the sink. **Measured at `minloglevel=2`: tier 1 passes and `all_reduce`
+  returns the arithmetically correct value; `=1` is the better setting because
+  it preserves WARNING — NCCL's own error channel — but is not yet measured.**
+  Setting `TORCH_CPP_LOG_LEVEL` instead does NOT work: torch reads it once at
+  import, so a child that sets it after the parent imported torch is too late.
+  Two BUILD deps are needed (`//third_party/py/absl/flags:_cpp_flags` and
+  `//base/python/clif:cpp_flag`) and neither arrives transitively — wrap the
+  import in `try/except` and the `ImportError` is swallowed, leaving a run that
+  silently applies nothing and reads as "the fix did not work". This is a
+  workaround, not a repair: the sink's bug is still there.
 - **Tier 1 fails this way: rank 0 takes a SIGSEGV the first time the process
   executes ANY NCCL collective, as NCCL is about to build its P2P/CUMEM
   channels — and NCCL itself logs zero WARN and reports `Init COMPLETE` first.**
