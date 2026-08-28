@@ -223,12 +223,19 @@ Two consequences worth stating separately:
   place it there.** A task that XManager calls healthy while nothing has
   appeared on CNS is equally consistent with an ordinary slow startup and with a
   death in one of the phases above — XM state records that the task was
-  scheduled, not that it is progressing. **Waiting is the correct action, and
-  the honest description of it is "waiting", not "diagnosing".** The only thing
-  that converts the wait into an answer is the job emitting something of its
-  own, which is why the heartbeat has to be the first thing `main()` does. And
-  judge the wait against a **measured** startup time for this binary: **the
-  first ever run of a job has no baseline, so "it feels slow" is not evidence.**
+  scheduled, not that it is progressing. **Check the queue's own state before
+  reading anything into it: the two systems use the word differently, and
+  XM `RUNNING` while the queue still says `SUBMITTED` usually just means the
+  task is waiting for its accelerators** — minutes of silence there are
+  expected, not a symptom. Quote which system you are reporting, or "RUNNING
+  but producing nothing" describes a far more alarming situation than the one
+  you are looking at. Once the queue agrees the job is running, **waiting is
+  still the correct action, and the honest description of it is "waiting", not
+  "diagnosing"**; the only thing that converts the wait into an answer is the
+  job emitting something of its own, which is why the heartbeat has to be the
+  first thing `main()` does. Judge the wait against a **measured** startup time
+  for this binary: **the first ever run has no baseline, so "it feels slow" is
+  not evidence** — and that run is exactly where the baseline comes from.
 
 A startup failure this table does not name belongs **here**, next to its phase,
 not appended to whichever rule happened to catch it.
