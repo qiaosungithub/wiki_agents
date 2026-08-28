@@ -435,6 +435,15 @@ both of which every GPU-multicard torch line hits:
   rejects it — the job dies at startup, before any step. Set `RANK`/`LOCAL_RANK`/
   `WORLD_SIZE` per forked child (and `MASTER_ADDR`/`MASTER_PORT` for NCCL init)
   the same way the smoke does.
+- **Bound the collective, and bound it once for the whole probe — a per-rank
+  timeout multiplies.** Collecting results with a per-worker deadline
+  (`q.get(timeout=T)` in a loop over N ranks) gives a worst case of `N x T`,
+  because the ranks are drained in sequence: eight ranks at five minutes each is
+  forty, not five. If the heartbeat only starts after the probe returns, that
+  whole span looks from outside exactly like a job that died at startup.
+  **Derive the worst case before choosing the constant, and keep the probe's
+  total budget shorter than the interval at which anyone will conclude the job
+  is dead.**
 
 NVLink domain caps the fully-connected single slice
 (table below); above it, chips talk network RDMA (legal, not faster for
