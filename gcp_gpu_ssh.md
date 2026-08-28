@@ -83,6 +83,34 @@ Note: per-user login is instance-level here; other users reach these VMs via
 **project-level** metadata keys, so editing one instance's `enable-oslogin` or
 its instance-level keys does not touch their access.
 
+## Our Own Boxes (we created them; we can delete them)
+
+**`qiaos-4a100` — `a2-highgpu-4g`, 4×A100-SXM4-40GB, us-central1-f, on-demand
+(STANDARD, not preemptible).** Built with `enable-oslogin=FALSE` + a metadata
+ssh-key, so the login user is **`qiaos@`** — not the `qiaos_google_com@` that
+the OS-Login boxes want. Image is DLVM `pytorch-2-9-cu129-ubuntu-2404-nvidia-580`
+(driver preinstalled, torch 2.9.1+cu129, NV12 all-pairs NVLink), 1TB pd-ssd.
+
+```bash
+gcloud compute ssh qiaos@qiaos-4a100 --zone=us-central1-f --project=viscam-cloud
+```
+
+**Creating a 4-card box is a capacity fight, not a quota fight.** Quota being
+free tells you nothing: every 4-card shape in us-central1 (H100 `a3-highgpu-4g`,
+A100-80GB `a2-ultragpu-4g`, A100-40GB `a2-highgpu-4g`) can be STOCKOUT at once.
+Two traps:
+
+- **`Internal error` usually means STOCKOUT**, not a bug — some zones return it
+  instead of the honest `ZONE_RESOURCE_POOL_EXHAUSTED`.
+- **A created VM can be a phantom.** It reaches STAGING, then GCE reclaims it and
+  the insert operation ends up `STOCKOUT`. Poll until `RUNNING` before believing
+  it; check `gcloud compute operations list --filter="targetLink~<name>"`.
+
+So: retry in a loop across zones and shapes, drop optional attachments (8 local
+SSDs sharply cut the odds), and verify `RUNNING` before reporting success.
+H100 quota is **only** in us-central1 and europe-west4; everywhere else
+`GPUS_PER_GPU_FAMILY` is 0 and no amount of retrying helps.
+
 ## Access Prerequisites (usually already true)
 
 **"GCP SSH access" for an intern is several grants; verify each rather than

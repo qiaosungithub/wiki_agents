@@ -19,16 +19,23 @@ two marked values. Naive BPTT gradients vanish for early timesteps. Probes:
 | Code + notebook (local mirror) | `~/work/rnn_unroll/` (`train.py`, `unroll_util.py`, `unroll_optimizer.py`, `model.py`, `data.py`, `dynamic_precision.py`, `grad_probe.py`) |
 | Lab notebook (READ FIRST, bottom-up) | `~/work/rnn_unroll/research/AUTORESEARCH_LOG.md` |
 | Launch/watch scripts | `~/work/rnn_unroll/scripts/` |
-| **Compute (REMOTE)** | GCE box `deepflow-4a100-40gb-junhwahur-1` (zone us-central1-b, project viscam-cloud), 4×A100-40GB. Local `logs_*` are EMPTY — real logs live on the box. SSH via `../gcp_gpu_ssh.md`. |
+| **Compute (REMOTE)** | TWO 4×A100-40GB GCE boxes in project viscam-cloud, usable IN PARALLEL: `deepflow-4a100-40gb-junhwahur-1` (us-central1-b) and `qiaos-4a100` (us-central1-f, ours). Local `logs_*` are EMPTY — real logs live on the boxes. SSH via `../gcp_gpu_ssh.md`. |
 | W&B | project `rnn-unroll-adding` (entity zhh24-massachusetts-institute-of-technology); group = experiment name |
 | Results spreadsheet | EqR workbook `17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0`, tab **`RNN-unroll-adding (qiaos)`** (sheet-id 960697842). Log conclusions here (`../research/result_logging.md`). |
 
-**Compute is plain PROCESSES on a reserved box, NOT Borg/XManager** — no BATCH
+**Compute is plain PROCESSES on reserved boxes, NOT Borg/XManager** — no BATCH
 tier, nothing preemptible; `../jobs.md` does not apply. Runs are
-`CUDA_VISIBLE_DEVICES=N .venv/bin/python train.py …`, 12 lanes (3/GPU), driven by
-a `scripts/run_*.sh` scheduler that writes `_sched*.log` and a final `ALL DONE`
-marker; a `watch_*.sh` polls over SSH and pings the owning session via
+`CUDA_VISIBLE_DEVICES=N .venv/bin/python train.py …`, 12 lanes (3/GPU) PER BOX,
+driven by a `scripts/run_*.sh` scheduler that writes `_sched*.log` and a final
+`ALL DONE` marker; a `watch_*.sh` polls over SSH and pings the owning session via
 `~/.amply/bin/amply_notify <session_id> -`.
+
+**Two boxes = 24 lanes; keep a sweep on ONE box.** Split work by SWEEP, not by
+arm: a scheduler assumes it owns the GPUs it sees, so two schedulers on one box
+oversubscribe it. Give each box its own sweep, its own isolated launch dir, and
+its own watcher. `qiaos-4a100` is a fresh DLVM image (torch 2.9.1+cu129, driver
+580, NV12 all-pairs) — it has NO `.venv` and none of the repo yet, so a first
+run there must clone/rsync the code and build the venv.
 
 ## How The Mechanism Works (the code)
 - `model.py` VanillaRNN: `h_t=tanh(x_t W_ih^T + h_{t-1} W_hh^T + b)`, readout on
@@ -97,7 +104,7 @@ poly*_late!) ⏳ · partial norm_power ✅champ · spectral/Muon ⏳ · selectiv
 whitening, only-normalize-nonzero, magnitude-floor/hybrid, RMS vs L2) = survey.
 
 ## Working Rhythm
-Queue serially (GPUs shared 12 lanes); launch from an ISOLATED dir (e.g.
+Queue serially (GPUs shared 12 lanes per box); launch from an ISOLATED dir (e.g.
 `rnn_unroll_v3`) so edits never contaminate a running scheduler that reads
 `train.py` live. Launch detached as `setsid nohup … >log 2>&1 </dev/null &` (the
 `</dev/null` avoids a gcloud channel-EOF hang). One watcher per sweep, pointed at
