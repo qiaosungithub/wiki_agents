@@ -229,13 +229,26 @@ Two consequences worth stating separately:
   task is waiting for its accelerators** — minutes of silence there are
   expected, not a symptom. Quote which system you are reporting, or "RUNNING
   but producing nothing" describes a far more alarming situation than the one
-  you are looking at. Once the queue agrees the job is running, **waiting is
-  still the correct action, and the honest description of it is "waiting", not
+  you are looking at. **The queue's history separates the two: never yet
+  `RUNNING` means it is waiting for chips; `RUNNING` and then back to an earlier
+  state means its row was overwritten while the task itself keeps running** —
+  and an entry whose `xid` was cleared that way can be claimed a second time,
+  putting two jobs on the same work. Once the queue agrees the job is running,
+  **waiting is still the correct action, and the honest description of it is "waiting", not
   "diagnosing"**; the only thing that converts the wait into an answer is the
   job emitting something of its own, which is why the heartbeat has to be the
   first thing `main()` does. Judge the wait against a **measured** startup time
   for this binary: **the first ever run has no baseline, so "it feels slow" is
-  not evidence** — and that run is exactly where the baseline comes from.
+  not evidence** — and that run is exactly where the baseline comes from. Once
+  you *have* one, it cuts the other way: a job whose earlier incarnation reached
+  its first heartbeat in half a minute, and which has now been silent for
+  several, is genuinely stuck rather than merely slow.
+- **Log entry into anything that can block, not just its result** — otherwise
+  hanging inside a step is indistinguishable from dying before it. A probe that
+  writes only when it finishes (an NCCL collective, a checkpoint restore, a
+  large read) leaves exactly the same trace as a crash one line earlier: the
+  record of the previous step, and nothing after. One line saying *starting X*
+  costs nothing and splits that ambiguity in two.
 
 A startup failure this table does not name belongs **here**, next to its phase,
 not appended to whichever rule happened to catch it.
