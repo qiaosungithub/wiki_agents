@@ -104,7 +104,8 @@ finished". So a log-mirror / heartbeat / checkpoint-dir `RecursivelyCreateDir`
 must be **deferred into `main()`**, never run at import. (This bit even a file
 whose comment claimed "after imports is safe" — the rule is after `app.run`.)
 Parse flags with `known_only=True` for the same class of reason: the launcher
-forwards selectors the binary never declares.
+forwards selectors the binary never declares — see the next rule, which cost two
+B200 jobs.
 
 **A GPU job MUST write its own evidence (verdict / heartbeat with device_count +
 NCCL result) to CNS — the Borg log is behind restricted-LOAS and `analog` is
@@ -115,6 +116,48 @@ you with nothing but the one-line `tpu check` reason. Write the proof from insid
 `main()` (post-InitGoogle, per above) and flush it EARLY — a soak/train job
 should land `start` (with `device_count`) and a first NCCL-probe within the first
 minute, so a later preemption still leaves the evidence on disk.
+
+## Rule 4b — `app.run` MUST Use `known_only=True`, Or The Job Dies Before `main()`
+
+**Every job binary launched through the shared launcher must parse flags with
+`known_only=True`; a bare `app.run(main)` is a latent job-killer.** The launcher
+forwards its own selectors (`--xm_resource_alloc`, `--cell`, ...) to every
+binary it starts. A binary that has not declared them dies inside absl's flag
+parser:
+
+```python
+# WRONG — dies on the launcher's own flags
+app.run(main)
+
+# RIGHT — the launcher contract
+app.run(main, flags_parser=lambda argv: FLAGS(argv, known_only=True))
+```
+
+What the failure looks like, and why it is so expensive to diagnose:
+
+| symptom | why |
+|---|---|
+| `Task exited with code 1` and nothing else | absl exits during parsing |
+| **zero** bytes written to CNS — the output dir is never even created | user code never ran |
+| empty application log | the death precedes the first `print` |
+| dies seconds after RUNNING | parsing is the first thing that happens |
+
+**The trap is that this failure is arch- and code-independent, so it mimics a
+hardware or permission problem.** Two B200 jobs from two completely different
+binaries — one importing a training stack, one a self-contained 200-line soak —
+died identically this way, which briefly looked like "B200 is broken". It was
+not: a pre-`main()` death measures your launch, never your hardware.
+
+**Verify it locally in ten seconds** rather than spending a build+queue cycle:
+
+```bash
+python3 your_main.py --your_flag=1 --xm_resource_alloc=group:x/y --cell=sj
+# bare app.run  -> FATAL Flags parsing error: Unknown command line flag
+# known_only    -> reaches main() with --your_flag parsed correctly
+```
+
+Any new job binary should get this smoke before it is ever enqueued: the same
+argv shape the launcher will use, run on the workstation, must reach `main()`.
 
 ## Rule 5 — GPU Topology: One Task, N Local GPUs, You Own NCCL
 
@@ -349,6 +392,16 @@ Key facts:
   grant is pending. But source only rules out *this* wall: whether a `b200-8`
   job completes device_count + NCCL end-to-end is still to be confirmed by a
   real run.
+- **Measured, and it is the runtime evidence the point above asked for: a B200
+  job's failure text is a DIFFERENT CLASS from GB200's.** Two `b200-8` jobs
+  reached RUNNING on Borg and died as `Task exited with code <n>` — the process
+  exiting on its own — never the `Check failed ... PERMISSION_DENIED ... CA pool`
+  that GB200 produces 100% of the time. Same submitter, same group, same cell,
+  same week. So B200 does not contact the IMEX CA pool. **This confirms the
+  IMEX-exempt half only.** `device_count` and NCCL on B200 remain unconfirmed:
+  both jobs died before reaching user code (see the `known_only` rule below),
+  so they carry no information about whether the GPUs work — a failure that
+  happens before your code runs measures your launch, not your hardware.
 
 ## Accelerator Names, NVLink Domains, Capability
 
