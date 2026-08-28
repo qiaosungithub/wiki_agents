@@ -505,7 +505,12 @@ was preempted mid-run (`Preempted. Due to guarantee reclaim -- we were ABOVE`).
 
 - **Short smoke you can restart:** BATCH is fine and free.
 - **A clean, uninterrupted finish (a real result, or a definitive smoke exit
-  0):** use **`--tier=PROD`** — it is non-preemptible and, for GPU, still cheap.
+  0):** use **`--tier=PROD`** — far more durable than BATCH, and for GPU still
+  cheap. **Durable is not immune**: PROD carries an eviction SLO (bounded
+  frequency, advance notice), not immunity, and measured across a fleet-wide
+  sweep more than a hundred PROD jobs took a `guarantee reclaim` and the large
+  majority came back and kept running. **Plan to be interrupted on PROD too** —
+  checkpoint/resume is a baseline requirement of any long run, not a BATCH tax.
 
   GPU PROD does NOT compete with the TPU v6p/v7 pools that arc1/maze/elt train
   on, so it does not starve them.
@@ -513,7 +518,31 @@ was preempted mid-run (`Preempted. Due to guarantee reclaim -- we were ABOVE`).
   does not confer preemption immunity; a higher-priority job in the same floor
   still evicts it. The lever against preemption is PRIORITY, so **train/sanity
   GPU work goes PROD; BATCH is for eval only.**
-- **`--tier=PROD` stops preemption, but NOT migration — and the migration is
+- **What actually rules BATCH out for training is duty cycle and the SIGTERM
+  window, not the eviction itself.** Preemption alone would be survivable — an
+  evicted BATCH job re-queues and continues, and measured runs absorbed several
+  evictions and still accumulated hours of held time. The two things that are
+  not survivable:
+
+  | | |
+  |---|---|
+  | **Duty cycle** | measured median **~7%** of wall-clock actually holding chips on the comparable pool: a job parked for ten hours computed for well under an hour. BATCH trades credits for wall-clock, and that is the wrong trade whenever anything downstream has a deadline |
+  | **Grace period** | the launcher sets no `stop_time`, so a preempted task gets the **15 s default** to react — nowhere near enough to write a real checkpoint. It is raisable to a few minutes (`Borg(stop_time=...)`, capped at 300 s below priority 120), but the effective value is `min(yours, the preemptor's wait)`, so **design the checkpoint for the worst case, not the cap** |
+
+  Both are properties of *your* setup rather than of BATCH, which is why "BATCH
+  is unusable" is the wrong summary: **it is unusable at 15 seconds of notice
+  and 7% duty cycle**, and only the first of those is a one-line fix.
+- **Scheduling priority is decided before the accelerator kind is looked at, so
+  GPU BATCH and TPU BATCH obey identical rules** — the tier maps to a Borg
+  priority in code shared by both, and no GPU-specific preemption policy exists.
+  Differences between families come from *data*: your allocation's floor for
+  that exact card in that exact cell, and the PROD pressure there. Two
+  consequences: **a large `Obtainable` does not predict low preemption** (the
+  BATCH pool is mirrored from PROD quota and is ~100% oversubscribed, so the
+  number is not a count of idle chips), and **an allocation with no floor for a
+  card holds every chip of it above-floor**, which loses to any within-floor
+  claimant regardless of how long it has been waiting.
+- **`--tier=PROD` also does not stop MIGRATION — and the migration is
   invisible in every status query.** MEASURED on a `b200-8` PROD soak: it ran
   **2.19 h** on one host, vanished for **~9 minutes**, then resumed on a
   *different* host (new `hostname`, new `borg_task` id) and kept going.
@@ -589,7 +618,7 @@ is why PROD is the right call the moment you need the run to actually complete.
 ## Rule 7 — The Real Wall Is The Budget Gate, Not Capacity Or Preemption
 
 On a saturated fleet, a GPU job that is *placeable* (capacity exists) and
-*PROD* (won't be preempted) can STILL never run, because a third gate stops it
+*PROD* (top scheduling priority) can STILL never run, because a third gate stops it
 before it ever builds: the **1/10-G9-income budget bar**. Observed live
 (2026-08-28): every `gb200-{8,16,32,64}` PROD enqueue sat in
 `BUDGET_DEFERRED`, never reaching BUILD, for hours.
