@@ -122,7 +122,7 @@ comms-bound work — the launcher warns, does not block).
 ## Rule 6 — Tiers: BATCH Preempts, PROD For A Clean Finish
 
 GPU inverts the usual TPU cost intuition: **GPU PROD is cheap** (H100 PROD
-~0.36–0.46 cr/chip-hr; A100 ~0.42; GB200/GB300/H200 free pool; B200 ~11), and
+~0.5–0.8 cr/chip-hr; A100 ~0.16; B200 ~0.4; GB200/GB300/H200 free pool), and
 **BATCH is the free pool for most GPUs (0.00)** — but BATCH is preemptible and
 gets `guarantee reclaim`-preempted the instant a PROD floor-holder wants the
 chips. Observed directly: an `h100-8` BATCH smoke reached RUNNING in `mf`, then
@@ -133,6 +133,16 @@ was preempted mid-run (`Preempted. Due to guarantee reclaim -- we were ABOVE`).
   0):** use **`--tier=PROD`** — it is non-preemptible and, for GPU, still cheap.
   GPU PROD does NOT compete with the TPU v6p/v7 pools that arc1/maze/elt train
   on, so it does not starve them.
+- **BATCH is preempted even while it holds a g9-floor slice** — floor membership
+  does not confer preemption immunity; a higher-priority job in the same floor
+  still evicts it. The lever against preemption is PRIORITY, so **train/sanity
+  GPU work goes PROD; BATCH is for eval only.**
+- **If a PROD job is held `Queued (GQM price over limit order)`, WAIT — do not
+  raise its limit order.** A per-job `set_limit_order` bump is banned policy: the
+  price cap is a blast-radius bound doing its job (refusing to overpay at a
+  market peak), and the price falls back on its own. Hand-bumping is toil that
+  does not scale and end-runs the cap. See the cap-vs-market note in
+  `tpu_reference.md`.
 
 The unqualified "BATCH is eval-only / never train on BATCH" rule
 (`jobs.md`, `AGENTS.md`) is about the *contended TPU* pools; for a GPU free-pool
@@ -257,6 +267,41 @@ was always Rule 7 budget, never chips:
 `yuiadtq` had the most (116 free) and could place every shape down to `gb200-8`.
 Use `slice_probe` to pick the cell with the most free chips, but remember the
 budget gate (Rule 7) decides whether it ever builds.
+
+## GB200 Needs IMEX NVLink Authorization; B200 Does Not
+
+**A GB200 job runs on Borg but crashes at CUDA/NVLink init unless your MDB role
+is in the IMEX authorization group — B200 and the single-node GPUs have no such
+dependency.** GB200 is NVL72: its NVLink domain spans nodes, so the runtime must
+set up an IMEX (Internode Memory EXchange) fabric, which authenticates to a
+per-region IMEX-proxy CA pool. Without membership the task reaches RUNNING, then
+dies with a real crash (a failed work unit, not a preemption):
+
+```
+PERMISSION_DENIED: MDB role <user> is not allowed to send request to CA pool
+  projects/mn-nvlink-imex-proxy/locations/<region>
+```
+
+Key facts:
+
+| arch | NVLink domain | IMEX proxy needed? |
+|---|---|---|
+| `gb200` / `gb300` | cross-node (NVL72) | **yes** — at ANY size, even a single 8-GPU slice |
+| `b200` / `b300` | single node (8 GPU) | no |
+| `h100` / `h200` / `a100` | single node | no |
+
+- The grant is **MDB group membership** (an `*-imex-ra-users`-style group); the
+  request goes through the standard MDB/ganpati group-add flow and needs an
+  owner's approval — an operator-level action, not something a job flag sets.
+- **Verify before assuming:** `aclcheck` the IMEX users group for your user; a
+  `PERMISSION_DENIED` from the ACL proxy is the confirmation you lack it. Sizing
+  down does NOT help (single-node `gb200-8` hits it too).
+- **B200 is the IMEX-free NVLink path.** `b200` is a distinct card from `gb200`,
+  single-node, so it needs no IMEX proxy and is the shortest route to a real
+  Blackwell-class NVLink smoke while the GB200 grant is pending. *(Whether a
+  `b200-8` job actually completes device_count + NCCL end-to-end is still to be
+  confirmed by a real run — treat B200-works as a hypothesis until a verdict
+  lands.)*
 
 ## Accelerator Names, NVLink Domains, Capability
 

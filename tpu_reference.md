@@ -223,7 +223,18 @@ Always cross the rounded count with a live `tpu preflight` — the legal ceiling
 (H100 board = 8) may force MULTIPLE boards + network RDMA between them, which is
 not the same as one fully-connected slice (see NVLink Domain above).
 
-**Price inverts the TPU intuition:** GPU PROD is cheap (H100 ~0.36–0.46
-cr/chip-hr; A100 ~0.42; GB200/GB300/H200 free pool; B200 ~11) and most GPUs have
+**Price inverts the TPU intuition:** GPU PROD is cheap (H100 ~0.5–0.8
+cr/chip-hr; A100 ~0.16; B200 ~0.4; GB200/GB300/H200 free pool) and most GPUs have
 a **free (0.00) BATCH pool** — but BATCH is preemptible (`gpu_on_borg.md`
-Rule 6). Caps are blast-radius bounds far above market, not trackers.
+Rule 6).
+
+**The fixed per-family price caps (`_tpu_limit_price_for_arch` /
+`cap_policy.py`) can sit BELOW market at a price peak, and that is by design.**
+They are blast-radius bounds, not trackers, so on a spike the market clears
+above the cap and a PROD job in that family is held `Queued (GQM price over
+limit order)` until the price falls back. The GPU caps stay far above their
+(cheap) market; several TPU caps (v5p, v7, v6e, and v6p at peaks) are routinely
+pierced — verify with a live `market.json` read vs the cap. **The correct
+response to a price-hold is to WAIT, never a per-job `set_limit_order` bump**
+(that overpays and end-runs the bound). Changing a cap is an operator decision;
+the knob is `cap_policy.py` + its LINT-synced shell twin, never `budget_check`.
