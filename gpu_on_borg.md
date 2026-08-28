@@ -139,6 +139,64 @@ The unqualified "BATCH is eval-only / never train on BATCH" rule
 smoke it is not the hazard — the hazard is preemption cutting a run short, which
 is why PROD is the right call the moment you need the run to actually complete.
 
+## Rule 7 — The Real Wall Is The Budget Gate, Not Capacity Or Preemption
+
+On a saturated fleet, a GPU job that is *placeable* (capacity exists) and
+*PROD* (won't be preempted) can STILL never run, because a third gate stops it
+before it ever builds: the **1/10-G9-income budget bar**. Observed live
+(2026-08-28): every `gb200-{8,16,32,64}` PROD enqueue sat in
+`BUDGET_DEFERRED`, never reaching BUILD, for hours.
+
+**What BUDGET_DEFERRED means.** The dispatch/build worker calls
+`budget_check.py --query <type> <tier> <lo_price> <group>` before building. It
+returns `{income, bar, current, headroom, new_cost, fits}`:
+
+- `bar = income / 10` — the budget ceiling is **one tenth of the rolling G9
+  income** (income ~25 811 → bar ~2 581). This is a shared, fleet-wide number.
+- `current` = the projected cost of ALL your live SUBMITTED/RUNNING jobs
+  (XM-truth, zombie-filtered). With ~16 live jobs `current` was ~2 132 = **83 %
+  of the bar already spent** before the GPU job is even considered.
+- `headroom = bar - current`, and it **oscillates violently** (seen swinging
+  `-211 ↔ +469` within one minute as other jobs start/stop). A job dispatches
+  only in the instant `headroom >= new_cost`.
+- `fits = new_cost <= headroom`. If false → `BUDGET_DEFERRED`, requeued every
+  round (the fixed worker does NOT count these as build attempts, so the job is
+  never HELD — it waits forever for a window).
+
+**The projection trap (why a cheap job looks expensive).** The router queries
+budget with `lo_price=0`, so `new_cost` is the **full on-demand projection**
+(`gb200-8` → 800), even though the job, once submitted, is auto-capped by
+`_tpu_set_limit_order` to the per-arch policy price (`gb200`=20 cr/GPU-hr) and
+its REAL projected cost is ~1.6. Verified: the same `budget_check --query` with
+`lo_price=0.20` returns `new_cost=1.6, fits=true`. So the gate rejects on a
+price the job will never actually pay. This is a **gate-precision gap**, not a
+real affordability problem — but do NOT patch the shared wrapper/router budget
+logic to fix it without operator/monitor sign-off (it is a fleet-global lever).
+
+**What actually works.**
+- **Size down** lowers `new_cost` linearly (`≈ 100·chips + fixed`), so
+  `gb200-8` needs the smallest window — but on a fully-saturated bar even the
+  fixed component can exceed headroom, so sizing down is necessary-not-
+  sufficient.
+- **Wait for a window.** Leave the job enqueued; the fixed dispatch worker
+  re-tests every round and fires the instant `headroom >= new_cost`. This is
+  the in-policy path (`monitor`: "don't idle waiting for price — queue it and
+  go do other work").
+- **Free headroom you own:** draining your OWN dead-weight live jobs lowers
+  `current` and raises headroom. Terminal jobs (failed/CANCELLED) do NOT count,
+  so there is nothing to reclaim there — only live SUBMITTED/RUNNING jobs do.
+  Never drain another agent's live experiment to make room.
+- Raising the bar (more G9 income / a separate GPU budget line) is an
+  **operator-level** decision, same class as the anti-preemption floor.
+
+**Distinguish the three GPU stalls** (they look similar in `tpu queue-status`):
+
+| Queue state | Meaning | Lever |
+|---|---|---|
+| `QUEUED … no placeable cell` | no contiguous slice right now (capacity) | wait / smaller shape / other cell |
+| `BUDGET_DEFERRED … over bar` | budget gate: `new_cost > headroom` | wait for window / size down / free own headroom |
+| reached RUNNING then `Preempted` | BATCH lost chips to higher prio | `--tier=PROD` (Rule 6) |
+
 ## Preflight, Placement, Capacity (Same Tools, GPU-Aware)
 
 - `tpu preflight --tpu_type=h100-8 --group=9 --tier=BATCH` → GREEN + candidate
@@ -166,6 +224,39 @@ is why PROD is the right call the moment you need the run to actually complete.
 | job silently a TPU when you asked GPU (or vice versa) | used `--power` without pinning `--archs` (Rule 1) |
 | reached RUNNING then died `guarantee reclaim` | BATCH preemption (Rule 6) — resubmit PROD |
 | `analog`/`borg tasklog` = `PERMISSION_DENIED` (restricted-LOAS) | expected on this workstation; make the app write its own diagnostics to CNS (`jobs.md` §Debugging), or read state via `tpu check` |
+| enqueued PROD, placeable, but never builds; `BUDGET_DEFERRED` | budget gate: `new_cost > headroom` (Rule 7) — wait for a window / size down |
+| `gb200` build never starts, worker claims→releases fast | almost always Rule 7 budget, NOT ARM build failure — check `.tpu_local_queue.json` `last_reason` for `over bar` |
+
+## GB200 Is ARM (Grace) — The Build Cross-Compiles To aarch64
+
+`gb200`/`gb300` are Grace(ARM CPU)+Blackwell(GPU). `xm.ResourceType.GB200`
+has `architecture() == ARM`, so `xm_abc.bazel_args.gpu(GB200)` automatically
+adds `--cpu=arm` **and** `--define=cuda_target_sm100=1` (Blackwell sm100; the
+launcher delegates the per-SM enables to xmanager's `GPU_TO_SM` table, so you do
+NOT hardcode sm90 as for H100). Consequence: a `gb200` job cross-compiles the
+WHOLE torch binary + CUDA deps to **aarch64** — a heavier, less-trodden path
+than x86 H100. If a dep lacks an ARM build the job goes HELD at BUILD; that is a
+real build gap (fix the dep), distinct from the Rule-7 budget stall (which never
+reaches BUILD). Verify sizing first: `gb200-72` rounds to the nearest legal
+slice (`gb200-64`) at placement time (see `tpu_reference.md`
+round-to-nearest-legal-slice rule).
+
+### Per-cell GB200 capacity is NOT the bottleneck (2026-08-28 snapshot)
+
+`slice_probe --accel=gb200 --topology=<n> --group=9` gives free chips +
+obtainable slices per cell. Live snapshot showed capacity is ample — the block
+was always Rule 7 budget, never chips:
+
+| cell | free chips | gb200-64 | -32 | -16 | -8 |
+|---|---|---|---|---|---|
+| `yuiadtq` | 116 | 1 | 3 | 7 | 14 |
+| `yucbfcd` | 64 | 1 | 2 | 4 | 8 |
+| `yuchstz` | 43 | 0 | 1 | 2 | 5 |
+| `yuphxer` | 18 | 0 | 0 | 1 | 2 |
+
+`yuiadtq` had the most (116 free) and could place every shape down to `gb200-8`.
+Use `slice_probe` to pick the cell with the most free chips, but remember the
+budget gate (Rule 7) decides whether it ever builds.
 
 ## Accelerator Names, NVLink Domains, Capability
 
