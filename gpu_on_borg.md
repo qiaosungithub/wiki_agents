@@ -290,18 +290,33 @@ Key facts:
 | `b200` / `b300` | single node (8 GPU) | no |
 | `h100` / `h200` / `a100` | single node | no |
 
-- The grant is **MDB group membership** (an `*-imex-ra-users`-style group); the
-  request goes through the standard MDB/ganpati group-add flow and needs an
-  owner's approval — an operator-level action, not something a job flag sets.
-- **Verify before assuming:** `aclcheck` the IMEX users group for your user; a
-  `PERMISSION_DENIED` from the ACL proxy is the confirmation you lack it. Sizing
-  down does NOT help (single-node `gb200-8` hits it too).
-- **B200 is the IMEX-free NVLink path.** `b200` is a distinct card from `gb200`,
-  single-node, so it needs no IMEX proxy and is the shortest route to a real
-  Blackwell-class NVLink smoke while the GB200 grant is pending. *(Whether a
-  `b200-8` job actually completes device_count + NCCL end-to-end is still to be
-  confirmed by a real run — treat B200-works as a hypothesis until a verdict
-  lands.)*
+- **The judge is the runtime crash, not `aclcheck`.** The definitive evidence is
+  that a GB200 job reaches RUNNING and then fails 100% at CUDA/NVLink init with
+  the `PERMISSION_DENIED ... CA pool ...` above. Do NOT cite an `aclcheck`
+  result: in this workspace `aclcheck` typically fails on the environment's own
+  LOAS restriction (no access to the ACL-proxy / ganpati-read principal),
+  returning a DENIED that is about *whether you may query the ACL*, not *whether
+  you are in the group*. That DENIED looks like proof but tests something else,
+  and a reviewer will reject it.
+- **The grant is MDB group membership, and the CA-pool→group mapping is in
+  source** (harder evidence than aclcheck): `security/ca/ra/imex/service/config/
+  startup.pi` maps the IMEX CA pool to a `*-imex-ra-users` group, mirrored in
+  `production/borg/pod/miba/private-ca-front-end/server.pi`. The request goes
+  through the standard MDB/ganpati group-add flow with an owner's approval — an
+  operator-level action, not a job flag. **Cover BOTH staging and prod RA** (a
+  borglet defaults to the STAGING RA), or the job still fails on the arm you did
+  not grant.
+- **Single-node `gb200-8` hits the wall too, and that is a source fact, not an
+  observation:** the IMEX sidecar starts iff `IsGpuWithNvlinkDomain()` is true,
+  which is true only for GB200/GB300/VR200 and keys on CARD TYPE, not node count.
+  So every GB200 slice — even one 8-GPU tray — brings up IMEX and needs the grant.
+- **IMEX authorization is required only for cross-node NVLink cards
+  (GB200/GB300); single-node cards (B200/B300, H100/H200, A100) never start the
+  IMEX sidecar** — source-confirmed via the same `IsGpuWithNvlinkDomain()`. It
+  follows that `b200` is the shortest Blackwell-class NVLink path while a GB200
+  grant is pending. But source only rules out *this* wall: whether a `b200-8`
+  job completes device_count + NCCL end-to-end is still to be confirmed by a
+  real run.
 
 ## Accelerator Names, NVLink Domains, Capability
 
