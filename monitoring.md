@@ -237,7 +237,12 @@ for the local-copy caveat (`~/.amply/bin/amply_notify`).
 ## Every New Run Gets A Title, And You Verify It Landed
 
 **A run without a title is unfindable: the runs-list shows "no name" and the
-operator cannot tell twenty sessions apart.** Name every run you open, with the
+operator cannot tell twenty sessions apart. This applies to EVERY handoff — the
+successor you open mid-shift is exactly the run that will still be alive at 3am,
+and an untitled one cannot be told from a stale probe or an abandoned experiment.
+Name it with the line's role and generation (`gpu-survey-docs-v5 (GPU survey
+docs/intel lane; handoff from v4)`), and confirm the title came back from the
+server before you consider the handoff done.** Name every run you open, with the
 line's role, not just a version number (`arc1-unroll-v7 (TRM/ARC unroll
 ablation)` beats `v7`).
 

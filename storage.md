@@ -45,6 +45,49 @@ placements that are fine; a registration takes days, the sibling metro that
 already works takes minutes to find. `research/v7_storage_placement.md` holds the
 current survey and how to redo it.
 
+## Never Hand-Maintain A Cell -> Metro -> Bucket Table
+
+**There is exactly one measured source of truth for which metro a cell is in and which CNS
+prefix is co-located with it: `google3_tpu_utils/cell_locality.py`, seeded from
+`mach_locality` and regenerable with `remeasure_cell_locality.py --diff/--write`. Query it;
+never write a new table, and never fall back to a guess.**
+
+Hand-maintained copies of this mapping caused two separate job deaths, and the shape of both
+was the same: **the code answered when it should have refused.**
+
+| Fallback | What it did | Cost |
+|---|---|---|
+| `metro_of()` returned the cell name as its own metro | scored `oe`, `nf`, `nm`, `oi` as four metros instead of all being `tul` | `--metro` silently dropped valid cells and looked like a capacity shortage |
+| launcher fell back to a `_DEFAULT_BUCKET` | an unlisted cell got a bucket a continent away | duty cycle fell under the floor, the pruner deleted the job mid-run |
+
+Both fallbacks looked defensive. Neither could be seen from the outside: one under-supplied
+candidates (reads as "no capacity"), the other silently relocated the data.
+
+**Resolve buckets by metro, not by cell.** A per-cell table is wrong the moment a new cell
+appears — and 88% of schedulable cells were missing from at least one table. Storage belongs
+to a metro, so keying on the metro covers every cell in it, including ones nobody has listed
+yet.
+
+**An unknown cell must fail closed, and `UNKNOWN` must be a value that cannot be mistaken for
+an answer** — not `''`, not the cell name, not a plausible default. Check what the consumer
+does with it: a sentinel object reaching code that calls `.lower()` turns a clean refusal
+into a crash in an unrelated loop, so cross a string boundary that can never equal a real
+metro.
+
+**Before folding several tables into one, prove the fold changes no existing answer.** Verify
+that the old per-cell entries were already a function of the metro, then compare every prior
+lookup before and after. Report the two groups separately: rows that must not change, and
+rows whose change is the entire point — a single mixed list hides a regression among the
+intended fixes.
+
+**A snapshot without a regeneration command is the next stale default.** Record the command
+and the timestamp in the file, ship the re-measure script beside it, and give it a
+`--diff` mode that exits non-zero — verified by injecting a wrong row and seeing it caught.
+
+**Widening a candidate set and fixing its storage mapping must land together.** A cell
+readmitted to candidacy but still missing a bucket lands on the silent default — the fix
+manufactures the very failure it was meant to remove.
+
 ## Deciding Whether Two Locations Are "Far Apart"
 
 **Cost and latency are different stakes.** Cost applies only when one end is a
@@ -298,6 +341,49 @@ instant**: the block clears minutes after usage actually drops, and human
 accounts get no soft-excess grace. Verify recovery by writing, not by re-reading
 the quota.
 
+## A Checkpoint Path Is An Opaque String, And Four Shapes Coexist
+
+**Whatever produced a checkpoint owns the shape of its path. Store the string the job itself
+reported and replay it byte for byte; any tool that appends, strips, or "normalises" a
+checkpoint path breaks at least one family in this fleet.**
+
+| Family | Shape |
+|---|---|
+| EqR-jax (maze, trm-arc1, hrm-trm) | `step_<N>/` — the job appends `/state` itself |
+| codi, coconut | `step_<N>/` — flat, there is **no** `/state` subdirectory |
+| paligemma, jax_llava | `checkpoint_<N>` — a flax file |
+| torch ports | `step_<N>.pt` — **a single FILE, not a directory** |
+
+The rule for passing one to a job is in `jobs.md` §The `LOAD_FROM` Contract. Two traps make
+this worse than it looks: a path must point at the **leaf** (a bucket root or a
+`checkpoints/` parent raises `FileNotFoundError` *after* printing a reassuring metadata
+warning), and **identical files are not identical roles** — a `ckpt_util.py` that is
+byte-for-byte the same as another checkout's can be dead code there, with the real writer
+somewhere else entirely. Comparing md5s answers "is this the same file", never "is this the
+code that runs".
+
+**Read a checkpoint from anywhere; write one only to local storage.** The asymmetry is large
+and it is the whole rule:
+
+| | Cost | Verdict |
+|---|---|---|
+| Restore read, cross-metro same continent | ~6x slower | fine, it happens once |
+| Restore read, cross-continent | ~2.5x slower (6.0 GiB across the Atlantic ≈ 14 s) | fine, it happens once |
+| Training loop **writing** cross-metro | ~94x, blocking saves push duty cycle under the 0.20 floor | **the pruner deletes the job** |
+
+So a resume may start from a checkpoint anywhere, but the job must then write locally. The
+safest arrangement is to **copy the checkpoint to the compute cell's own CNS prefix before
+launch — swapping the prefix and keeping the tail verbatim** — and point the job at the copy;
+skip the copy when it is already co-located. Verify the copy by a **delayed** re-read: a
+workspace in a dropped-write state returns `rc=0`, reads back correctly, and loses the file
+seconds later. If the copy fails, refuse to launch — falling back to the remote path is how a
+job gets pruned an hour later, far from any evidence of the decision.
+
+**A rough ceiling for a blocking save is `0.80 x save_interval x write_rate`.** With
+~360 MiB/s local that is roughly 8.5 GiB at a 30 s cadence; at ~10 MiB/s cross-continent it
+is 0.23 GiB, i.e. no real training checkpoint qualifies. Treat the 0.20 duty-cycle floor as
+the binding constraint, and re-measure the write rate rather than trusting these figures.
+
 ## Checkpoints Are The Default Reason A Cell Fills Up
 
 **A checkpoint writer with no retention policy will eventually take down every
@@ -529,6 +615,37 @@ Two silent traps:
 - **No file or RPC access before framework initialization completes.** Touching
   remote storage at module import time aborts the process; do it inside the entry
   point, never at module scope.
+
+## `/tmp` Is RAM On This Host — Do Not Scatter Build Artifacts Into It
+
+**`/tmp` is a tmpfs: every byte written there is charged to physical memory or
+swap, and it has no size limit, so one careless writer can starve the whole
+machine.** It reached 47 GB one night — testdeps, torch envs, smoke-test trees,
+a CLI's session state — and pushed swap to 100% full. That is the dangerous
+state: with no swap headroom the kernel cannot page anything out, so the next
+memory spike is an immediate OOM-kill rather than a gradual slowdown. Clearing
+24 GB of it moved MemAvailable from 10 GB to 34 GB and restored 15 GB of swap.
+
+**Put build artifacts, test dependencies, and any payload over ~100 MB in a
+project directory or under `~/work/`, never in `/tmp`.** Reserve `/tmp` for lock
+files and small logs. If a tool insists on `/tmp`, point its `TMPDIR` elsewhere
+— and verify by checking that the tool stopped creating files there, not by
+echoing the variable back.
+
+**Before deleting anything under `/tmp`, check the live command lines, not just
+`lsof`.** A job that will `open()` a file in a minute holds no descriptor now,
+so `lsof` reads clean on a file that is about to be needed — a 2.2 GB tarball
+looked orphaned by every static check while two live PROD jobs had it on their
+argv. And `grep`ping `ps` for the path matches your own grep: exclude your own
+pid, or "3 references" is really zero. **A matching tool answers "does this
+string appear", never "is anyone using this".**
+
+**A cross-filesystem `mv` is a copy, so an interrupted one leaves a half in
+both places** — and the second attempt fails with `unable to remove target:
+Directory not empty`, which reads like a permissions problem. Recover with
+`rsync -a --ignore-existing` then delete the source, and verify by **file count
+and total bytes, not `du`**: block accounting differs between tmpfs and ext4, so
+identical trees legitimately report different `du` sizes.
 
 ## Local Disk Cleanup
 
