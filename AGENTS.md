@@ -202,5 +202,11 @@ or when violating it has a real cost.** Everything else dilutes what matters.
   state, no source line numbers, no job ids. Record how to verify instead.
 - **Lead a section with its rule in bold.** A reader who stops after the first
   sentence must not be misled.
+- **Put the caveat inside the sentence it qualifies, never in the paragraph
+  after it.** People quote and act on the bold claim alone, so a qualifier
+  parked downstream — "but it may also be X", "(unverified)" — is reliably lost
+  in the first retelling, and what survives is more confident than what you
+  wrote. When a finding has two branches, name both in one clause so that
+  whichever half is copied still carries the other.
 - **Prefer a table to five parallel bullets.** Delete audit snapshots once they
   are too old to be evidence.
