@@ -110,24 +110,39 @@ absent on a GPU job, the binary is CPU-only and will report
 covers the GCP `python_container` path; a Borg job gets CUDA from the build flag,
 not the image.
 
-**Side effect worth knowing, because it lands on other people: a CUDA build
-repoints the `blaze-bin` convenience symlink at the cuda output tree, and any
-script holding a hardcoded `blaze-bin/...` path silently stops finding its
-binary.** `blaze-bin` means "whatever config I built last", not "where this
-target lives" — CPU and CUDA builds write to sibling trees
-(`blaze-out/k8-fastbuild/bin` vs `.../k8-fastbuild-cuda/bin`), and only one of
-them is linked at a time. Nothing is deleted; the TPU-side tools are still on
-disk in the other tree.
+**Side effect worth knowing, because it lands on other lanes: building a GPU
+target repoints the `blaze-bin` convenience symlink at the cuda output tree, and
+any script holding a hardcoded `blaze-bin/...` path silently stops finding its
+binary.** CPU and CUDA builds write to sibling trees
+(`blaze-out/k8-fastbuild/bin` vs `.../k8-fastbuild-cuda/bin`), only one is
+linked at a time, and a GPU-only tree contains none of the CPU-side tools.
+Nothing is deleted — they are still on disk in the other tree.
 
-That matters because of how the consumer behaves: a tool that cannot find its
-helper binary tends to **skip the feature rather than fail**, so the visible
-symptom is a mild log line, not an error — and the guard the helper implemented
-disappears with it. **When you check whether a binary "is missing", resolve the
-symlink and look in the sibling tree before concluding anything was lost**
-(`readlink blaze-bin`, then `ls blaze-out/*/bin/<path>`); rebuilding costs
-minutes of the shared build lane and fixes only the link. **A durable reference
-names the output tree explicitly** — pointing a long-lived script at `blaze-bin`
-makes its behaviour depend on whoever built last.
+**No one performs this, which is why it has no owner.** The build is run by the
+shared build-worker on whatever it drains next, so the symlink flips whenever a
+GPU entry reaches the head of a queue — no human action, nothing to review, and
+the lane that submitted the entry never sees it. `blaze-bin` encodes "the config
+**I** built last", and on a shared build lane there is no *I*.
+
+Two properties make the damage quiet:
+
+- **A tool that cannot find its helper binary usually skips the feature rather
+  than failing**, so the symptom is a mild log line and the guard that helper
+  implemented is simply gone. Check the guard, not the log.
+- **Already-running processes are unaffected — they hold a resolved inode — so
+  the breakage only cashes in at the next restart.** A supervisor loop that
+  re-resolves a `blaze-bin` path each iteration keeps "restarting" into a
+  missing binary while looking alive. **That is the reverse of the stale-import
+  trap: there, restarting is the fix; here, restarting is when it bites** — and
+  it bites exactly when something has just crashed and most needs to come back.
+
+**So when a binary looks "missing", resolve the symlink and check the sibling
+tree before concluding anything was lost** (`readlink blaze-bin`, then
+`ls blaze-out/*/bin/<path>`). Relinking is instant; rebuilding costs minutes of
+the shared build lane and repairs only the link, which the next GPU build undoes
+again. **The durable fix is to name the output tree explicitly** in anything
+long-lived — a supervisor, a wrapper, a daemon — rather than depending on which
+config was built last.
 
 ## Rule 3 — BUILD A Torch GPU `py_binary` The Staging Way
 
