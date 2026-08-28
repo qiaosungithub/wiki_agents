@@ -112,10 +112,27 @@ A single `--tpu_type=h100-8` is **one Borg task with 8 local GPUs in one
 process** — NOT 8 tasks, and the launcher sets no `torchrun`/`RANK` for it (GPU
 is not a TPU multi-task job; the launcher's `is_tpu_job` is False for GPU, so it
 injects no JAX-coordination flags). Multi-GPU coordination is YOURS: for a
-single-host job, spawn one process per GPU yourself (`torch.multiprocessing`
-`fork` — a `spawn` child re-imports the bazel `__main__` and re-registers absl
-flags → `DuplicateFlagError`; and the parent must touch NO CUDA before fork,
-only `device_count()`). NVLink domain caps the fully-connected single slice
+single-host job, spawn one process per GPU yourself. Two non-obvious traps here,
+both of which every GPU-multicard torch line hits:
+- **Use `fork`, and take it from STDLIB `multiprocessing`, not
+  `torch.multiprocessing`.** google3 patches `torch.multiprocessing` to
+  `g3lib.multiprocessing`, which *asserts* on `get_context("fork")` and whose
+  `absl_spawn`/`absl_forkserver` replacements demand the process be started by
+  `g3_multiprocessing.handle_main()` (not `app.run()`) and die in the bazel
+  runfiles resource tracker. Importing plain `import multiprocessing` and calling
+  `get_context("fork")` is the working path.
+- **It must be `fork`, never `spawn`, and the parent must touch NO CUDA before
+  forking** (only `device_count()`, which is fork-safe). A `spawn` child
+  re-imports the bazel `__main__` and re-registers absl flags →
+  `DuplicateFlagError`; a forked child inherits the already-parsed process.
+- **The TRAINING path needs this fan-out too, not just a sanity smoke.** With no
+  injected `RANK`/`WORLD_SIZE`, a naive `train.run()` sees `WORLD_SIZE=1`, so the
+  per-process batch becomes the full global batch and a strict data reader
+  rejects it — the job dies at startup, before any step. Set `RANK`/`LOCAL_RANK`/
+  `WORLD_SIZE` per forked child (and `MASTER_ADDR`/`MASTER_PORT` for NCCL init)
+  the same way the smoke does.
+
+NVLink domain caps the fully-connected single slice
 (table below); above it, chips talk network RDMA (legal, not faster for
 comms-bound work — the launcher warns, does not block).
 
