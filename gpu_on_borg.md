@@ -414,6 +414,19 @@ was preempted mid-run (`Preempted. Due to guarantee reclaim -- we were ABOVE`).
   gap and overstates the stretch by minutes; and **a work unit that never fails
   is what distinguishes migration from crash**, so check `FailedWorkUnits`
   before calling a restart either one.
+- **The budget enforcer can kill a GPU job for a price it does not actually
+  cost.** MEASURED: a `b200-8` PROD soak ran 6 h 18 min with zero preemptions and
+  zero failed work units, and was then stopped by `budget_enforcer` at
+  `cost=800` — while `budget_check --query b200-8 PROD` returns `11.4` and the
+  router admitted a sibling job at `11.4`. **800 = 8 chips x 100**, the
+  signature of a GPU family falling through to the generic
+  `mapping.get(arch, 100)` default. The enforcer's own header claims it reuses
+  `budget_check`'s pricing, so **a comment asserting a shared basis is not
+  evidence of one** — compare the numbers. Practical effect: at 800 cr/hr a
+  free-pool GPU job looks like one of the priciest PROD jobs in the fleet and
+  gets picked first, so **on GPU the largest measured survival threat is not
+  preemption, it is being mispriced.** If a long GPU job disappears, `grep` your
+  XID in the enforcer log before blaming the scheduler.
 - **If a PROD job is held `Queued (GQM price over limit order)`, WAIT — do not
   raise its limit order.** A per-job `set_limit_order` bump is banned policy: the
   price cap is a blast-radius bound doing its job (refusing to overpay at a
