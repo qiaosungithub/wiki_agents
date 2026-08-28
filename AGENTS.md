@@ -188,6 +188,20 @@ checked the other's *downstream* reasoning, the faulty *premise* is what nobody
 re-examines. A self-correcting process beats an infallible one — but only while
 each round re-checks premises rather than conclusions.
 
+**Hedging a number does not make it right — a second, independent route to the
+same answer does.** "Rough estimate, timestamped, not claiming precision" is a
+statement about your confidence, not about the value, and it can sit in front of
+a figure that is wrong by a factor of five while making it *read* as measured;
+the same holds for a well-formed method list in front of a false conclusion.
+Before quoting a number that someone will plan against, derive it a second way
+— a different instrument, a different window, a different artifact — and if you
+only have the one, hedge the **range** rather than your posture: "about two
+hours, from a single six-minute window, so possibly several times that" invites
+the reader to check, where "about 2.1 hours (rough)" does not. Beware in
+particular a slope measured across a transient: a rate taken during startup,
+catch-up or backlog drain is not the steady state, and **a window is long enough
+only when it does not consist of a single phase.**
+
 **And when you act on something you were told rather than something you saw, go
 back to the source first.** Hedges do not survive relay: whoever passes a
 finding along copies the conclusion and drops the "(unverified)", so a claim
