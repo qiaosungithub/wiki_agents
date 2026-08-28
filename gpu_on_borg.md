@@ -326,22 +326,13 @@ reaches BUILD). Verify sizing first: `gb200-72` rounds to the nearest legal
 slice (`gb200-64`) at placement time (see `tpu_reference.md`
 round-to-nearest-legal-slice rule).
 
-### Per-cell GB200 capacity is NOT the bottleneck (2026-08-28 snapshot)
+### Chips Are Not The GB200 Bottleneck — The Budget Gate Is
 
-`slice_probe --accel=gb200 --topology=<n> --group=9` gives free chips +
-obtainable slices per cell. Live snapshot showed capacity is ample — the block
-was always Rule 7 budget, never chips:
-
-| cell | free chips | gb200-64 | -32 | -16 | -8 |
-|---|---|---|---|---|---|
-| `yuiadtq` | 116 | 1 | 3 | 7 | 14 |
-| `yucbfcd` | 64 | 1 | 2 | 4 | 8 |
-| `yuchstz` | 43 | 0 | 1 | 2 | 5 |
-| `yuphxer` | 18 | 0 | 0 | 1 | 2 |
-
-`yuiadtq` had the most (116 free) and could place every shape down to `gb200-8`.
-Use `slice_probe` to pick the cell with the most free chips, but remember the
-budget gate (Rule 7) decides whether it ever builds.
+**What holds a GB200 job back is the Rule 7 budget gate, not free chips.** Read
+the current free chips and obtainable slices per cell with `slice_probe
+--accel=gb200 --topology=<n> --group=9` and pick the cell with the most free
+chips — but whether the job ever builds is decided by the budget gate, not by
+the chip count, so a placeable cell is not a schedulable one.
 
 ## GB200 Needs IMEX NVLink Authorization; B200 Does Not
 
