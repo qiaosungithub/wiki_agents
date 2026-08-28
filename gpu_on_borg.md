@@ -219,6 +219,22 @@ grep -m1 -A2 'version:' \
   differed while `numpy` was identical. Check the package you actually depend
   on rather than assuming the whole tree shifted — or that it did not.
 
+**Before assuming the version matters, check what your code actually calls — the
+three torch ports here pin nothing and need nothing recent.** All three depend
+on plain `//third_party/py/torch:pytorch` with no version constraint anywhere,
+and the API surface they use is the stable core: `F.scaled_dot_product_attention`,
+`F.rms_norm`, `F.cross_entropy`, `torch.cuda.*`, `torch.autocast`,
+`torch.compile`, `torch.distributed.init_process_group`. Both staging workspaces
+provide every one of those, `_dynamo` included. **So any of them can build from
+either workspace, and standardising on one staging root costs nothing** — which
+is worth doing, because a shared root makes "same code, different behaviour"
+impossible by construction rather than merely unlikely.
+
+**When a job does behave differently across roots, that is a finding about the
+library, not a reason to keep both roots.** Pin everyone to the newer one and
+treat the divergence as a bug to characterise — running half the fleet on each
+is how you end up debugging your own code for a difference that was never in it.
+
 ### FlashAttention Is Available, With Two Conditions
 
 **`//third_party/py/flash_attn` exists and builds against the in-tree torch, but
