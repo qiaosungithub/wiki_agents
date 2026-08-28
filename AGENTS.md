@@ -131,6 +131,25 @@ notes; surface a conflict rather than guessing.
 The user's request, then current code and native docs, then live infra state and
 logs, then these guides, then `archive/` (history only).
 
+**To assert that X has permission / fits / will be received, perform X once —
+do not query a status that describes X.** A status query almost always measures
+the *adjacent* thing, and it fails in the most expensive direction: it looks
+like supporting evidence. The hard part is not finding evidence, it is stating
+what the claim actually asks.
+
+| The claim | The status query that looks right | What it actually measures |
+|---|---|---|
+| This slice will fit the model | total HBM across the slice | per-chip HBM, when weights are replicated (`model_size=1`); totals bind only under model parallelism |
+| I lack membership in a group | `aclcheck` returns `PERMISSION_DENIED` | whether you may *read the ACL* — a sandbox that cannot reach the ACL proxy denies identically |
+| This capacity is usable | the router shows the shape `PLACEABLE` | that an availability RPC answered; not the budget gate, the authorization, or preemption |
+| That agent still exists | a writer holds its log, or a dashboard says `ongoing` | that some process writes a file; dashboards go stale and are not authoritative |
+| My alert reached the on-call | the notify call returned `rc=0` | that *a* worker accepted it — possibly a retired session nobody reads |
+
+The last row is the general trap: **a silent success is more dangerous than a
+clean failure**, because failure leaves a trace and `rc=0` makes every check
+look green. Close the loop at the far end — confirm the message arrived in the
+recipient's stream, confirm the job reached `RUNNING` and wrote its own verdict.
+
 ## Maintaining Memory
 
 **Record a rule only when a future agent cannot cheaply infer it from the code,
