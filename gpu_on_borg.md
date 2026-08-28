@@ -175,6 +175,11 @@ surviving copy of the round that mattered. But size it honestly: **an external
 snapshot preserves what it saw, it does not make you see everything** — its
 resolution is your polling interval, so events between two polls are lost just
 as completely. It is a stopgap until the producer appends, not a substitute.
+The two regimes were measured back to back on one job: while it truncated, a
+restart had to be **reconstructed after the fact from two external polls, and
+an earlier one was missed entirely**; once it appended, the next restart
+**recorded itself** — same system, same observer, same class of event, and the
+only change was how the producer opened the file.
 
 ## Rule 4b — `app.run` MUST Use `known_only=True`, Or The Job Dies Before `main()`
 
@@ -234,7 +239,14 @@ both of which every GPU-multicard torch line hits:
   `absl_spawn`/`absl_forkserver` replacements demand the process be started by
   `g3_multiprocessing.handle_main()` (not `app.run()`) and die in the bazel
   runfiles resource tracker. Importing plain `import multiprocessing` and calling
-  `get_context("fork")` is the working path.
+  `get_context("fork")` is the working path. **Both alternatives the assertion
+  itself recommends are dead ends here, each measured on a real job:**
+  `absl_forkserver` raises `TypeError` in the bazel runfiles resource tracker,
+  and `absl_spawn` requires `g3_multiprocessing.handle_main()` in place of
+  `app.run()`, which breaks the launcher contract of Rule 4b. **An error
+  message's own suggested fix is written for the stdlib case, not for a job
+  under the launcher** — stdlib `multiprocessing` is the only path that clears
+  both.
 - **It must be `fork`, never `spawn`, and the parent must touch NO CUDA before
   forking** (only `device_count()`, which is fork-safe). A `spawn` child
   re-imports the bazel `__main__` and re-registers absl flags →
@@ -275,13 +287,17 @@ was preempted mid-run (`Preempted. Due to guarantee reclaim -- we were ABOVE`).
   *different* host (new `hostname`, new `borg_task` id) and kept going.
   Throughout, `xmanager list` said `RUNNING 0/1`, unchanged; no failed work
   unit, no enforcer hit, no pruner signature — the work unit never failed, the
-  *task* was moved. Consequences: (i) **checkpoint even on PROD, even when
-  nothing is "failing"** — anything unsaved at the ~2 h mark is gone; (ii) the
-  only reason this was caught is that the job wrote its own `uptime` on every
-  heartbeat and the counter reset from 2.192 to 0.192, so **a long GPU job
-  should emit its own uptime** or a restart will pass unnoticed. Sample size is
-  one migration in 3.2 h, so read "~2 h" as an order of magnitude, not a period.
-  (iii) **`uptime` answers "how long has THIS round lasted", never "how long has
+  *task* was moved. It kept happening: over a single soak the same job was moved
+  repeatedly, with measured stretches of **2.19 h, ~1.3 h and 0.43 h** between
+  moves and a **~9 minute** gap each time, while `FailedWorkUnits` stayed `0/1`
+  from first launch to last. Consequences: (i) **checkpoint even on PROD, even
+  when nothing is "failing"** — and size the interval for *no* safe period:
+  three unequal stretches rule out a schedule, so the risk is not "you lose
+  about two hours of work", it is **"you can lose it at any time, with no
+  plannable gap"**; (ii) the only reason this was caught is that the job wrote
+  its own `uptime` on every heartbeat and the counter reset, so **a long GPU job
+  should emit its own uptime** or a restart will pass unnoticed; (iii)
+  **`uptime` answers "how long has THIS round lasted", never "how long has
   the job held the slice"** — the two diverge at the first migration, and it is
   the second that answers whether an accelerator can carry a long run. Counting
   migrations therefore needs a record that survives them (Rule 4: append-only);
@@ -290,7 +306,12 @@ was preempted mid-run (`Preempted. Due to guarantee reclaim -- we were ABOVE`).
   round whose end was overwritten yields a lower bound on its length, never its
   duration. The tell that survives truncation is the pair (`hostname`,
   `borg_task`): **a new host id means a new round, whether or not you witnessed
-  the changeover.**
+  the changeover.** Two more reading traps once you are counting rounds:
+  **measure a round from its own `start` to its own last heartbeat, never from
+  one `start` to the next** — the second span silently includes the migration
+  gap and overstates the stretch by minutes; and **a work unit that never fails
+  is what distinguishes migration from crash**, so check `FailedWorkUnits`
+  before calling a restart either one.
 - **If a PROD job is held `Queued (GQM price over limit order)`, WAIT — do not
   raise its limit order.** A per-job `set_limit_order` bump is banned policy: the
   price cap is a blast-radius bound doing its job (refusing to overpay at a
