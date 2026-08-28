@@ -189,7 +189,7 @@ in its `workdir`, not necessarily the one you are standing in:
 |---|---|---|
 | no file matching the default | dies loading the config | loudly, at startup |
 | a file matching the default, but not your arm | **runs the wrong experiment to completion** | only by reading which config it loaded |
-| the binary never declares `config` at all | `FATAL: Unknown command line flag` before `main()` | exit 1, zero CNS bytes, empty log — reads as hardware or permissions |
+| the binary never declares `config` at all | `FATAL: Unknown command line flag` before `main()` — **fixed by Rule 4b**, then the injected flag is simply ignored | exit 1, zero CNS bytes, empty log — reads as hardware or permissions |
 | the file you wanted | fine | — |
 
 **The second row is the expensive one, and every state-based check calls it
@@ -209,7 +209,14 @@ five:
 **Stopping after step three yields "there is a default, so it is fine", and
 "fine" is precisely the bad row.** Whether the same omission is fatal or silent
 differs per checkout, so another line's answer to this question is not evidence
-about yours.
+about yours — and it can differ across *time* in one checkout too: **whether an
+entry will die is a property of what its `workdir` contains right now, not a
+property of the entry.** A "this will fail" verdict reached hours ago expires
+when the source under that path changes.
+
+Only the last row has a known fix (Rule 4b, running in production). The others
+are not launcher bugs to be worked around — they are the entry disagreeing with
+its own checkout, and the check above is how you find out which.
 
 **Symmetrically: disproving a stated cause of death does not prove survival.**
 When the reason given for "this will fail" turns out to be wrong, what has been
