@@ -443,7 +443,13 @@ both of which every GPU-multicard torch line hits:
   whole span looks from outside exactly like a job that died at startup.
   **Derive the worst case before choosing the constant, and keep the probe's
   total budget shorter than the interval at which anyone will conclude the job
-  is dead.**
+  is dead.** The reference for that constant is **how long silence goes
+  unquestioned here, not how long the operation could technically take** — a
+  probe budgeted at eight ranks x five minutes ran 40 minutes against a fleet
+  that starts asking after 5–10, so it read as dead for most of its life while
+  behaving exactly as designed. **Budget the probe as a whole, not per rank**;
+  the per-rank form looks entirely reasonable in the code and hides the
+  multiplication.
 
 NVLink domain caps the fully-connected single slice
 (table below); above it, chips talk network RDMA (legal, not faster for
