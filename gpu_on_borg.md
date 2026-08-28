@@ -53,7 +53,13 @@ What this does and does not buy you:
   from the queue is staged by the long-lived build-worker, which uses the
   environment frozen at *its* start — so exporting in your shell changes
   nothing for a queued entry, and neither does editing the wrapper without
-  restarting the worker. Check `/proc/<worker-pid>/environ`, not your own.
+  restarting the worker. Check `/proc/<worker-pid>/environ`, not your own —
+  **but only for variables its parent handed it**: that file is the snapshot
+  taken at `exec`, so a variable the process `export`s in its own body never
+  appears there (verified with a positive and negative control). If the value
+  you care about is set inside the script, `/proc/environ` will quietly show you
+  the old one, and the only sound check is end-to-end: make the running process
+  act on the value and observe the result.
 - **A failed write needs a cause, exactly like a successful one.** `rc=1` on a
   fresh root usually means the staging subdir does not exist yet (`mkdir -p`
   and it works), not that the workspace is unhealthy — identical observation,
