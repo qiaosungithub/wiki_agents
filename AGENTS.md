@@ -51,6 +51,7 @@ and each has a `README.md` index.
 | Place data or checkpoints; copy or upload | `storage.md`, then the project guide |
 | Pick a cell/metro for a v7 run | `research/v7_storage_placement.md` |
 | Read a distributed path interactively | `storage.md` §Distributed Reads |
+| **CitC/srcfs is dropping writes**; `CreateSnapshot failure`; a staging rsync that never converges | `storage.md` §Before Blaming CitC For Dropping Writes |
 | A write fails, or a job produced 0-byte logs | `storage.md` §An Over-Quota Cell Looks Like A Broken Program |
 | Resume skips work, or a 0-byte file counts as done | `storage.md` §Existence Is Not Completeness |
 | Reclaim local disk, or prune checkpoints | `storage.md` §Local Disk Cleanup, §Checkpoints Are The Default Reason A Cell Fills Up |

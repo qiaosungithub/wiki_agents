@@ -388,7 +388,48 @@ the culprit: a size that grew from zero, or sits *below* the expected boundary,
 is not a torn append — an append cannot shrink a file, so it means another
 writer, and the two have opposite fixes.
 
+## Before Blaming CitC For Dropping Writes, Find Out Who Is Writing
+
+**A flood of `CreateSnapshot failure ... dropping local changes` is far more
+often a local writer generating an impossible amount of work than a sick
+backend — and the two are told apart in one command: count `Service is
+overloaded` lines in `srcfsd.ERROR`. Zero of them, with tens of thousands of
+`code: 104`, means the writes are ours.** The expensive shape is a staging
+`rsync -aL ./ "$stagedir/"` whose SOURCE is the CWD while the DESTINATION sits
+*inside* that same tree: it walks the whole depot into a subdirectory of itself,
+never converges, is killed by its timeout, is `rm -rf`'d, and starts again. One
+such queue entry produced 76% of a day's CreateSnapshot failures — measured
+1.1 GB in 3 min, ~140 files/s — while every other job on the box stayed on its
+usual baseline.
+
+**Guard it in the code, not with a sentinel: refuse to rsync when
+`realpath(dest)` is under `realpath(src)`, and refuse when the source is too
+big to be a project workdir.** Both checks are needed and they catch different
+shapes — a `workdir=/tmp` entry has its destination *outside* the source and
+still copies ~9,000 top-level entries. Calibration is not delicate: a real
+project workdir has ~20 top-level entries, a google3 checkout root ~417, `/tmp`
+~9,300. Resolve symlinks first (`[ -d ]` and string prefixes both lie about
+them) and compare with a trailing slash so `/a/bc` is not read as inside `/a/b`.
+
+**The reason "which workspace" is not the interesting question: the error line
+already answers it.** Each 104 line names the depot path and the workspace id it
+was dropped for (`... to workspace (qiaos/3202) ... dropping local changes`), so
+a read-only, zero-side-effect audit of who is losing writes is a `grep` — and it
+beats a write-probe, which perturbs the very counter you are reading. Do **not**
+use a directory's `mtime` as a health fingerprint: every CitC workspace root
+stats as epoch-0 (measured 18/18, healthy and sick alike), so it is a 100%
+false-positive test.
+
+**The `bt`-style "backend throttling" alarms on this box double-count.** glog's
+severity cascade writes every ERROR into `.WARNING` too, so a sentinel that
+`cat`s both files sees each event twice; halve any such number before reasoning
+about it, and prefer counting distinct *builds* over counting *file paths*.
+
 ## A Wedged CitC Workspace Is Server-Side, Not Yours To Restart
+
+**This section describes the *other* shape — a genuinely sick workspace with
+no local writer to blame. Rule out the section above first (zero `Service is
+overloaded` lines plus a huge local writer means it is yours, not the server's).**
 
 **When one CitC workspace silently rolls back writes, the fault is server-side
 per-workspace state — it survives an srcfsd restart AND `citctools forceupdate`,

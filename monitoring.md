@@ -164,6 +164,54 @@ sent* means another monitor is still live (a retiring one whose run hasn't
 exited). Reconcile who leads immediately (§Handoffs), stand the other down to
 read-only, and fold any action it took into your state so you don't repeat it.
 
+## A Delivered Message Can Still Arrive Broken
+
+**`rc=0` on a send proves a message was accepted, not that it was intact —
+an unquoted heredoc evaluates backticks and `$vars` in your own text, and the
+send still reports success.** Two instances in one shift, the second inside the
+message explaining the first: one shipped a literal `$DOC` where a path should
+have been, the other lost three code blocks to command substitution (with a
+`command not found` on stderr that nobody was reading). This is worse than a
+failed delivery, because a failure leaves a trace. **Always `<<'EOF'` — quote
+the delimiter — whenever the body contains a backtick, `$`, or any shell
+metacharacter.**
+
+**Never hard-code a run-id as an alert target.** Every watcher pinned to the
+previous monitor goes silently mute the moment that run completes, and the
+failure is invisible from the sender's side: `amply_notify` returns rc=2
+(sidecar gone) or the gateway returns `HTTP 400 ... chatbot is not listening`,
+both into a log nobody reads. Discover the target at send time, confirm with a
+probe that is not rc=2/3, and spool undelivered alerts to disk so the backlog
+survives. A shift where the sentinel worked perfectly and 23 real alerts reached
+nobody looks exactly like a quiet shift.
+
+**Find the current monitor by anchoring on the hash: `grep -a "# THIS MONITOR"`.**
+Retired rows keep the phrase `(was THIS MONITOR, takeover HH:MMZ)` mid-line, so
+the loose `grep -a "THIS MONITOR" | head -1` returns the *oldest* retired monitor
+— measured three generations stale. And do not "fix" that with `grep -av "^#"`:
+it happens to work, but it filters full-line comments while the interference is
+mid-line, so it will fail silently the day the comment style changes. **A fix
+that works for the wrong reason is a fix that breaks without warning.**
+
+**The roster answers "who claims to be current", never "who is alive"** — nor
+does the dashboard, which showed `ongoing` for an hour after a worker died. Only
+a heartbeat plus process liveness answers that. Update the roster *at* takeover,
+before anything else: a stale roster does not fail loudly, it hands out a
+confident wrong answer that then spreads (one line filed its check-in into a
+dead mailbox; another recorded the monitor two versions behind).
+
+## Record How A Number Was Measured, Or The Next Retelling Will Swap The Variable
+
+**A rule that names a quantity without naming its instrument decays into a
+rule about a *correlated* quantity, and the swap is invisible until the two
+diverge.** A wiki entry stating "5 concurrent rsyncs drain the CreateSnapshot
+token bucket" — concurrent *stage-writes* — was retold as "there are more agents
+running now", and that version was used to explain an incident where agent count
+was flat at 1.05x while the fault rate moved 3000x. The retelling was *more*
+confident than the original: it had lost the mechanism and had never been
+measured at all. Keep the instrument in the sentence, and when someone hands you
+a causal claim, ask who measured it before you act on it.
+
 ## Cross-Run Communication
 
 `send_message` only reaches sessions in your *own* run. The watched lines are
