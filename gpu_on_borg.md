@@ -768,6 +768,8 @@ are out of budget" are simultaneously true all the time.
 | `gb200` build never starts, worker claims→releases fast | almost always Rule 7 budget, NOT ARM build failure — check `.tpu_local_queue.json` `last_reason` for `over bar` |
 | `init_process_group` fails `errno: 97 - Address family not supported`, rank 0 appears to hang | `MASTER_ADDR=127.0.0.1` on an IPv6-only host — use `::1` (Rule 5) |
 | a collective raises `ncclRemoteError ... Connection closed by remote peer` | usually a *victim's* view of another rank dying — find the child the parent never had to kill (Rule 5, and the B200 notes) |
+| rank 0 dies with SIGSEGV in its first collective; NCCL logs `Init COMPLETE` and no WARN | the open multi-process B200 failure — reproduce with 2 processes, not 8 (B200 notes) |
+| a `faulthandler` dump file is created but stays 0 bytes | absl owns SIGSEGV from import time; capture fd 2 with `dup2` instead (B200 notes) |
 
 ## GB200 Is ARM (Grace) — The Build Cross-Compiles To aarch64
 
@@ -856,13 +858,34 @@ Key facts:
   query — that is the only class of evidence that survives both the Borg log
   wall and a broken CLI.
 - **NCCL collectives across all 8 B200s WORK — measured, single-process (tier
-  0); the 8-process path (tier 1) is a separate, still-open question.** Tier 0
+  0); the multi-process path (tier 1) does NOT, and that blocks DDP.** Tier 0
   ran `torch.cuda.nccl.all_reduce` over 8 devices and got the arithmetically
   correct result on every card (NCCL 2.29.7), **13 seconds** after process
   start. So the cards, the driver, the NCCL build and the fabric are all
   cleared; whatever remains is in the multi-process layer above them. Keep the
   two claims apart when quoting this — the tier-0 result does not depend on
   tier 1 and must not be walked back with it.
+- **Tier 1 fails this way: rank 0 takes a SIGSEGV the first time the process
+  executes ANY NCCL collective, as NCCL is about to build its P2P/CUMEM
+  channels — and NCCL itself logs zero WARN and reports `Init COMPLETE` first.**
+  Reproduced every time it was tried, always rank 0, always signal 11, 3-7 s
+  after the collective begins; **two processes on two GPUs reproduce it**, so
+  iterate at that size rather than at eight. Ruled out, each by a run that
+  varied only that one thing: the device (rank 0 moved to `cuda:1` still died,
+  while the rank holding `cuda:0` survived), the store implementation (dropping
+  a hand-built `TCPStore` for torch's own rendezvous changes nothing, and
+  neither does `use_libuv=False`), NVLS (`32 nvls channels` -> `0`, still dies),
+  the payload (`barrier` moves no data and dies in `barrier`), and every NCCL
+  env var the job injects. **`all_reduce` is not special — it is the first
+  collective, whichever one that is.** What remains bound to `rank == 0` and
+  still untested: torch's own privileged rank (it generates the `ncclUniqueId`)
+  and being the first child forked.
+- **A single-process `all_reduce` proving out does NOT mean torch DDP will run.**
+  `DistributedDataParallel` requires one process per GPU, so the tier-0 form
+  cannot host it at all; and even a passing multi-process `all_reduce` is still
+  not a passing DDP step, because the backward pass adds autograd hooks, gradient
+  buckets and asynchronous reduction. Check the collective and the DDP step as
+  two separate tiers, and do not let the cheaper one stand in for the other.
 - **Getting there took three runs, and each one moved the failure earlier in the
   stack — that progression, not any single verdict, is what to copy.** First
   the probe never reached NCCL at all (`AssertionError: Use of 'fork' is
@@ -875,6 +898,21 @@ Key facts:
   step wrote a breadcrumb on entry, the same run named its own failure in one
   read. **Instrument entry into every blocking step before you re-run** —
   re-running an uninstrumented probe buys another round of the same silence.
+- **`faulthandler.enable(file=...)` silently does nothing in a google3 binary,
+  so plan to capture fd 2 instead of owning the signal.** `absl/app.py`
+  registers CPython's dump function into absl's failure chain at IMPORT time
+  (`absl_faulthandler.register_fatal_error_handler()`), and a second
+  registration is refused — your `enable(file=...)` creates the file and then
+  never writes a byte, which reads exactly like "the handler never fired". The
+  traceback goes to **fd 2**, and on Borg that stderr is unreadable from an
+  agent sandbox (`analog` and `borg tasklog` both fail LOAS). The workaround is
+  to stop competing for the handler: `dup2` each child's fd 2 onto a file of
+  your own and upload it — that also catches NCCL's and the driver's writes,
+  which never went through Python at all.
+- **A diagnostic arm designed to PASS must be ordered last** whenever the runner
+  stops at the first passing arm — otherwise it silently cancels every arm
+  behind it, and the run looks complete. Early-stop logic and arm ordering are
+  coupled; decide them together.
 - **A dead child and a hung child are indistinguishable unless the parent
   records which ones it had to kill.** Have the parent log a breadcrumb before
   it kills a still-running child and again when it reaps each one, with the
