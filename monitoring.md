@@ -186,6 +186,29 @@ down: `curl -s -X POST "<dashboard_url>/chat/send?run_id=<RID>"
 a run-id — passing a run-id fails with `Session not registered`. See AGENTS.md
 for the local-copy caveat (`~/.amply/bin/amply_notify`).
 
+## Every New Run Gets A Title, And You Verify It Landed
+
+**A run without a title is unfindable: the runs-list shows "no name" and the
+operator cannot tell twenty sessions apart.** Name every run you open, with the
+line's role, not just a version number (`arc1-unroll-v7 (TRM/ARC unroll
+ablation)` beats `v7`).
+
+Use `~/work/.monitor_watch/tools/launch_chatonly_run.py "<workdir>" "<title>"`.
+To title an existing run, POST to `/annotate/title` with **both `run_id` and
+`title` in the form body** — the server reads `flask.request.form`, so a
+`run_id` passed in the URL query string returns 400 and the run stays untitled:
+
+```python
+data = urllib.parse.urlencode({"run_id": rid, "title": t}).encode()
+urllib.request.urlopen(urllib.request.Request(f"{dash}/annotate/title", data=data))
+# 204 == saved. Anything else means the title did NOT land.
+```
+
+**Treat a failed title as a failed launch, not a warning.** The launcher used to
+print `title annotate warn: HTTP Error 400` and carry on; a whole night of runs
+went out unnamed because that line reads like noise. It now exits non-zero
+instead.
+
 ## Handoffs: Let The Line Summarize Itself
 
 When a line's context gets heavy (slow, repetitive, tool calls timing out),
