@@ -102,6 +102,7 @@ a single scalar:
 | **Compute ratio ≠ speedup** — decide from the bound your job is actually in | HBM bandwidth does not track compute: v6e scores 2x v5p on compute but **0.58x** its bandwidth, so memory-bound work (long-context attention, small-batch decode) runs *slower* on v6e than on v5p. v6p/v7 gain 2.66x bandwidth against 4.34x compute — real, but not the headline number |
 | **int8 does not carry over** | v4/v5e/v5p/v6e accelerate int8 (2x) and int4 (4x); v6p/v7 accelerate fp8 (2x) and give int8 **no speedup at all** (1x). An int8-tuned model moved from v5p to v6p/v7 must switch to fp8 to gain anything |
 | **v6p is 4.34x v5p, not 2x** — re-derive the ratio rather than repeating a remembered one | An earlier table here said 2x and made the router recommend twice the hardware a request needed |
+| **Equivalent compute is not equivalent price** — `v7 = v6p` says nothing about what they cost | Measured on one afternoon: `v7-32` PROD priced **8x** its `v6p-32` equivalent, and the same family's price moved ~2x within an hour. So "v7 ≈ v6p, take either" is a compute statement being read as a procurement one. If a job's `allowed_archs` spans both, check the live market before assuming the router picked the cheap side — and **timestamp any price you quote**, because it expires in minutes (`infra/quota_market.md`) |
 
 ## Legal Shapes
 
