@@ -212,6 +212,22 @@ confident than the original: it had lost the mechanism and had never been
 measured at all. Keep the instrument in the sentence, and when someone hands you
 a causal claim, ask who measured it before you act on it.
 
+## Cap Every Line-To-Monitor Message At 200 Words
+
+**A monitor reads every line's messages into one context, so a fleet of verbose
+reporters burns the monitor down faster than the work does.** Tell each line, in
+its handoff and in any broadcast: **messages to the monitor must be under 200
+words** — lead with the decision or the number, drop the reasoning chain, and
+keep the evidence in your own artifact where the monitor can fetch it if it
+matters. A line that writes a 2000-word status every 20 minutes is not being
+thorough, it is spending someone else's context.
+
+What survives the cut, in order: (1) what you need from the monitor, or "nothing
+needed"; (2) the one number or state that changed; (3) anything actively losing
+money or data. Everything else goes in a file. The same cap applies to the
+monitor's own replies — a broadcast repeated to fifteen lines is fifteen times
+its length.
+
 ## Cross-Run Communication
 
 `send_message` only reaches sessions in your *own* run. The watched lines are
