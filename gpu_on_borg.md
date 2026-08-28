@@ -149,6 +149,33 @@ you with nothing but the one-line `tpu check` reason. Write the proof from insid
 should land `start` (with `device_count`) and a first NCCL-probe within the first
 minute, so a later preemption still leaves the evidence on disk.
 
+**Early is not enough — the evidence file must be APPEND-ONLY: never opened for
+truncation, and never read-modify-written.** Writing early defeats *"the job
+died before it wrote anything"*; it does nothing about *"the write destroyed
+what was already there"*, and a GPU job restarts far more often than it fails
+(Rule 6: PROD migrates, and `max_task_failures=-1` silently re-runs). The two
+self-destructing patterns fail on different schedules:
+
+| pattern | when you lose data |
+|---|---|
+| `open(path, "w")` per attempt | at every restart — one round survives, the current one |
+| read whole file, append line, write whole file back | at **every write** — one interrupted rewrite truncates the lot, no restart needed |
+| `open(path, "a")`, or one path per attempt | you don't |
+
+Under either destructive pattern the file describes the latest round only — so
+**the more times a job restarts, the more certain you are to be reading the one
+round that needs no explanation.** The attempt worth keeping is precisely the
+one with no successor to preserve it.
+
+**When you cannot change how the evidence is produced — someone else's binary, a
+run too valuable to restart — poll it from outside and keep your own
+snapshots.** An external record needs no cooperation from the producer and no
+change to a running job, and after a destructive write it is often the only
+surviving copy of the round that mattered. But size it honestly: **an external
+snapshot preserves what it saw, it does not make you see everything** — its
+resolution is your polling interval, so events between two polls are lost just
+as completely. It is a stopgap until the producer appends, not a substitute.
+
 ## Rule 4b — `app.run` MUST Use `known_only=True`, Or The Job Dies Before `main()`
 
 **Every job binary launched through the shared launcher must parse flags with
@@ -254,6 +281,16 @@ was preempted mid-run (`Preempted. Due to guarantee reclaim -- we were ABOVE`).
   heartbeat and the counter reset from 2.192 to 0.192, so **a long GPU job
   should emit its own uptime** or a restart will pass unnoticed. Sample size is
   one migration in 3.2 h, so read "~2 h" as an order of magnitude, not a period.
+  (iii) **`uptime` answers "how long has THIS round lasted", never "how long has
+  the job held the slice"** — the two diverge at the first migration, and it is
+  the second that answers whether an accelerator can carry a long run. Counting
+  migrations therefore needs a record that survives them (Rule 4: append-only);
+  **a migration count read off a self-truncating heartbeat is a floor, not a
+  total** — one lost file has already hidden an entire migration here, and a
+  round whose end was overwritten yields a lower bound on its length, never its
+  duration. The tell that survives truncation is the pair (`hostname`,
+  `borg_task`): **a new host id means a new round, whether or not you witnessed
+  the changeover.**
 - **If a PROD job is held `Queued (GQM price over limit order)`, WAIT — do not
   raise its limit order.** A per-job `set_limit_order` bump is banned policy: the
   price cap is a blast-radius bound doing its job (refusing to overpay at a
