@@ -380,19 +380,32 @@ Key facts:
   (GB200/GB300); single-node cards (B200/B300, H100/H200, A100) never start the
   IMEX sidecar** — source-confirmed via the same `IsGpuWithNvlinkDomain()`. It
   follows that `b200` is the shortest Blackwell-class NVLink path while a GB200
-  grant is pending. But source only rules out *this* wall: whether a `b200-8`
-  job completes device_count + NCCL end-to-end is still to be confirmed by a
-  real run.
-- **Measured, and it is the runtime evidence the point above asked for: a B200
-  job's failure text is a DIFFERENT CLASS from GB200's.** Two `b200-8` jobs
-  reached RUNNING on Borg and died as `Task exited with code <n>` — the process
-  exiting on its own — never the `Check failed ... PERMISSION_DENIED ... CA pool`
-  that GB200 produces 100% of the time. Same submitter, same group, same cell,
-  same week. So B200 does not contact the IMEX CA pool. **This confirms the
-  IMEX-exempt half only.** `device_count` and NCCL on B200 remain unconfirmed:
-  both jobs died before reaching user code (see the `known_only` rule below),
-  so they carry no information about whether the GPUs work — a failure that
-  happens before your code runs measures your launch, not your hardware.
+  grant is pending — confirmed by a real run, see the next point.
+- **CONFIRMED BY A RUNNING JOB — `b200-8` initialises CUDA fully and sees all 8
+  GPUs, with no CA-pool authorization of any kind.** A `b200-8` soak on `sj`
+  wrote this from inside the task:
+
+  ```json
+  {"event":"start","device_count":8,"host":"ti-vm-...","torch":"2.15.0a0+google3"}
+  {"event":"alive","uptime_sec":749.9,"step":629813,"device_count":8,
+   "device0":"NVIDIA B200","sm":"sm10.0"}
+  ```
+
+  Eight devices visible, the card really is a B200 (`sm10.0`), and the bf16
+  matmul loop ran 629k steps across 12.5 minutes — all without the
+  `PERMISSION_DENIED ... CA pool` that GB200 produces 100% of the time at the
+  same stage. **So "B200 is IMEX-exempt" is now a measured result, not an
+  inference.** Note the evidence is the job's OWN heartbeat on CNS, not a status
+  query — that is the only class of evidence that survives both the Borg log
+  wall and a broken CLI.
+- **Still untested on B200: multi-GPU NCCL.** The soak's NCCL probe reported
+  `nccl_all_ok: false`, but the error was `AssertionError: Use of 'fork' is
+  discouraged in Google3 (go/python-tips/018)` — the probe was killed by a
+  google3 assertion before it reached NCCL. **A probe that fails to run proves
+  nothing about what it was going to measure.** Use `absl_forkserver` /
+  `absl_spawn`, never `mp.get_context("fork")`, in any google3 multi-process GPU
+  probe (a `fork`-based sanity path can sit unnoticed for a long time if
+  something else kills the job earlier).
 
 ## Accelerator Names, NVLink Domains, Capability
 
