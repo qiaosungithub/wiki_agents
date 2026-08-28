@@ -235,12 +235,25 @@ was preempted mid-run (`Preempted. Due to guarantee reclaim -- we were ABOVE`).
 - **Short smoke you can restart:** BATCH is fine and free.
 - **A clean, uninterrupted finish (a real result, or a definitive smoke exit
   0):** use **`--tier=PROD`** — it is non-preemptible and, for GPU, still cheap.
+
   GPU PROD does NOT compete with the TPU v6p/v7 pools that arc1/maze/elt train
   on, so it does not starve them.
 - **BATCH is preempted even while it holds a g9-floor slice** — floor membership
   does not confer preemption immunity; a higher-priority job in the same floor
   still evicts it. The lever against preemption is PRIORITY, so **train/sanity
   GPU work goes PROD; BATCH is for eval only.**
+- **`--tier=PROD` stops preemption, but NOT migration — and the migration is
+  invisible in every status query.** MEASURED on a `b200-8` PROD soak: it ran
+  **2.19 h** on one host, vanished for **~9 minutes**, then resumed on a
+  *different* host (new `hostname`, new `borg_task` id) and kept going.
+  Throughout, `xmanager list` said `RUNNING 0/1`, unchanged; no failed work
+  unit, no enforcer hit, no pruner signature — the work unit never failed, the
+  *task* was moved. Consequences: (i) **checkpoint even on PROD, even when
+  nothing is "failing"** — anything unsaved at the ~2 h mark is gone; (ii) the
+  only reason this was caught is that the job wrote its own `uptime` on every
+  heartbeat and the counter reset from 2.192 to 0.192, so **a long GPU job
+  should emit its own uptime** or a restart will pass unnoticed. Sample size is
+  one migration in 3.2 h, so read "~2 h" as an order of magnitude, not a period.
 - **If a PROD job is held `Queued (GQM price over limit order)`, WAIT — do not
   raise its limit order.** A per-job `set_limit_order` bump is banned policy: the
   price cap is a blast-radius bound doing its job (refusing to overpay at a
