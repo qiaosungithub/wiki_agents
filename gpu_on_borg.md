@@ -857,9 +857,9 @@ Key facts:
   inference.** Note the evidence is the job's OWN heartbeat on CNS, not a status
   query — that is the only class of evidence that survives both the Borg log
   wall and a broken CLI.
-- **NCCL collectives across all 8 B200s WORK — measured, single-process (tier
-  0); the multi-process path (tier 1) works too, but only with the logging
-  workaround below.** Tier 0
+- **NCCL collectives across all 8 B200s WORK — measured both single-process
+  (tier 0) and with 8 processes, one per GPU (tier 1); tier 1 additionally needs
+  the logging workaround below, without which it fails 100% of the time.** Tier 0
   ran `torch.cuda.nccl.all_reduce` over 8 devices and got the arithmetically
   correct result on every card (NCCL 2.29.7), **13 seconds** after process
   start. So the cards, the driver, the NCCL build and the fabric are all
@@ -879,9 +879,12 @@ Key facts:
   Workaround, applied in each child after fork and before the first collective:
   raise absl's `minloglevel` (`absl.flags._cpp_flags.set_flag('minloglevel',
   '1')`), which short-circuits `LogMessage::Flush()` on its first line, upstream
-  of the sink. **Measured at `minloglevel=2`: tier 1 passes and `all_reduce`
-  returns the arithmetically correct value; `=1` is the better setting because
-  it preserves WARNING — NCCL's own error channel — but is not yet measured.**
+  of the sink. **Measured on a real 8-GPU B200 job: with `minloglevel=1` all 8
+  ranks pass and the multi-process `all_reduce` returns exactly the value tier 0
+  produces, so use `1` (kWarning) — it stops the INFO that crashes and still
+  leaves WARNING, which is NCCL's own error channel and the only instrument you
+  will have next time (`=2` also works but was only ever measured at two GPUs,
+  and it silences WARNING as well).**
   Setting `TORCH_CPP_LOG_LEVEL` instead does NOT work: torch reads it once at
   import, so a child that sets it after the parent imported torch is too late.
   Two BUILD deps are needed (`//third_party/py/absl/flags:_cpp_flags` and
@@ -940,6 +943,16 @@ Key facts:
   stops at the first passing arm — otherwise it silently cancels every arm
   behind it, and the run looks complete. Early-stop logic and arm ordering are
   coupled; decide them together.
+- **Account for running jobs by enumerating the RESOURCE, never your own record
+  of what you launched — a cancel you never issued leaves no failed return code
+  to find.** Auditing the jobs you remember starting, or even a written list of
+  them, only proves that the things you *did* succeeded; it cannot surface the
+  thing you never did. Two successive audits here missed two different jobs —
+  one burning eight B200s for over four hours — and the true count came only
+  from listing the output directory itself. **Verify the kill the same way:**
+  a cancel returning SUCCESS means the request was accepted, while the proof it
+  died is that its heartbeat file stops growing between two samples — an
+  instrument that does not depend on the tool you used to stop it.
 - **A dead child and a hung child are indistinguishable unless the parent
   records which ones it had to kill.** Have the parent log a breadcrumb before
   it kills a still-running child and again when it reaps each one, with the
