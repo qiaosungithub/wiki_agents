@@ -29,6 +29,7 @@ and each has a `README.md` index.
 | `reports/` | Writing and rendering paper reports. |
 | `infra/` | Allocator, market, and CLI internals, when `jobs.md` falls short. |
 | `tools/` | Executable helpers (price caps); prose elsewhere. |
+| `handoffs/` | **The one canonical home for handoff docs**, `<line-name>.md`. |
 | `archive/` | History. Never routed to by default. |
 
 ## Topic Router
@@ -38,6 +39,7 @@ and each has a `README.md` index.
 | Anything, before you start | `engineering.md` |
 | Find a checkout or its boundaries | `projects/README.md` |
 | Queue, inspect, resume, debug a job | `jobs.md`, then the project guide |
+| **Resume a job / write anything that passes a checkpoint to a job** | `jobs.md` §The `LOAD_FROM` Contract |
 | Submit a job or a batch (default `tpu enqueue` + serial `tpu build-worker`; auto cell / `--metro`) | `jobs.md` §The Submission Queue In One Screen |
 | A CPU-only batch job will not schedule | `jobs.md` §Requirements And Runtime |
 | Choose a cell (now auto-picked); preflight before packaging | `jobs.md` §Choosing Where To Run |
@@ -50,6 +52,8 @@ and each has a `README.md` index.
 | **Choose an accelerator family**; a preemptible slice will not hold | `research/accelerator_choice.md` |
 | Place data or checkpoints; copy or upload | `storage.md`, then the project guide |
 | Pick a cell/metro for a v7 run | `research/v7_storage_placement.md` |
+| **Map a cell to its metro or its CNS bucket**; add a cell to any such table | `storage.md` §Never Hand-Maintain A Cell -> Metro -> Bucket Table |
+| **Copy, move, or hand off a checkpoint**; resume across metros | `storage.md` §A Checkpoint Path Is An Opaque String |
 | Read a distributed path interactively | `storage.md` §Distributed Reads |
 | **CitC/srcfs is dropping writes**; `CreateSnapshot failure`; a staging rsync that never converges | `storage.md` §Before Blaming CitC For Dropping Writes |
 | A write fails, or a job produced 0-byte logs | `storage.md` §An Over-Quota Cell Looks Like A Broken Program |
@@ -67,6 +71,7 @@ and each has a `README.md` index.
 | A watched run shows DEAD/500; hand a heavy line to a fresh session | `monitoring.md` |
 | Monitor got a request mid-task; track it so it isn't dropped | `monitoring.md` §Track Every Request In The Todo List |
 | Write a handoff doc; retire an old session (kill its worker) | `monitoring.md` §Handoffs: Let The Line Summarize Itself |
+| **Where to put / find a handoff doc** | `handoffs/README.md` |
 | `EqR` / `EqR-jax` | `projects/eqr_jax.md` |
 | RNN unroll optimizer / adding problem / gradient propagation science line | `projects/rnn_unroll_adding.md` |
 | VLM training, data, benchmark reporting | `projects/vlm_training.md`, `projects/vlm_data.md`, `projects/vlm_metrics.md` |
@@ -116,6 +121,34 @@ were equal. `tpu route --power=` does the arithmetic (`tpu_reference.md`).
 **Storage** — Keep compute and storage co-located; a job far from its data is
 killed by the pruner, not merely slowed. Never move Type 1 payloads across
 regions (`storage.md`, `projects/README.md` for the category).
+
+**Cell -> metro -> bucket comes from one measured table** — `cell_locality.py`
+(seeded from `mach_locality`, regenerable via `remeasure_cell_locality.py`).
+Never hand-write another copy and never guess: a fallback that returned the cell
+name as its own metro made `--metro` silently drop valid cells (it reads as "no
+capacity"), and a `_DEFAULT_BUCKET` fallback put a job's writes a continent away
+until the pruner deleted it. Resolve buckets **by metro, not by cell**, and make
+an unknown cell fail closed (`storage.md` §Never Hand-Maintain A Cell -> Metro ->
+Bucket Table).
+
+**A checkpoint path is opaque; four shapes coexist** — including a torch
+`step_<N>.pt` that is a FILE, not a directory. Replay the producer's own string
+byte for byte; appending or stripping `/state` breaks a family. Read a
+checkpoint from anywhere, but **write only to local storage** — a training loop
+writing cross-metro is ~94x slower, drops duty cycle under the 0.20 floor, and
+the pruner deletes the job mid-run (`storage.md` §A Checkpoint Path Is An Opaque
+String).
+
+**Resuming — pass the checkpoint in the env var `LOAD_FROM`, verbatim** — Never
+via a config key (which key it lands in differs per family, so writing the key
+keeps working on most lines and silently cold-starts the rest), and never after
+normalising the path (four incompatible shapes coexist, including a torch
+`step_<N>.pt` that is a FILE, not a directory). Point it at the leaf, clear it
+once the job writes its own first checkpoint (a pinned `LOAD_FROM` overrides
+auto-resume forever and reads as training instability), and leave
+`CHECKPOINT_BUCKET` — where the job *writes* — alone. Reading a checkpoint
+across a metro is survivable; *writing* across one gets the job deleted by the
+pruner (`jobs.md` §The `LOAD_FROM` Contract).
 
 **Logging results** — Re-read the tab's header and neighboring rows **every
 time**; layout drifts and a stale column map mis-files a number without
