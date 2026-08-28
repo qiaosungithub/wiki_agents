@@ -427,6 +427,23 @@ was preempted mid-run (`Preempted. Due to guarantee reclaim -- we were ABOVE`).
   gets picked first, so **on GPU the largest measured survival threat is not
   preemption, it is being mispriced.** If a long GPU job disappears, `grep` your
   XID in the enforcer log before blaming the scheduler.
+- **And a long-lived daemon prices from the table it imported at start, not the
+  one on disk — fixing the table changes nothing until the daemon restarts.**
+  Same job, same enforcer, two minutes apart across a restart: `cost=800`
+  before, `cost=6` after. The corrected price table had been on disk for an hour
+  while the daemon kept killing jobs at the stale one. This is the environment
+  trap one layer in: a value frozen at process start is not only `environ` — it
+  is **any Python module the process imported**, and unlike a config file
+  nothing about the code hints that it was read once. **Check the daemon's start
+  time against the mtime of what it imports**, and verify a fix by making the
+  running process print the new value, never by confirming the file changed.
+- **A stop that reports `OK` may have stopped without re-queueing.** The pause
+  path stops the job first and re-enqueues second; when the second half fails
+  (e.g. its CLI binary is not built) the log still shows the pause succeeding,
+  so the job is gone and nothing is scheduled to bring it back. Read the lines
+  *after* the `OK` before assuming a paused job will return — **a two-step
+  operation that reports the first step's status is a silent success in the
+  sense of `AGENTS.md` §Evidence Order.**
 - **If a PROD job is held `Queued (GQM price over limit order)`, WAIT — do not
   raise its limit order.** A per-job `set_limit_order` bump is banned policy: the
   price cap is a blast-radius bound doing its job (refusing to overpay at a
