@@ -231,9 +231,16 @@ is worth doing, because a shared root makes "same code, different behaviour"
 impossible by construction rather than merely unlikely.
 
 **When a job does behave differently across roots, that is a finding about the
-library, not a reason to keep both roots.** Pin everyone to the newer one and
-treat the divergence as a bug to characterise — running half the fleet on each
-is how you end up debugging your own code for a difference that was never in it.
+library, not a reason to keep both roots.** Pin everyone to one root and treat
+the divergence as a bug to characterise — running half the fleet on each is how
+you end up debugging your own code for a difference that was never in it.
+**Choose that root for being healthy and shared, not for being newest**: the
+root this fleet standardised on turned out to carry an *older* torch than
+another workspace on the same machine, which is fine — the ports pin nothing —
+but it means "we picked the newest" is the wrong reason to record, and anyone
+re-deriving the choice from that reason will pick differently. A drained root
+that accepts writes and loses them minutes later is the failure that actually
+matters here, and it is invisible to a version comparison.
 
 ### FlashAttention Is Available, With Two Conditions
 
