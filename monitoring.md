@@ -59,6 +59,36 @@ readings, gotchas hit this shift. A monitor that keeps state only in context
 *will* forget it after the first compaction (a prior monitor stopped updating it
 and coasted on luck for hours).
 
+## Keep A Standing Doc Of The Operator's Requirements (`FLEET_STANDING.md`)
+
+**Maintain ONE living document — `~/work/.monitor_watch/FLEET_STANDING.md` — holding the
+operator's standing requirements, the current high-level direction, and every line's
+status; re-read it each heartbeat and update it the moment anything changes.** This is the
+operator's explicit instruction: *"更多是用来维护我的要求 + high level 指导，免得你忘记。
+你定时看看那个文档。那个文档维护好各个 session 的状态和一些指示，这样也方便你写交接文档的时候
+只需要简单 finetune 它。"* It differs from the two neighbouring artifacts and all three are
+required:
+
+| File | Holds | Lifetime |
+|---|---|---|
+| `FLEET_STANDING.md` | the operator's rules, current direction, per-line status | **across monitors** — successive versions edit it, never recreate it |
+| `AGENT_STATUS.md` | this shift's narrative, readings, mistakes | one shift |
+| the todo list | what is outstanding RIGHT NOW | minutes to hours |
+
+Structure it so a handoff is a *diff*, not a rewrite: §1 the operator's requirements
+verbatim with the date each was given, §2 current high-level direction (volatile — it is
+normal for a later order to overturn an earlier one, so record which one is newer), §3
+per-line status split into active / standby / stopped, §4 the red lines, §5 how to turn it
+into a handoff doc. **Quote the operator's own words in §1 and §4 rather than paraphrasing**
+— a summary of a rule drifts, and the monitor who inherits it cannot tell your paraphrase
+from his instruction.
+
+**A standing requirement outlives the monitor who received it, so writing it down is not
+optional.** A rule held only in one monitor's context dies at the next handoff, and the
+successor re-learns it by violating it. The same applies to a direction that *changed*:
+when an order is overturned, edit §2 in place and note which is newer — a monitor acting on
+a superseded instruction is the failure this file exists to prevent.
+
 ## Track Every Request In The Todo List (mandatory)
 
 **You MUST keep a live todo list via the `todo_write` tool, and the FIRST thing
@@ -286,8 +316,17 @@ it is far more accurate than a monitor writing it from the outside.** Protocol:
 
 1. Message the line: write a **self-contained** doc (every run-id / XID / cell /
    cns path / branch / commit / workspace path spelled out — a fresh agent has
-   zero context), and paste the full text back in its next reply.
-2. Grab the pasted body (`lastmsg.py` / `chat_messages`), save under
+   zero context) to a file, and reply with **only the absolute path + md5 + one
+   sentence** saying what it contains.
+   ★**Never ask for the full text pasted into chat.** That instruction — which
+   this section used to give — puts a 13k-character message into the monitor's
+   context and directly violates the 200-word cap two sections above. The
+   operator caught it: *"理想状态应该是他直接给你一个交接文档的路径而不是给你发消息。"*
+   A monitor reads every line into ONE context, so the cost is not the line's, it
+   is the monitor's ability to watch the rest of the fleet. **When two rules in
+   this file conflict, the violation belongs to whoever wrote the instruction,
+   not to the agent who obeyed it.**
+2. Read the doc from that path yourself, verify the md5, save a copy under
    `handoff_bodies/`.
 3. Fix any stale references in the body (e.g. the prior monitor's run-id → yours).
 4. Prepend a short framing header ("you are the new session for line X;
@@ -314,6 +353,26 @@ each). These zombie workers pile up and eat RAM (7 retired runs still live =
   alive. `session_cancel` only works **within your own run**, not across runs.
 - Sweep leftovers periodically:
   `for rid in $(awk '{print $2}' runs_retired.txt|sort -u); do lsof ~/.amply/logs/$rid.log 2>/dev/null; done`.
+
+**Killing the worker is not the same as cutting the line's references — hunt the
+survivors that still name the dead run-id.** A retired run-id keeps living inside
+whatever hard-codes it, and every one of those becomes a dead mailbox: the alert
+is sent, `amply_notify` may even return 0, and nobody reads it. That blind spot
+is exactly how a 777k line died unnoticed for two hours. After the kill, grep the
+dead rid across the watcher surface and re-point each hit at the successor:
+
+| Where it hides | Why the kill misses it |
+|---|---|
+| A `*.sh` the line owned | edited file ≠ running process; a `while true`/cron wrapper revives it |
+| A `crontab` line pinning `AMPLY_RUN_ID=` | survives every kill, fires on the next tick |
+| A **keepalive** script that revives *other* scripts | one level of indirection — searching for the daemon's own name finds nothing |
+| A library the loop `source`d at startup | the function body is a start-time snapshot |
+| A long-running binary's `runfiles/` | the process holds the old snapshot until restart |
+
+**One level of indirection is enough to hide a process from a name search**, so
+search for the *run-id*, not for the daemon's name, and confirm each replacement
+by reading the value out of the **restarted** process (`/proc/<new pid>/environ`,
+or the script's own start-up banner) rather than out of the file.
 
 ### Writing the handoff doc: direction first, then detail
 A fresh session has zero context, so the doc must read top-down. Model it on the
