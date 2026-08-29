@@ -456,6 +456,18 @@ python3 your_main.py --your_flag=1 --xm_resource_alloc=group:x/y --cell=sj
 Any new job binary should get this smoke before it is ever enqueued: the same
 argv shape the launcher will use, run on the workstation, must reach `main()`.
 
+**And pass every boolean as `--flag=true` / `--flag=false`, never as the bare
+`--flag` or `--noflag`: the launcher forwards an argument with no `=` as an
+empty string, and absl rejects `--flag=` for a bool.** The rewrite happens in
+the launcher's argv splitter (`arg.split('=', 1)`, with the one-element branch
+assigning `""`), so the form that works when you run the binary by hand is
+exactly the form that dies under the launcher — exit 1 inside the flag parser,
+before `main()`, which means **no log, no CNS line, only `FailedWorkUnits 1/1`**.
+This has now killed jobs three times. The general rule it teaches is worth more
+than the workaround: **running it locally does not prove it will run under the
+launcher, because the layer in between rewrites your argv** — so smoke-test the
+argv the launcher *produces*, not the argv you typed.
+
 ## Rule 5 — GPU Topology: One Task, N Local GPUs, You Own NCCL
 
 A single `--tpu_type=h100-8` is **one Borg task with 8 local GPUs in one
