@@ -212,3 +212,40 @@ amply server **05:42Z–13:34Z 停摆 7h45m**。13:31Z 我恢复时探针已全�
 7. 答 srcfsd-owner-v3 那个 ACK（`_notify` 自警要不要改发给 owner 自己）
 8. ★**OOM 真根因重查**（§1）—— operator 已在开根治 session，配合他
 9. `trm-torch-v3`(357k) 和 `codi-torch-v2`(368k) 逼近 400k，准备交接
+
+---
+
+## 8. ★ operator 本班（2026-08-29 03:49Z–13:50Z）给的指示逐条
+
+operator 令我整理这一节。**以下是他的原话摘录 + 我的执行状态**，不是我的转述总结。
+★**§1 长期要求见 `FLEET_STANDING.md`，那份未经他改口不许删；本节是本班新增/被强调的。**
+
+| # | operator 的话（原文） | 时间 | 性质 | 我的执行 |
+|---|---|---|---|---|
+| A | 「infra-v13 身份探针，请忽略。」 | 03:53Z | 一次性 | 已忽略 |
+| B | ★「**OOM原因是什么？我现在开一个OOM killer的根治session，请你告诉我根因是什么，有哪几条**」 | 13:36Z | **任务** | ❌**我给错了**（§1）。他 13:42Z 顶回 |
+| C | ★「**你在干什么，你这四条OOM的根因第一条不是GPU的根因吗？怎么和grad扯上关系了？请你立刻自己做交接**」 | 13:42Z | **纠错+令** | 已验算认错；已交接 |
+| D | ★「**你交接文档应该放置在 handoff_bodies 文件夹下面**」 | 13:50Z | **规范** | ✅ 已放 `handoff_bodies/HANDOFF_monitor_v50.md`（md5 与 `handoffs/` 那份一致） |
+| E | ★「**认真写交接文档，阅读 wiki_agents 的要求**」 | 13:50Z | **规范** | ✅ 本文重写：加证据等级标注 / 每线一个 `###` 块 direction-before-detail / fix-status 分桶 / 继承 todo / git commit。**上一版全缺** |
+| F | ★「**记得整理一下我每轮给你的 prompt，里面的指示你总结一下哪些是重要的**」 | 13:50Z | **规范** | ✅ 即本节。**★这一条本身要传下去：每班都要维护它** |
+
+### ★ 从 B/C/D/E 提炼出的、我认为最该传下去的四条
+
+1. ★**operator 会拿你的答案去开新 session。** 他问 OOM 根因不是闲聊，是要拿去派工。
+   **一个错误的根因会让整条新线朝错方向走。** ⇒ 报根因**必须先做数量级验算**，
+   拿不准就明说 UNKNOWN + 只给实测事实。**"我不知道"比一个像答案的东西便宜得多。**
+2. ★**他能一眼看穿领域串味。** 我把 GPU 显存的直觉套到 CPU 探针上，他第一时间抓到
+   （"这不是 GPU 的根因吗？怎么和 grad 扯上关系"）。**不要用一个领域的机制去解释另一个领域的现象。**
+3. ★**"认真写交接文档，阅读 wiki_agents 的要求"** —— 我上一版是凭印象写的，
+   漏了证据等级、分桶、direction-before-detail。**规范就在 `monitoring.md` §Handoffs 和
+   `handoffs/README.md` 里，写之前回读，不要凭印象。**
+4. ★**存放位置有冲突时要摊开说，别自己选一个。** `handoffs/README.md` 写
+   "and nowhere else"，而 operator 要 `handoff_bodies/`，且 v48 实际两处都放。
+   我按 `AGENTS.md`「surface a conflict rather than guessing」问了他，同时**先两处都放**
+   （`handoffs/` 在 git 里可恢复，`handoff_bodies/` 是 monitor 工作副本）。
+   ★**若他澄清只要一处，记得同步改 README + monitoring.md，否则下一任会看到相反的规则。**
+
+### 本班被下级顶回 2 次（每次都对，这一节比任何结论都重要）
+- **trm-torch-v3** 顶回我"trm 和 codi 同一堵墙"：它用 `b200_soak` 的 deps 对照证明
+  共同子集无罪 ⇒ **形状相同不等于同因**。
+- **operator 本人**顶回我的 OOM 根因（见 §1）。
