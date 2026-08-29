@@ -25,7 +25,7 @@ current home is `~/work/.monitor_watch/` — do not re-version it. Layout:
 | `state_<name>.json` | Per-line persisted state (phase, dead_streak, idle_since). |
 | `AGENT_STATUS.md` | The live-memory file (see §Live Memory). |
 | `tools/` | The cross-run CLIs (probe/lastmsg/handoff). Back them up here. |
-| `handoff_bodies/` | Saved handoff docs, so a handoff survives a `/tmp` wipe. |
+| `handoff_bodies/` | ★**The canonical home for handoff docs** (operator, 2026-08-29), `HANDOFF_<line_name>.md`. |
 
 `/tmp` is a tmpfs and is shared with other users' dead-process litter; anything
 you need after a reboot or another user's cleanup must be under `~/work`.
@@ -326,8 +326,10 @@ it is far more accurate than a monitor writing it from the outside.** Protocol:
    is the monitor's ability to watch the rest of the fleet. **When two rules in
    this file conflict, the violation belongs to whoever wrote the instruction,
    not to the agent who obeyed it.**
-2. Read the doc from that path yourself, verify the md5, save a copy under
-   `handoff_bodies/`.
+2. Read the doc from that path yourself, verify the md5, and store it as
+   `handoff_bodies/HANDOFF_<line_name>.md` — ★the canonical location (operator,
+   2026-08-29: 「只放 handoff_bodies」). Keep **no** second copy elsewhere; a
+   drifted duplicate reads exactly as authoritative as the current one.
 3. Fix any stale references in the body (e.g. the prior monitor's run-id → yours).
 4. Prepend a short framing header ("you are the new session for line X;
    a monitor watches your health; start from §N").

@@ -418,6 +418,54 @@ with `TPU_ROUTE_ENABLED=1` (unset by default). Neither the worker nor the router
 ever submits into an oversold/full cell or cancels a job whose live status it
 cannot read. Tool internals: `infra/tpu_cli.md`.
 
+## The `LOAD_FROM` Contract
+
+**A scheduler tells a job where to resume from by setting the environment variable
+`LOAD_FROM` to the checkpoint path, VERBATIM — never by a config key, and never after
+"fixing up" the path.** Any new launcher, requeue path, or resume tool must follow this
+exactly; it is the one interface every family in this fleet already speaks.
+
+**The contract is the ENV VAR, not the config key.** `LOAD_FROM` is what all consumers read.
+Which config key it lands in differs per project — EqR-jax family uses `load_from`, the
+codi/coconut family uses `load_model_path` — so a producer that writes the *key* instead of
+the *variable* keeps working on most lines and silently cold-starts the rest. That failure is
+partial by construction: a smoke test on any EqR-jax line passes and certifies the bug.
+
+**Never parse, normalise, or complete the path.** Four incompatible checkpoint shapes coexist,
+and every "helpful" transformation breaks at least one:
+
+| Family | Shape | Note |
+|---|---|---|
+| EqR-jax (maze, trm-arc1, hrm-trm) | `step_<N>/` | the job appends `/state` itself |
+| codi, coconut | `step_<N>/` | flat, there is **no** `/state` subdirectory |
+| paligemma, jax_llava | `checkpoint_<N>` | flax file |
+| torch ports | `step_<N>.pt` | **a single FILE, not a directory** |
+
+Store the string the job itself reported (its `latest_checkpoint()`), replay it unchanged.
+`LOAD_FROM` must point at the **leaf**; a bucket root or a `checkpoints/` parent raises
+`FileNotFoundError` — after first printing a reassuring metadata warning.
+
+**Clear `LOAD_FROM` once the job has written its own first checkpoint, or set it only for the
+first dispatch.** An explicit `LOAD_FROM` wins unconditionally and disables the job's own
+auto-resume, so leaving it pinned makes every later preemption reload the same old
+checkpoint: a run measured at step 380k restarted from 298k, and it reads as training
+instability rather than as an infra fault.
+
+**`CHECKPOINT_BUCKET` is a separate variable and must not be repointed on resume.** It says
+where the job *writes*; `LOAD_FROM` says where it *reads*. The torch ports derive their whole
+working directory from it, so moving it silently restarts them from scratch.
+
+**Read remote if you must; write local always.** A cross-metro restore read is survivable
+(6.0 GiB across the Atlantic measured at ~14 s). A training loop *writing* checkpoints across
+a metro is not: throughput falls ~6x same-continent and ~94x cross-continent, blocking saves
+push duty cycle under the 0.20 floor, and the WIM pruner deletes the job — no preemption
+notice, no crash. Prefer copying the checkpoint to the compute cell's own CNS prefix before
+launch (swap the prefix, keep the tail verbatim) and point `LOAD_FROM` at the local copy.
+
+**A job that cannot find its `LOAD_FROM` must fail closed.** Cold-starting instead is the
+expensive silent failure: it looks like a successful launch, burns the full run, and only the
+loss curve shows it began from scratch.
+
 ## Preemption, Restart, And Resume
 
 - **A restart restores nothing.** The binary re-executes from the top on a fresh

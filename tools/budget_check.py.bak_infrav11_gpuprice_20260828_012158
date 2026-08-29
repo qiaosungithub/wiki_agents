@@ -4,7 +4,6 @@ import json
 import re
 import sys
 import os
-import time
 
 # ---- Groups EXEMPT from the G9 income/10 credit cap -----------------------
 # g3 (gdm-viscam-interns-dynamic) and g5 (vqfree-xm) are separate dynamic pools
@@ -83,19 +82,6 @@ def get_default_cap(tpu_type):
         'v5e': 30,
         'v6e': 80,
         'v6p': 180,
-        # NVIDIA GPU families (added 2026-08-28, infra-v11). Before this, every
-        # GPU family missed the table and fell through to the 100 cr/chip-hr
-        # catch-all, projecting gb200-8 and h100-8 at 800 cr/hr each -- a 5-10x
-        # over-statement that silently refused GPU work the fleet could afford.
-        # These are the per-chip POLICY caps printed in the money board's cap
-        # column ("5.00 ok (policy)"), i.e. the same limit-order bound the
-        # submit path already enforces, so the gate and the submit path agree.
-        'a100': 5,
-        'h100': 10,
-        'h200': 10,
-        'b200': 20,
-        'gb200': 20,
-        'gb300': 20,
     }
     return mapping.get(arch, 100)
 
@@ -155,17 +141,13 @@ def market_prices():
     for i, ln in enumerate(lines):
         if '\u2502' not in ln:
             continue
-        # Card type is either "TPU v6p" or "GPU GB200". Before 2026-08-28 only
-        # the TPU arm existed, so no GPU family ever got a market price and all
-        # of them fell back to the cap.
-        m = re.match(r'(?:TPU\s+(v\d+[a-z]?)|GPU\s+([A-Za-z]+\d+))$', _cell(ln, 1))
+        m = re.match(r'TPU\s+(v\d+[a-z]?)$', _cell(ln, 1))
         if not m or _cell(ln, 2) != 'PROD':
             continue
-        family = (m.group(1) or m.group(2)).lower()
         blob = " ".join(_cell(lines[j], 3) for j in range(i, min(i + 4, len(lines))))
         mm = re.search(r'median\s+([\d.]+)\s*,\s*n=(\d+)', blob)
         if mm:
-            out[family] = float(mm.group(1))
+            out[m.group(1).lower()] = float(mm.group(1))
             continue
         # Some families print a single median value with no "(median X, n=Y)"
         # continuation row -- e.g. v7 shows just "20.00 Credits/hr" (or a
@@ -177,109 +159,22 @@ def market_prices():
         # 'median' semantics of taking the representative low price).
         mm2 = re.search(r'([\d.]+)\s*(?:[\u2013\u2014-]\s*[\d.]+\s*)?Credits/hr', blob)
         if mm2:
-            out[family] = float(mm2.group(1))
-            continue
-        # "0.00 (free pool)" / "not offered in this pool" carry NO Credits/hr
-        # figure. Deliberately NOT parsed as a 0.00 market price: a zero
-        # projection would make this gate structurally unable to refuse that
-        # family no matter how much of it is queued. Falling through to the
-        # policy cap keeps the gate bounded and truthful about uncertainty.
-        # Revisit only with an explicit operator decision to stop gating
-        # free-pool families.
+            out[m.group(1).lower()] = float(mm2.group(1))
     return out
 
 
 _MARKET = None
-_MARKET_AT = 0.0
-# The memo below exists to avoid re-parsing the money cache on every job in a
-# loop over hundreds of rows. 60s is far shorter than any price move that
-# matters and far longer than one such loop, so it keeps the saving without
-# keeping a price.
-_MARKET_TTL_S = 60.0
 
 
 def chip_price(tpu_type):
-    """(credits per chip-hour, basis) -- market when fresh, else the cap.
-
-    THE MEMO EXPIRES. It used to be `if _MARKET is None`, i.e. read once per
-    process and never again. That is correct for budget_check's own CLI (a new
-    process per launch) and WRONG for anything long-lived that imports it --
-    which budget_enforcer.py does, as a daemon looping every 120s for days.
-
-    Measured 2026-08-27, the two gates disagreed by 3x at the same instant on
-    the same five jobs:
-
-        budget_check (fresh process)  64 chips x 47.81 = 3060  -> REFUSED every launch
-        budget_enforcer (20h old)     64 chips x 15.60 =  996  -> "nothing to pause"
-
-    So the price tripled and only one gate knew. Launches were blocked using the
-    high price while the enforcer -- whose whole job is to shed load when prices
-    rise -- sat idle using a day-old one, and said "OK" every two minutes while
-    doing it. A wrong number that never changes is worse than no number: nothing
-    about the output looks stale.
-
-    The second face of the same bug: `market_prices()` returns {} when the money
-    cache is itself too old, and {} was memoised just as permanently. A process
-    that started during one stale window fell back to policy caps forever, even
-    after the cache recovered. Re-reading fixes both.
-    """
-    global _MARKET, _MARKET_AT
-    now = time.time()
-    if _MARKET is None or (now - _MARKET_AT) > _MARKET_TTL_S:
+    """(credits per chip-hour, basis) -- market when fresh, else the cap."""
+    global _MARKET
+    if _MARKET is None:
         _MARKET = market_prices()
-        _MARKET_AT = now
     arch = tpu_type.split('-')[0].lower()
     if arch in _MARKET:
         return _MARKET[arch], 'market'
     return get_default_cap(tpu_type), 'cap'
-
-
-_FREE_POOL = None
-_FREE_POOL_AT = 0.0
-
-
-def free_pool_families():
-    """{'gb300', ...}: PROD families whose auction cleared at zero this cycle.
-
-    Deliberately SEPARATE from market_prices() rather than a 0.00 entry in it.
-    market_prices() feeds current-cost accounting, and a zero there is exactly
-    what the free-pool branch in that parser refuses to write: it would make
-    the aggregate gate structurally unable to refuse a family no matter how
-    much of it is queued. This set is consulted ONLY for the incoming job, so a
-    free-pool job is admitted while every family -- free-pool included -- still
-    contributes its policy cap to current_cost.
-
-    Kept out of market_prices() for a second reason: budget_enforcer.py,
-    arm_dash.py, reconcile_ledger.py and reconcile_finished.py all import it and
-    expect {family: price}. Widening that contract would reach all four.
-    """
-    global _FREE_POOL, _FREE_POOL_AT
-    now = time.time()
-    if _FREE_POOL is not None and (now - _FREE_POOL_AT) <= _MARKET_TTL_S:
-        return _FREE_POOL
-    fams = set()
-    raw = ''
-    try:
-        age_h = (datetime.datetime.now()
-                 - datetime.datetime.fromtimestamp(os.path.getmtime(MONEY_CACHE))
-                 ).total_seconds() / 3600.0
-        if age_h <= MONEY_MAX_AGE_H:
-            raw = open(MONEY_CACHE).read()
-    except OSError:
-        raw = ''
-    raw = re.sub(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])', '', raw)
-    for ln in raw.splitlines():
-        if '\u2502' not in ln:
-            continue
-        m = re.match(r'(?:TPU\s+(v\d+[a-z]?)|GPU\s+([A-Za-z]+\d+))$', _cell(ln, 1))
-        if not m or _cell(ln, 2) != 'PROD':
-            continue
-        # This row's OWN price cell, not the 4-row blob market_prices() joins,
-        # so an adjacent BATCH row cannot leak its figure in here.
-        if re.search(r'free\s+pool', _cell(ln, 3), re.I):
-            fams.add((m.group(1) or m.group(2)).lower())
-    _FREE_POOL, _FREE_POOL_AT = fams, now
-    return fams
 
 
 def parse_tpu_type(tpu_type):
@@ -497,45 +392,6 @@ def main():
     if new_tpu_type.strip().lower().startswith('cpu'):
         print(f"\033[32m[budget check] new job is CPU-only ({new_tpu_type}) -- no chips, "
               f"does not draw on the G9 chip budget; admitted regardless of aggregate.\033[0m")
-        sys.exit(0)
-
-    # A FREE-POOL family cleared at zero this cycle, so it adds no credits/hr
-    # and this bar -- which bounds credits/hr -- cannot be protecting anything
-    # by refusing it. Fourth sibling of the three hatches above, and admitted
-    # 2026-08-28 on lyy's explicit decision, which is exactly the condition the
-    # free-pool branch in market_prices() records itself as waiting for
-    # ("Revisit only with an explicit operator decision to stop gating
-    # free-pool families").
-    #
-    # Measured that day: a ONE-chip gb300 probe, real clearing price 0.00, was
-    # refused because five STRANDED v7 jobs -- none running, all held out of the
-    # auction by their own limit order -- projected 3929.3 against a 2241.6 bar.
-    # Forcing the probe's own cost to 0.0 did not help; the aggregate alone was
-    # already over. So parsing free pool as a 0.00 market price would NOT have
-    # fixed this: the incoming job had to skip the comparison, not be re-priced.
-    #
-    # A POSITIVE TEST, for the reason spelled out above the CPU branch: keying
-    # on `new_cost == 0` would also wave through every tpu_type parse_tpu_type
-    # fails to read. This asks whether the family is named in the money board as
-    # free pool, so a typo still lands on the refusing side.
-    #
-    # WHAT STILL BOUNDS IT: the per-XID limit order the wrapper sets right after
-    # launch (tpu_wrapper.sh _tpu_limit_price_for_arch: gb200/gb300 -> 20
-    # cr/chip-hr), verified working on XID 284287636 the same day -- it had
-    # looked broken only on an EMPTY experiment, where XManager reports no
-    # resource requirements to cap. If the family stops clearing at zero, that
-    # cap pulls the job from the auction instead of letting it bill unbounded.
-    #
-    # NOT a blanket exemption: free-pool families still contribute their policy
-    # cap to current_cost, so a fleet of them still tightens this gate on
-    # everything else. Only the single job being admitted skips the comparison.
-    _new_arch = new_tpu_type.split('-')[0].strip().lower()
-    if _new_arch in free_pool_families():
-        print(f"\033[32m[budget check] new job family '{_new_arch}' cleared at 0.00 "
-              f"(free pool) this cycle -- adds no credits/hr, so the aggregate bar "
-              f"cannot protect the budget by refusing it; admitted regardless of "
-              f"aggregate ({total_cost:.1f} vs limit {limit:.1f}). Bounded by the "
-              f"per-XID limit order instead.\033[0m")
         sys.exit(0)
 
     if total_cost > limit:

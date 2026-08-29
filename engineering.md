@@ -53,6 +53,30 @@ infrastructure.
   surviving handle together mean the failure happened before logging existed.
   Do not re-run to collect logs that cannot exist.
 
+## When A Result Is Rejected, Change The PREDICATE, Not The Command
+
+**A correction re-runs the measurement; it does not fix a broken way of
+reading it.** Told that a survey was wrong, the reflex is to re-issue it with a
+more thorough command — `ls -d` becomes `ls -l` — while the line that turns
+output into a verdict is copied across unchanged. The second run is then just as
+wrong as the first, and now it carries the authority of having been double-
+checked. **Re-derive the verdict, not the data**: state what would have to be
+true for the old reading to be wrong, and check *that*.
+
+Two failure shapes hide behind an identical re-run, and both survive a more
+careful command:
+
+| what was actually wrong | why re-running does not catch it |
+|---|---|
+| the **predicate** (grep on text that both outcomes contain) | any command feeding it produces the same verdict |
+| the **subject** (probing the wrong path, the wrong tree, `git show HEAD:f` instead of the worktree) | the reading is correct — of the wrong object |
+
+The second is the quieter one: in a dirty worktree, the committed file and the
+file on disk are different objects, so a report built from `HEAD` can describe
+work that was finished hours ago as still outstanding. **Name the object you
+measured in the finding itself** ("in the worktree", "at HEAD"), because the
+sentence is what gets relayed, and by then nobody can tell which one you read.
+
 ## A Test That Cannot Fail Proves Nothing — And Often Finds The Bug
 
 **Write the negative control before believing a checker**, and prefer a test

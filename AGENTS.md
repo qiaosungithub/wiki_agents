@@ -29,7 +29,7 @@ and each has a `README.md` index.
 | `reports/` | Writing and rendering paper reports. |
 | `infra/` | Allocator, market, and CLI internals, when `jobs.md` falls short. |
 | `tools/` | Executable helpers (price caps); prose elsewhere. |
-| `handoffs/` | **The one canonical home for handoff docs**, `<line-name>.md`. |
+| `handoffs/` | Pointer only — handoff docs live in `~/work/.monitor_watch/handoff_bodies/`. |
 | `archive/` | History. Never routed to by default. |
 
 ## Topic Router
@@ -71,7 +71,7 @@ and each has a `README.md` index.
 | A watched run shows DEAD/500; hand a heavy line to a fresh session | `monitoring.md` |
 | Monitor got a request mid-task; track it so it isn't dropped | `monitoring.md` §Track Every Request In The Todo List |
 | Write a handoff doc; retire an old session (kill its worker) | `monitoring.md` §Handoffs: Let The Line Summarize Itself |
-| **Where to put / find a handoff doc** | `handoffs/README.md` |
+| **Where to put / find a handoff doc** (`~/work/.monitor_watch/handoff_bodies/`) | `handoffs/README.md` |
 | `EqR` / `EqR-jax` | `projects/eqr_jax.md` |
 | RNN unroll optimizer / adding problem / gradient propagation science line | `projects/rnn_unroll_adding.md` |
 | VLM training, data, benchmark reporting | `projects/vlm_training.md`, `projects/vlm_data.md`, `projects/vlm_metrics.md` |

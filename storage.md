@@ -209,6 +209,39 @@ may be unreadable from a workstation (`jobs.md` covers which log paths fail on a
 restricted credential); a manifest and a completion marker outlive the task, the
 work unit, and the credential.
 
+## Asking Whether A Path Exists
+
+**Judge existence by `rc` and STDOUT ONLY; never grep the output for the path
+name, and never merge stderr into stdout first.** `fileutil` reports a missing
+path by printing an error *that quotes the path you asked about*, so a check
+shaped like `out=$(fileutil ls "$p" 2>&1); echo "$out" | grep -c "$name"` returns
+a match for **both** outcomes and the predicate is dead:
+
+| outcome | rc | stdout | stderr |
+|---|---|---|---|
+| exists | 0 | the listing | empty |
+| missing | 1 | **empty** | ~300 B *containing the path string* |
+
+This fails in the expensive direction — it reads "missing" as "present", so it
+produces a table of green rows that looks like corroboration. The safe form
+keeps the streams apart and never inspects the text:
+
+```
+fileutil ls -l "$path" >/tmp/o.txt 2>/dev/null; rc=$?
+[ "$rc" -eq 0 ] && [ -s /tmp/o.txt ]     # exists
+```
+
+**A bulk existence sweep must carry a known-missing row.** One path at a time,
+a human notices the error text; a `for cell in ...` loop compresses each answer
+to one word and the broken predicate becomes invisible. Include a path you know
+is absent and require it to report absent — the sweep is only evidence once its
+negative control has fired (`engineering.md` §A Test That Cannot Fail).
+
+**And an absent tree is not the same shape as an empty one.** `.../data/` listing
+nothing can mean the directory is empty *or* that its parent never existed; the
+error text distinguishes them (`no <path>` vs `No parent directory <prefix>`) but
+only if you read stderr deliberately instead of folding it into the answer.
+
 ## Existence Is Not Completeness
 
 **A distributed write is not atomic, so every "do we already have this?" check on

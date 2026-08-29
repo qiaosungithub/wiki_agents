@@ -96,12 +96,37 @@ run there must clone/rsync the code and build the venv.
 - **At fair 60k steps, no unroll variant has beaten baseline at a matched cell**
   yet; the T200 cell (baseline best 2/8=25%, not saturated) is the current
   discriminating test for the dyn-prec-on arms + the true-unroll optimizer.
+- **★ A `dynamic_precision`-ON result from before 2026-08-28 measured a BUG, not
+  the idea.** The rescue hook sat on every hidden state, and `loss.backward()`
+  summed the real param grads ACROSS timesteps through those hooks — a
+  per-timestep rescale does not cancel in that sum, so W_ih/W_hh/b got the wrong
+  gradient DIRECTION (cos 0.18-0.25 vs true; readout unaffected because it
+  branches off upstream = the built-in control). Corrupted params can't learn
+  marker→accumulation, so the model parks on the memoryless plateau 0.167.
+  **Consequence: every dyn-prec-ON result, INCLUDING ITS NEGATIVES, is void and
+  is being re-run.** Notably the "1/n & 1/n² fail even with dyn-prec ON (0/24,
+  locked)" claim, which had been used to permanently drop those arms, is
+  RETRACTED. Fixed via a gated rescue (`_RESCUE_ENABLED` + `rescue_active()`, the
+  gate is open only around the site-grad extraction, dormant during
+  `loss.backward()`). Guard before citing any dyn-prec result:
+  `grep -c _RESCUE_ENABLED dynamic_precision.py` must be nonzero.
+- **A negative result may DROP an arm only if it depends on NO default-on
+  experimental knob** — and only with a positive control that actually solved in
+  the same sweep. Detector: bug-kills are ~10x TIGHTER than genuine failures
+  (poisoned sweep CV 0.23% vs genuine-failure CV 2.43%); if failing cells agree
+  to <1% CV across arms with genuinely different knobs, audit the shared code
+  path before writing "none of the arms work". Full rule + post-mortem:
+  `~/work/rnn_unroll/research/CONTAMINATION_AUDIT.md`.
 
 ## Ideas Backlog / Operator Ideas (status)
-eps-shrink ✅std · dynamic_precision ✅default-on · depth-weight 1/n & 1/n² (use
-poly*_late!) ⏳ · partial norm_power ✅champ · spectral/Muon ⏳ · selective-site ⏳
-· TRUE per-site optimizer state ⏳ · idea-7 extensions (log-space norm, per-step
-whitening, only-normalize-nonzero, magnitude-floor/hybrid, RMS vs L2) = survey.
+eps-shrink ✅std · dynamic_precision ✅default-on (impl FIXED 2026-08-28) ·
+depth-weight 1/n & 1/n² (use poly*_late!) ⏳ · partial norm_power ✅champ ·
+spectral/Muon ⏳ · selective-site ⏳ · TRUE per-site optimizer state ⏳ · idea-7
+extensions (log-space norm, per-step whitening, only-normalize-nonzero,
+magnitude-floor/hybrid, RMS vs L2) = survey.
+**⏳ means UNTESTED, not "tried and failed"** — the dyn-prec-ON evidence that
+appeared to close some of these was void (see Confirmed Findings). Being
+re-measured under the fixed hook.
 
 ## Working Rhythm
 Queue serially (GPUs shared 12 lanes per box); launch from an ISOLATED dir (e.g.
