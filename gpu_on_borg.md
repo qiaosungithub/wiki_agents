@@ -908,12 +908,21 @@ Key facts:
   and made each iteration ten times cheaper, which was the right way to search;
   signing the repair off still required re-running it at the size the question
   was originally asked about.
-- **A passing `all_reduce` does NOT mean torch DDP will run.** The
+- **torch DDP really trains on 8 B200s — measured, including bf16 autocast
+  together with `find_unused_parameters=True` — but check it as its own tier,
+  because a passing `all_reduce` does not imply a passing DDP step.** The
   single-process form cannot host `DistributedDataParallel` at all (DDP needs one
-  process per GPU), and even a passing multi-process `all_reduce` is not a
-  passing DDP step: backward adds autograd hooks, gradient buckets and
-  asynchronous reduction. Check the collective and the DDP step as separate
-  tiers; do not let the cheaper one stand in for the other.
+  process per GPU), and backward adds autograd hooks, gradient buckets and
+  asynchronous reduction on top of the bare collective. **Assert against an
+  analytic target, not against the other ranks:** give rank *r* the input
+  `(r+1)^2` so its un-reduced local gradient differs from the reduced mean, then
+  check all three of DDP's collectives separately — the constructor broadcast
+  (start every rank at a *different* weight, or a broadcast that did nothing is
+  indistinguishable from one that worked), the bucketed reduction after backward,
+  and the parameter actually moving by `-lr*grad`. **A linear input `r+1` is the
+  trap here:** at odd world sizes the mean lands exactly on the middle rank's own
+  value, so that rank's assertion can never fail — and an even-only test schedule
+  never reveals it.
 - **Instrument entry into every blocking step before you re-run — a probe that
   logs only its result makes "blocked inside the collective" and "died on the
   line before it" byte-identical.** Getting to the diagnosis above took three
@@ -935,6 +944,24 @@ Key facts:
   stops at the first passing arm — otherwise it silently cancels every arm
   behind it, and the run looks complete. Early-stop logic and arm ordering are
   coupled; decide them together.
+- **A broken instrument reports as a broken subject, and it preferentially
+  accuses whatever was tested LAST — finding that out and ruling it out are two
+  different jobs.** A parent collecting results over `select()` dies at
+  `FD_SETSIZE` (1024) once enough descriptors accumulate, so on a long arm list
+  the later arms all fail while their children are in fact writing `ok=true` and
+  exiting 0; short test runs never reach the threshold. **To find it, give the
+  subject a channel independent of the collection path** — here, each rank
+  writing its own verdict breadcrumb, which is the only reason the failure was
+  not published as "this configuration does not work on B200". **To rule it out,
+  re-run the same configuration in first position**: results that are green early
+  and red late are perfectly consistent with both a real defect and a decaying
+  harness, and only moving the cell separates them. Use `poll()`, which has no
+  descriptor ceiling.
+- **A negative control that can fail for the wrong reason is not a control.**
+  Asserting merely that the control arm "did not pass" is satisfied just as well
+  by every rank dying at startup; require it to reach its verdict *and* produce
+  the specific wrong answer you predicted — for an un-reduced gradient, each
+  rank's own local value.
 - **Account for running jobs by enumerating the RESOURCE, never your own record
   of what you launched — a cancel you never issued leaves no failed return code
   to find.** Auditing the jobs you remember starting, or even a written list of
