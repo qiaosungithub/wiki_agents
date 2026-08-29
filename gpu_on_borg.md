@@ -857,88 +857,61 @@ Key facts:
   inference.** Note the evidence is the job's OWN heartbeat on CNS, not a status
   query — that is the only class of evidence that survives both the Borg log
   wall and a broken CLI.
-- **NCCL collectives across all 8 B200s WORK — measured both single-process
-  (tier 0) and with 8 processes, one per GPU (tier 1); tier 1 additionally needs
-  the logging workaround below, without which it fails 100% of the time.** Tier 0
-  ran `torch.cuda.nccl.all_reduce` over 8 devices and got the arithmetically
-  correct result on every card (NCCL 2.29.7), **13 seconds** after process
-  start. So the cards, the driver, the NCCL build and the fabric are all
-  cleared; whatever remains is in the multi-process layer above them. Keep the
-  two claims apart when quoting this — the tier-0 result does not depend on
-  tier 1 and must not be walked back with it.
-- **The multi-process failure is NOT NCCL: torch's own `LOG(INFO)` inside
-  `ProcessGroupNCCL::initNCCLComm()` reaches a Remote Debug Logging sink that
-  segfaults, and the fix is to silence INFO before the first collective.** The
-  symbolized stack, read bottom-up, is `allreduce() -> initNCCLComm() ->
-  LogMessage::Flush() -> LogToSinks() -> BatchingRemoteDebugLogSink::Send() ->
-  absl::Mutex::UnlockSlow()`. NCCL never misbehaves — which is exactly why its
-  own log shows zero WARN and an `Init COMPLETE` immediately before the death,
-  why the dying rank has built none of its P2P channels, and why `barrier` dies
-  too: **`initNCCLComm()` is lazy, so whichever collective runs first triggers
-  it.** Rank 0 is special only because that log line is one rank 0 alone emits.
-  Workaround, applied in each child after fork and before the first collective:
-  raise absl's `minloglevel` (`absl.flags._cpp_flags.set_flag('minloglevel',
-  '1')`), which short-circuits `LogMessage::Flush()` on its first line, upstream
-  of the sink. **Measured on a real 8-GPU B200 job: with `minloglevel=1` all 8
-  ranks pass and the multi-process `all_reduce` returns exactly the value tier 0
-  produces, so use `1` (kWarning) — it stops the INFO that crashes and still
-  leaves WARNING, which is NCCL's own error channel and the only instrument you
-  will have next time (`=2` also works but was only ever measured at two GPUs,
-  and it silences WARNING as well).**
-  Setting `TORCH_CPP_LOG_LEVEL` instead does NOT work: torch reads it once at
-  import, so a child that sets it after the parent imported torch is too late.
-  Two BUILD deps are needed (`//third_party/py/absl/flags:_cpp_flags` and
-  `//base/python/clif:cpp_flag`) and neither arrives transitively — wrap the
-  import in `try/except` and the `ImportError` is swallowed, leaving a run that
-  silently applies nothing and reads as "the fix did not work". This is a
-  workaround, not a repair: the sink's bug is still there.
-- **Tier 1 fails this way: rank 0 takes a SIGSEGV the first time the process
-  executes ANY NCCL collective, as NCCL is about to build its P2P/CUMEM
-  channels — and NCCL itself logs zero WARN and reports `Init COMPLETE` first.**
-  Reproduced every time it was tried, always rank 0, always signal 11, 3-7 s
-  after the collective begins; **two processes on two GPUs reproduce it**, so
-  iterate at that size rather than at eight — but **a reproducer shrunk to speed
-  up the hunt is a tool for FINDING a bug, never for VERIFYING the fix: the
-  dimension you shrank is precisely the one it can no longer answer for you**,
-  so confirm the repair at full size before anyone ships it. Ruled out, each by
-  a run that varied only that one thing: the device (rank 0 moved to `cuda:1` still died,
-  while the rank holding `cuda:0` survived), the store implementation (dropping
-  a hand-built `TCPStore` for torch's own rendezvous changes nothing, and
-  neither does `use_libuv=False`), NVLS (`32 nvls channels` -> `0`, still dies),
-  the payload (`barrier` moves no data and dies in `barrier`), and every NCCL
-  env var the job injects. **`all_reduce` is not special — it is the first
-  collective, whichever one that is.** What remains bound to `rank == 0` and
-  still untested: torch's own privileged rank (it generates the `ncclUniqueId`)
-  and being the first child forked.
-- **A single-process `all_reduce` proving out does NOT mean torch DDP will run.**
-  `DistributedDataParallel` requires one process per GPU, so the tier-0 form
-  cannot host it at all; and even a passing multi-process `all_reduce` is still
-  not a passing DDP step, because the backward pass adds autograd hooks, gradient
-  buckets and asynchronous reduction. Check the collective and the DDP step as
-  two separate tiers, and do not let the cheaper one stand in for the other.
-- **Getting there took three runs, and each one moved the failure earlier in the
-  stack — that progression, not any single verdict, is what to copy.** First
-  the probe never reached NCCL at all (`AssertionError: Use of 'fork' is
-  discouraged in Google3` — trap (i) of Rule 5, whose fix is stdlib
-  `multiprocessing`; **do NOT follow the assertion's own advice** to switch to
-  `absl_spawn`/`absl_forkserver`, which fails differently). Then it *hung* with
-  no way to say where, because **the probe logged only its result, never its
-  entry into each step**, so "blocked inside the collective" and "died on the
-  line before it" produced byte-identical evidence. Then, once every blocking
-  step wrote a breadcrumb on entry, the same run named its own failure in one
-  read. **Instrument entry into every blocking step before you re-run** —
-  re-running an uninstrumented probe buys another round of the same silence.
-- **`faulthandler.enable(file=...)` silently does nothing in a google3 binary,
-  so plan to capture fd 2 instead of owning the signal.** `absl/app.py`
-  registers CPython's dump function into absl's failure chain at IMPORT time
-  (`absl_faulthandler.register_fatal_error_handler()`), and a second
-  registration is refused — your `enable(file=...)` creates the file and then
-  never writes a byte, which reads exactly like "the handler never fired". The
-  traceback goes to **fd 2**, and on Borg that stderr is unreadable from an
-  agent sandbox (`analog` and `borg tasklog` both fail LOAS). The workaround is
-  to stop competing for the handler: `dup2` each child's fd 2 onto a file of
-  your own and upload it — that also catches NCCL's and the driver's writes,
-  which never went through Python at all.
+- **NCCL works across all 8 B200s — measured both single-process and with 8
+  processes, one per GPU — but the multi-process form needs the logging
+  workaround below, without which it fails 100% of the time.** Single-process
+  `torch.cuda.nccl.all_reduce` over 8 devices returns the arithmetically correct
+  result on every card 13 s after start, and the 8-process path reaches the same
+  value once the workaround is in. Prove the two separately: the single-process
+  result does not depend on the multi-process one and must not be walked back
+  with it.
+- **A multi-process collective dies on rank 0 with SIGSEGV, and it is NOT NCCL:
+  torch's `LOG(INFO)` inside `ProcessGroupNCCL::initNCCLComm()` reaches a broken
+  debug-log sink.** The stack is `allreduce -> initNCCLComm -> LogMessage::Flush
+  -> LogToSinks -> BatchingRemoteDebugLogSink::Send -> absl::Mutex::UnlockSlow`.
+  NCCL never misbehaves — hence zero WARN and an `Init COMPLETE` right before the
+  death, and no P2P channels built yet. `initNCCLComm()` is lazy, so **whichever
+  collective runs first triggers it** (`barrier` too); rank 0 is special only
+  because that log line is one it alone emits. **Fix: in each child, after fork
+  and before the first collective, `absl.flags._cpp_flags.set_flag('minloglevel',
+  '1')`** — the check is the first line of `LogMessage::Flush()`, upstream of the
+  sink. Use `1` (kWarning), not `2`: it stops the INFO that crashes and keeps
+  WARNING, which is NCCL's own error channel and your only instrument next time.
+  `TORCH_CPP_LOG_LEVEL` does NOT work (torch reads it once at import, so a child
+  sets it too late). Two BUILD deps are required and arrive non-transitively
+  (`//third_party/py/absl/flags:_cpp_flags`, `//base/python/clif:cpp_flag`), so a
+  `try/except ImportError` around them yields a run that silently fixes nothing
+  and reads as "the workaround does not help". This is a workaround; the sink bug
+  is still there.
+- **A reproducer shrunk to speed up the hunt is a tool for FINDING a bug, never
+  for VERIFYING the fix — the dimension you shrank is precisely the one it can no
+  longer answer for you.** Two processes on two GPUs reproduced the crash above
+  and made each iteration ten times cheaper, which was the right way to search;
+  signing the repair off still required re-running it at the size the question
+  was originally asked about.
+- **A passing `all_reduce` does NOT mean torch DDP will run.** The
+  single-process form cannot host `DistributedDataParallel` at all (DDP needs one
+  process per GPU), and even a passing multi-process `all_reduce` is not a
+  passing DDP step: backward adds autograd hooks, gradient buckets and
+  asynchronous reduction. Check the collective and the DDP step as separate
+  tiers; do not let the cheaper one stand in for the other.
+- **Instrument entry into every blocking step before you re-run — a probe that
+  logs only its result makes "blocked inside the collective" and "died on the
+  line before it" byte-identical.** Getting to the diagnosis above took three
+  runs: the first never reached NCCL at all (the `fork` assertion of Rule 5), the
+  second hung with no way to say where, and the third named its own failure in
+  one read — the only thing that changed was a breadcrumb written on ENTRY to
+  each blocking call. Re-running an uninstrumented probe buys another round of
+  the same silence.
+- **`faulthandler.enable(file=...)` silently does nothing in a google3 binary —
+  capture fd 2 instead of competing for the signal.** `absl/app.py` registers
+  CPython's dump function into absl's failure chain at IMPORT time and a second
+  registration is refused, so your `enable(file=...)` creates the file and never
+  writes a byte — indistinguishable from "the handler never fired". The traceback
+  goes to **fd 2**, which on Borg is unreadable from an agent sandbox (`analog`
+  and `borg tasklog` both fail LOAS). `dup2` each child's fd 2 onto a file of
+  your own and upload it; that also catches NCCL's and the driver's writes, which
+  never went through Python at all. **This is how the crash above was diagnosed.**
 - **A diagnostic arm designed to PASS must be ordered last** whenever the runner
   stops at the first passing arm — otherwise it silently cancels every arm
   behind it, and the run looks complete. Early-stop logic and arm ordering are
@@ -946,13 +919,13 @@ Key facts:
 - **Account for running jobs by enumerating the RESOURCE, never your own record
   of what you launched — a cancel you never issued leaves no failed return code
   to find.** Auditing the jobs you remember starting, or even a written list of
-  them, only proves that the things you *did* succeeded; it cannot surface the
-  thing you never did. Two successive audits here missed two different jobs —
-  one burning eight B200s for over four hours — and the true count came only
-  from listing the output directory itself. **Verify the kill the same way:**
-  a cancel returning SUCCESS means the request was accepted, while the proof it
-  died is that its heartbeat file stops growing between two samples — an
-  instrument that does not depend on the tool you used to stop it.
+  them, only proves the things you *did* succeeded; it cannot surface the thing
+  you never did. Two successive audits here each missed a different job, one
+  burning eight B200s for over four hours, and the true count came only from
+  listing the output directory. **Verify the kill the same way:** a cancel
+  returning SUCCESS means the request was accepted, while the proof it died is
+  its heartbeat file no longer growing across two samples — an instrument that
+  does not depend on the tool you used to stop it.
 - **A dead child and a hung child are indistinguishable unless the parent
   records which ones it had to kill.** Have the parent log a breadcrumb before
   it kills a still-running child and again when it reaps each one, with the
