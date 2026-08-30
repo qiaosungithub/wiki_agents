@@ -185,6 +185,7 @@ what the claim actually asks.
 | This job hung | its log stopped growing | **one attempt's** log — a retried job writes `..._attempt2.log`, and the frozen file is the corpse of the attempt that died |
 | My watcher would have told me | the watcher process is alive and silent | that a process is running — not that it watches the right id, nor that its probe can express the failure you fear |
 | These repeated numbers disagree, so something is being sampled | the spread across runs | dispersion you never compared to the noise floor — at n=1319, p≈4.5%, binomial sd is 0.571 pt and a 0.531 pt spread is **expected** |
+| This stale row will be cleaned up automatically | the reconcile FUNCTION, called by hand, returns the right verdict | that the logic is correct — **not that anything calls it**: the daemon logged `reroute pass SKIPPED (standalone owner)` for a standalone process nobody had started, and 63 of 84 queue rows were zombies, the oldest 179 h stale |
 
 The **"will never finish"** row is the trap in its **time** form, and it is the
 one that reads as a verdict: the reading is correct, and it is a reading of
@@ -194,11 +195,11 @@ proves it wrong, recognise that the observation was never wrong, only its tense.
 The rest are the trap in its **space** form: the query measured the neighbouring
 thing.
 
-**Before a negative reading becomes a conclusion, name the four coordinates the
+**Before a negative reading becomes a conclusion, name the five coordinates the
 instrument is pointed at — which PROCESS, which ATTEMPT, which TIME WINDOW,
-which OUTPUT PATH.** One line of work missed a different one on each of five
-consecutive occasions in a single shift, every time with a reading that was
-perfectly true. Wrong process: the serial worker was idle, but the dispatch
+which OUTPUT PATH, and whether the code you verified is ever INVOKED.** One
+line of work missed a different one of these on five consecutive occasions in a
+single shift, every time with a reading that was perfectly true. Wrong process: the serial worker was idle, but the dispatch
 worker owned that queue state. Wrong attempt: the log froze because it belonged
 to a dead retry while `attempt2` ran fine. Wrong window: a spread was called a
 sampling bug without computing the binomial sd it had to beat. Wrong path: the
@@ -209,6 +210,16 @@ and the merged history "proved" a spike pattern neither arm had. **Whenever a
 file, a variable, or a chart carries a name you gave it earlier, re-derive WHICH
 ARTEFACT it holds before you reason from it** — the name is your old belief,
 not evidence.
+
+**The INVOKED coordinate is the one that survives careful review, because
+testing a pure function proves capability and says nothing about occurrence.**
+A reconcile routine was exercised directly, returned exactly the right verdict,
+and was cited as proof that stale rows self-clean — while no process on the
+machine ever called it, so a status table sat 179 hours out of date and read as
+live. **"It would handle this correctly" and "it is handling this" are
+different claims**, and only the second is evidence; check the caller, the
+service, the cron entry, not just the callee. Note the failure mode is the
+mirror image of a swallowed error: nothing failed, because nothing ran.
 
 **An absence is the weakest possible reading, so treat "X did not appear" as a
 question about the instrument first and the world second.** A missing log line,
