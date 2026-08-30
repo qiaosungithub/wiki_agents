@@ -67,6 +67,7 @@ and each has a `README.md` index.
 | Write a checker, or a verification keeps saying OK | `engineering.md` §A Test That Cannot Fail |
 | **Log a result to the spreadsheet**; find a chart | `research/result_logging.md` |
 | Write or render a paper report | `reports/README.md` |
+| **The workstation is swapping / VSCode-SSH keeps disconnecting**; reclaim idle blaze servers | `engineering.md` §standing servers, `monitoring.md` §Memory And Disk Wake Criteria |
 | **Monitor a fleet of autonomous runs**; watcher, handoffs, DEAD/idle alerts | `monitoring.md` |
 | A watched run shows DEAD/500; hand a heavy line to a fresh session | `monitoring.md` |
 | Monitor got a request mid-task; track it so it isn't dropped | `monitoring.md` §Track Every Request In The Todo List |
@@ -179,13 +180,43 @@ what the claim actually asks.
 | That agent still exists | a writer holds its log, or a dashboard says `ongoing` | that some process writes a file; dashboards go stale and are not authoritative |
 | My alert reached the on-call | the notify call returned `rc=0` | that *a* worker accepted it — possibly a retired session nobody reads |
 | This will never finish / never be released | it is making no progress now, and the ways it could finish are all ruled out | that it is stuck **at this instant** — a very slow counterpart can still return, and ruling out the exits you thought of is not ruling out the ones you did not |
+| Nobody will pick up this queued job | the serial build worker is idle and has not claimed it | **a different process**'s state — `BUILD_REQUESTED` is claimed by the dispatch worker, so the serial worker's idleness says nothing about it |
+| This flag did not take effect | the job's log never printed the override line | output emitted **before the log sink was started** — a value announced ahead of `_start_telemetry` exists only in a Borg stderr that is GC'd in minutes |
+| This job hung | its log stopped growing | **one attempt's** log — a retried job writes `..._attempt2.log`, and the frozen file is the corpse of the attempt that died |
+| My watcher would have told me | the watcher process is alive and silent | that a process is running — not that it watches the right id, nor that its probe can express the failure you fear |
+| These repeated numbers disagree, so something is being sampled | the spread across runs | dispersion you never compared to the noise floor — at n=1319, p≈4.5%, binomial sd is 0.571 pt and a 0.531 pt spread is **expected** |
 
-The last row is the trap in its **time** form, and it is the one that reads as a
-verdict: the reading is correct, and it is a reading of *now* answering a
-question about *later*. Say "I do not know when it will be released", never "it
-will not be released" — and when a fix or a fresh sample proves it wrong,
-recognise that the observation was never wrong, only its tense. Everything above
-it is the trap in its **space** form: the query measured the neighbouring thing.
+The **"will never finish"** row is the trap in its **time** form, and it is the
+one that reads as a verdict: the reading is correct, and it is a reading of
+*now* answering a question about *later*. Say "I do not know when it will be
+released", never "it will not be released" — and when a fix or a fresh sample
+proves it wrong, recognise that the observation was never wrong, only its tense.
+The rest are the trap in its **space** form: the query measured the neighbouring
+thing.
+
+**Before a negative reading becomes a conclusion, name the four coordinates the
+instrument is pointed at — which PROCESS, which ATTEMPT, which TIME WINDOW,
+which OUTPUT PATH.** One line of work missed a different one on each of five
+consecutive occasions in a single shift, every time with a reading that was
+perfectly true. Wrong process: the serial worker was idle, but the dispatch
+worker owned that queue state. Wrong attempt: the log froze because it belonged
+to a dead retry while `attempt2` ran fine. Wrong window: a spread was called a
+sampling bug without computing the binomial sd it had to beat. Wrong path: the
+override line was printed before the CNS mirror existed. **And the fifth is the
+one no checklist catches — the data was real but described two different
+objects**: a baseline file stitched a resumed run onto a run that never resumed,
+and the merged history "proved" a spike pattern neither arm had. **Whenever a
+file, a variable, or a chart carries a name you gave it earlier, re-derive WHICH
+ARTEFACT it holds before you reason from it** — the name is your old belief,
+not evidence.
+
+**An absence is the weakest possible reading, so treat "X did not appear" as a
+question about the instrument first and the world second.** A missing log line,
+an unclaimed job, a silent watcher and a stalled file all have two readings —
+the thing did not happen, or you cannot see it from here — and the second is
+usually cheaper to check. **A watcher that has never fired is indistinguishable
+from a watcher pointed at the wrong id**, which is why every probe needs a case
+in which it is known to speak.
 
 The `rc=0` row is the general case of that: **a silent success is more dangerous
 than a clean failure**, because failure leaves a trace and `rc=0` makes every
