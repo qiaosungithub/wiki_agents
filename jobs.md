@@ -393,7 +393,7 @@ operator may authorize a `priority>0`. It IS honored, unlike the dead
 
 | Command | Does |
 |---|---|
-| `tpu enqueue --power=v7-32 --archs=v7,v6p --launch=config=...` | Add a run. `--power` and `--archs` are REQUIRED together: `--power` the target, `--archs` the generations satisfying it, whichever has capacity (`--power_tolerance`, default 0.5, accepts 0.75x-1.5x). Not `tpu queue`, where `--power` and `--tpu_type` are exclusive. `--launch=k=v,flag` goes verbatim to `tpu queue` at submit; undeclared keys are REFUSED, so forward binary flags as `--launch=app.<flag>=<v>`. |
+| `tpu enqueue --power=v7-32 --archs=v7,v6p --launch=config=...` | Add a run. `--power` and `--archs` are REQUIRED together: `--power` the target, `--archs` the generations satisfying it, whichever has capacity (`--power_tolerance`, default 0.5, accepts 0.75x-1.25x: the code computes `target * (1 +/- tol/2)`, though the flag's own help text and a code comment both say 1.5x). Not `tpu queue`, where `--power` and `--tpu_type` are exclusive. `--launch=k=v,flag` goes verbatim to `tpu queue` at submit; undeclared keys are REFUSED, so forward binary flags as `--launch=app.<flag>=<v>`. |
 | `tpu queue-status` (alias `tpu qs`) | Local queue plus, live, why each job waits or where it is placeable. Run before trusting the scheduler: §Verify The Scheduler Exists Before You Rely On It. |
 | `tpu dequeue <job_id>` | Remove one before it is submitted. |
 | `tpu requeue [job_id...]` | Return HELD job(s) to QUEUED after you fix the cause (empty = all held). |
@@ -680,7 +680,10 @@ No `VMGROUP_STATE_RUN` means nothing runs, whatever the job says.
 Judge liveness by artifacts, not status queries. One run hung mid-epoch: no
 crash, NCCL error, rank exit or new attempt. For 17 frozen minutes XM
 `cancel --dry-run` said `RUNNING`, `tpu queue-status` `SUBMITTED`, both wrong.
-(`borg findjobs` was empty, but separately unreliable, not a third source.)
+(`borg findjobs` was empty, but that is not a third source: `--user=<me>` is
+not a valid flag and returns empty rather than erroring, so an empty result
+there means nothing unless you used `--user_re=` or `--name_re=`;
+`engineering.md` §Verify The Premise Before Changing Anything.)
 Frozen: log mirror, newest checkpoint `mtime`, step counter. Hangs are
 invisible to grep; watchers need a stall probe on step numbers minutes apart.
 

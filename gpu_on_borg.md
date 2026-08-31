@@ -203,7 +203,8 @@ and loses them minutes later.
 
 **`//third_party/py/flash_attn` builds against the in-tree torch, but its
 `py_library` is visibility-restricted and its version drifts per workspace.**
-Caveats, in the order they bite:
+Three caveats, in the order they bite (the heading says two; it predates the
+version-skew row):
 
 | | |
 |---|---|
@@ -223,7 +224,7 @@ hardware, capacity, or permission problem. Name the phase, then read its rule:
 | flag parsing, inside `app.run` | absl parses argv, including the launcher's own selectors | `Task exited with code 1`, zero bytes on CNS, output dir never created | Rule 4b |
 | process fan-out, before the first collective | your own multi-GPU spawn/fork | a google3 assertion (e.g. on `fork`) | Rule 5, trap (i) |
 
-Two consequences:
+Consequences:
 
 - A step that never ran proves nothing about the step after it, so record it as
   UNTESTED, not FAILED. A probe killed at fan-out says nothing about NCCL, one
@@ -412,8 +413,8 @@ argv. Smoke-test the argv the launcher *produces*, not the argv you typed.
 **A single `--tpu_type=h100-8` is one Borg task with 8 local GPUs in one
 process, not 8 tasks, and the launcher sets no `torchrun`/`RANK` for it.**
 `is_tpu_job` is False for GPU: no JAX-coordination flags are injected. Spawn one
-process per GPU yourself. Two traps, universal to multicard torch:
-- (i) Use `fork`, from STDLIB `multiprocessing`, not `torch.multiprocessing`.
+process per GPU yourself. Traps, universal to multicard torch:
+- Use `fork`, from STDLIB `multiprocessing`, not `torch.multiprocessing`.
   The wrong one kills the process at fan-out, before any collective (§The
   Startup Contract, last phase). google3 patches `torch.multiprocessing` to
   `g3lib.multiprocessing`, which *asserts* on `get_context("fork")`; its
@@ -572,10 +573,11 @@ What BUDGET_DEFERRED means: before building, the dispatch/build worker calls
 - `bar = income / 10`: one tenth of rolling G9 income (income ~25 811 → bar
   ~2 581), shared fleet-wide.
 - `current` = projected cost of ALL your live SUBMITTED/RUNNING jobs (XM-truth,
-  zombie-filtered). With ~16 live jobs `current` hit ~2 132 = 83 % of the bar,
+  zombie-filtered). In one sample with ~16 live jobs `current` read ~2 132 = 83 % of the bar,
   spent before the GPU job is even considered.
 - `headroom = bar - current`, and it swings hard: `-211 ↔ +469` within a minute
-  as other jobs start and stop. A job dispatches only when
+  as other jobs start and stop. Those two readings are different instants, not
+  one snapshot: the 2 132 sample sits at headroom +449, inside that range. A job dispatches only when
   `headroom >= new_cost`.
 - `fits = new_cost <= headroom`. If false → `BUDGET_DEFERRED`, requeued every
   round. The fixed worker does not count these as build attempts, so the job is
@@ -583,7 +585,9 @@ What BUDGET_DEFERRED means: before building, the dispatch/build worker calls
 
 The projection trap: why a cheap job looks expensive. The router queries
 budget with `lo_price=0`, so `new_cost` is the full on-demand projection
-(`gb200-8` → 800). But `_tpu_set_limit_order` auto-caps a submitted job to the
+(`gb200-8` → 800, from the 100 cr/chip-hr catch-all that applied before
+infra-v11 gave the GPU families their own policy caps; re-derive it from
+`budget_check.py` rather than reusing 800). But `_tpu_set_limit_order` auto-caps a submitted job to the
 per-arch policy price (`gb200`=20 cr/GPU-hr), so its real projected cost is
 ~1.6. The same `budget_check --query` with `lo_price=0.20` returns
 `new_cost=1.6, fits=true`. The gate rejects on a price the job never pays: a
