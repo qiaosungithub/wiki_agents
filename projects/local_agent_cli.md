@@ -107,7 +107,7 @@ whose last heartbeat sits within seconds of an `amply` coredump in
 `/var/lib/systemd/coredump`. The coredump is the only thing separating a crash
 from a pause; without it the watchdog overrides the operator every 60 seconds.
 
-## A Turn That WROTE A Tool Call Instead Of Making One
+## A Turn That Wrote A Tool Call Instead Of Making One
 
 Another way a session stops, identical from outside: worker up, run `Running`,
 nothing happens. The model wrote its tool call as XML-ish markup in the message

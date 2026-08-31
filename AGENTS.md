@@ -68,7 +68,7 @@ and each has a `README.md` index.
 | Write a checker, or a verification keeps saying OK | `engineering.md` §A Test That Cannot Fail |
 | **Log a result to the spreadsheet**; find a chart | `research/result_logging.md` |
 | Write or render a paper report | `reports/README.md` |
-| **The workstation is swapping / VSCode-SSH keeps disconnecting**; reclaim idle blaze servers | `engineering.md` §standing servers, `monitoring.md` §Memory And Disk Wake Criteria |
+| **The workstation is swapping / VSCode-SSH keeps disconnecting**; reclaim idle blaze servers | `engineering.md` §Diagnose From Evidence, Not From The Most Available Story, `monitoring.md` §Memory And Disk Wake Criteria |
 | **Monitor a fleet of autonomous runs**; watcher, handoffs, DEAD/idle alerts | `monitoring.md` |
 | A watched run shows DEAD/500; hand a heavy line to a fresh session | `monitoring.md` |
 | Monitor got a request mid-task; track it so it isn't dropped | `monitoring.md` §Track Every Request In The Todo List |

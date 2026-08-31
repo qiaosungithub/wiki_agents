@@ -9,7 +9,7 @@ chip-hours and is irrelevant to a CPU-only job, which bills in GCU against a
 different ledger. An unschedulable CPU job is almost never a market outcome; see
 `../jobs.md` §Requirements And Runtime for its pool.
 
-## The Model To Hold In Your Head
+## The Allocator Model
 
 **On a dynamic (market) pool, quota is an output of the market, not an input.**
 Credits fund a bid, a periodic auction clears a price, and your floor is

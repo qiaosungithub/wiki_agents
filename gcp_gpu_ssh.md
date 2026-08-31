@@ -53,7 +53,7 @@ Same relay model. The Mac must be a corp machine with `corp-ssh-helper` and
 `~/.ssh/config` block whose `ProxyCommand` is `corp-ssh-helper` and whose `User`
 is `qiaos`.
 
-## OS Login vs Metadata Keys — The Trap That Cost A Day
+## OS Login vs Metadata Keys
 
 **A GCE VM authorizes SSH by either OS Login or instance/project metadata
 ssh-keys, and `enable-oslogin=TRUE` makes the two mutually exclusive.** With OS
@@ -82,7 +82,7 @@ Note: per-user login is instance-level here. Other users reach these VMs via
 project-level metadata keys, so editing one instance's `enable-oslogin` or its
 instance-level keys leaves their access alone.
 
-## Our Own Boxes (we created them; we can delete them)
+## Our Own Boxes (we can delete these)
 
 **Three boxes, all `enable-oslogin=FALSE` + metadata ssh-key, so the login user
 is `qiaos@`, not the `qiaos_google_com@` the OS-Login boxes want. All DLVM

@@ -7,7 +7,7 @@ cluster, `storage.md` owns data, this file owns watching the agents that use
 them. A monitor writes almost no research code: its job is liveness,
 coordination, handoffs, escalation. It is spawned fresh each turn and the event
 stream is the only memory the harness guarantees, so everything durable lives on
-disk (§Live Memory).
+disk (§Maintain A Live-Memory File Every Turn).
 
 ## The Monitor Owns One Directory: `~/work/.monitor_watch/`
 
@@ -22,10 +22,10 @@ an operator `rm`'d it mid-shift, and the death detector went down. Home is
 | `watch.sh` / `heartbeat.sh` | Cron entry wrappers (set `HOME`, `AMPLY_RUN_ID`, exec python). |
 | `runs.txt` | The watched lines: `<name> <full-run-id>`, one per line. |
 | `state_<name>.json` | Per-line persisted state (phase, dead_streak, idle_since). |
-| `AGENT_STATUS.md` | The live-memory file (§Live Memory). |
+| `AGENT_STATUS.md` | The live-memory file (§Maintain A Live-Memory File Every Turn). |
 | `mem_oom_alert.sh` | Memory early-warning, cron `*/2`. OOM tiers (space) + THRASH tier (paging rate), §Memory And Disk Wake Criteria. Alert-only, never kills. |
-| `blaze_reaper.sh` | Reaps idle blaze servers, cron `*/30`. `DRY=1` previews; see `engineering.md` §standing servers. A resident blaze server is not automatically idle: the `tpu` CLI's own checkout keeps one warm for `blaze query` on every enqueue/route. Check `command*.profile.gz` mtime and leave an actively-queried server alone. |
-| `money_staleness_sentinel.sh` | `money.txt` freshness, cron `*/2`. Also flags an outer instance lock held by a blaze server, and a keepwarm log gone silent: the two traces of the lock-inheritance bug (`engineering.md` §standing servers). |
+| `blaze_reaper.sh` | Reaps idle blaze servers, cron `*/30`. `DRY=1` previews; see `engineering.md` §Diagnose From Evidence, Not From The Most Available Story. A resident blaze server is not automatically idle: the `tpu` CLI's own checkout keeps one warm for `blaze query` on every enqueue/route. Check `command*.profile.gz` mtime and leave an actively-queried server alone. |
+| `money_staleness_sentinel.sh` | `money.txt` freshness, cron `*/2`. Also flags an outer instance lock held by a blaze server, and a keepwarm log gone silent: the two traces of the lock-inheritance bug (`engineering.md` §Diagnose From Evidence, Not From The Most Available Story). |
 | `infra_v13_reaper/` | Probe-deadline reapers, cron `* * * * *` under `flock -n`. Cost is O(roster): one serial `xmanager list` per row at ~15 s, so ~4 rows saturate the 1-minute period and `flock` skips ticks. The symptom is reaping latency, not thrash. Judge it by the span between consecutive log lines for one XID over ≥20 cycles; a 6-cycle window samples one phase and reads green. Fix the cost class; `engineering.md` §A Test That Cannot Fail says why the test must grow the roster, not shrink it. |
 | `tools/` | The cross-run CLIs (probe/lastmsg/handoff). Back them up here. |
 | `handoff_bodies/` | Canonical home for handoff docs (operator, 2026-08-29), `HANDOFF_<line_name>.md`. |
@@ -125,7 +125,7 @@ When a message arrives mid-task:
    stays a short view of what is outstanding now.
 
 The `todo_write` list is the per-request companion to `AGENT_STATUS.md`
-(§Live Memory): that file holds the shift narrative, the list the open asks.
+(§Maintain A Live-Memory File Every Turn): that file holds the shift narrative, the list the open asks.
 
 ## The Watcher: Death, Idle, And Their False Positives
 
@@ -583,7 +583,7 @@ The fix is a tool now, not a monitor chore: `tpu build-worker`. A batch is
 `tpu enqueue`'d and one worker drains it one build at a time (a durable
 `flock`'d BUILDING lock guarantees ≤1 build in flight even across processes),
 curing both failure modes. When a line wants a sweep or multi-arm batch, tell it
-to use the build-worker (`../jobs.md` §Launch a batch), not to fan out `setsid`
+to use the build-worker (`../jobs.md` §The Launch Workflow), not to fan out `setsid`
 launches. The worker self-limits: a bad `--workdir` or repeated `found[]` sends
 the job HELD rather than into infinite churn, so it is safe to leave draining
 unattended.
@@ -768,7 +768,7 @@ heartbeat times out, and the client reports only an opaque exit code. Require
 both `si` ≥ ~5MB/s and `load15` ≥ ~0.8/core before calling it thrashing, because
 after a big reclaim load stays high for minutes with paging already at zero.
 `mem_oom_alert.sh` carries this as a separate THRASH tier; the usual culprit is
-idle standing heaps (`engineering.md` §standing servers), not the interactive
+idle standing heaps (`engineering.md` §Diagnose From Evidence, Not From The Most Available Story), not the interactive
 process that dies.
 
 `/tmp` is tmpfs and counts against RAM: each heartbeat run `df -h /tmp`, and

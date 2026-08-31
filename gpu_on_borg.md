@@ -462,20 +462,20 @@ NVLink domain caps the fully-connected single slice (table below). Above it
 chips talk network RDMA: legal, not faster for comms-bound work. The launcher
 warns, does not block.
 
-## Rule 6 — Tiers: BATCH Preempts, PROD For A Clean Finish
+## Rule 6 — Tiers: BATCH Preempts Freely, PROD Preempts Rarely
 
 GPU inverts the usual TPU cost intuition. Most GPU PROD is cheap (H100 PROD
-~1.0–1.2 cr/chip-hr; A100 ~0.16; GB200/GB300/H200 free pool). Most GPU BATCH is
-free (0.00) but preemptible: a PROD floor-holder wanting the chips triggers a
-`guarantee reclaim`. An `h100-8` BATCH smoke hit RUNNING in `mf`, then died
-mid-run (`Preempted. Due to guarantee reclaim -- we were ABOVE`).
+~1.0–1.2 cr/chip-hr; A100 ~0.16; H200 free pool). Most GPU BATCH is free (0.00)
+but preemptible: a PROD floor-holder wanting the chips triggers a `guarantee
+reclaim`. An `h100-8` BATCH smoke hit RUNNING in `mf`, then died mid-run
+(`Preempted. Due to guarantee reclaim -- we were ABOVE`).
 
 **B200 inverts the inversion. B200 PROD is ~100–120 cr/chip-hr, above its own
 limit order (20.00), so it reads `BLOCKS ALL` and never launches. Yet B200 BATCH
 is ~2.15, cheaper than H100 PROD.** On B200, PROD is unusable and only a BATCH
 eval affordable. Numbers and their measurement live in `tpu_reference.md`
-§NVIDIA GPUs; a copy here goes stale. (This paragraph said "B200 ~0.4" until it
-was measured at ~250x that.)
+§NVIDIA GPUs; a copy here goes stale, as an unmeasured figure in this paragraph
+already did once.
 
 - Short smoke you can restart: BATCH is fine and free.
 - A clean finish (a real result, or a definitive smoke exit 0): use

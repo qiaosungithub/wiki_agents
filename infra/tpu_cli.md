@@ -5,7 +5,7 @@ internals. Read this only when changing, rebuilding, or debugging the tool;
 launching and inspecting jobs is `../jobs.md`. Native code and
 `~/work/tpu_cmd/README.md` outrank this file for flags and workflows.
 
-## Two Halves, Two Repositories, And Why
+## Two Halves, Two Repositories
 
 | Half | Location | Contents |
 |---|---|---|
@@ -35,7 +35,7 @@ Self-asserting test scripts, which exit non-zero on failure instead of using the
 test framework, must be declared as test targets. Declared as binaries they
 never run, and the test command reports no tests found.
 
-## A Frozen Board Outlives Its Cause
+## A Frozen Board Means The Daemon Lost Its cwd
 
 **A long-lived daemon whose cwd is on the CitC FUSE mount dies silently when
 that mount is recreated.** Its python children fail at `os.getcwd()` with
