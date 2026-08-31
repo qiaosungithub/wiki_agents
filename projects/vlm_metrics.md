@@ -2,56 +2,55 @@
 
 Read this before a VLM result reaches the shared spreadsheet, or when a
 benchmark number looks wrong. This file owns *which number* each benchmark name
-means; `../research/result_logging.md` owns the write mechanics, the "settle the
+means. `../research/result_logging.md` owns the write mechanics, the "settle the
 protocol first" rule, and every column map — rebuild that map from the live
 header each time.
 
 ## One Benchmark Name, Several Numbers
 
 **Report the variant named here; the alternatives are different numbers, not
-rounding.** Pretraining rows take stage-1 final metrics and SFT rows stage-2
-final metrics, as two adjacent rows even when one run covers both stages.
+rounding.** Pretraining rows take stage-1 final metrics, SFT rows stage-2 final
+metrics: two adjacent rows even when one run covers both stages.
 
 | Benchmark | The number that counts | Trivial floor |
 |---|---|---|
-| POPE | **adversarial F1**, not macro F1 | — |
+| POPE | adversarial F1, not macro F1 | — |
 | MMVP | official 150-pair both-correct accuracy, not 300-item | `25%` |
 | CVBench | official source-balanced score | `42.4889%` protocol-aligned, displayed `42.49` |
 | VLMs Are Blind | official eight-task mean | `24.00%` published uniform-random |
 | ImageNet KNN | raw and PCA-whitened are separate protocols | — |
 | VStar / VisWiz | greedy and beam-search are separate protocols | — |
-| DocVQA | ANLS per `vlm_data.md`; Stage-3 training already includes DocVQA-train through the OV1.5 grouped stream, so this is in-domain supervised evaluation, **never zero-shot document generalization** | — |
+| DocVQA | ANLS per `vlm_data.md`. Stage-3 training already includes DocVQA-train through the OV1.5 grouped stream, so this is in-domain supervised evaluation, never zero-shot document generalization | — |
 | RefCOCOg valid answers | a diagnostic: note it when already logged, else `n/a`; never open result data solely to compute it | — |
 
-**Red on a metric means strictly below its OWN floor above** — each floor is
-protocol-specific, so one borrowed from a neighbour raises false alarms — while
-**red on a label means a verified encoder misconfiguration.** Two different
-signals; inserting a row inherits both, so clear inherited backgrounds before
-reapplying either. A result under a superseded protocol is marked
+**Red on a metric means strictly below its own floor above; red on a label means
+a verified encoder misconfiguration.** Each floor is protocol-specific, so one
+borrowed from a neighbour raises false alarms. Those are two different signals,
+and inserting a row inherits both: clear inherited backgrounds before reapplying
+either. A result under a superseded protocol is marked
 protocol-invalid instead, never scored against a floor.
 
 ## The Colour Table Of The VLM Tab
 
-**This file is the canonical owner of what a background colour means on the
-VLM tab**; `../research/result_logging.md` owns the write mechanics and the
-"clear inherited formatting first" rule. **Read this table before applying any
-colour, and never take a free one without adding it here** — a loosely applied
-colour destroys it for every row that used it correctly.
+**This file is the canonical owner of what a background colour means on the VLM
+tab.** `../research/result_logging.md` owns the write mechanics and the "clear
+inherited formatting first" rule. Read this table before applying any colour, and
+never take a free one without adding it here. A loosely applied colour destroys
+it for every row that used it correctly.
 
 | Colour | Scope | Meaning |
 |---|---|---|
 | `#F4CCCC` light red | one metric cell | value strictly below that benchmark's own trivial floor |
 | `#F4CCCC` light red | a label cell | verified encoder misconfiguration |
-| `#D9D2E9` purple | one metric cell | a **different protocol** for the same benchmark (e.g. MMVP scored on the 300-item variant instead of the official 150-pair) |
+| `#D9D2E9` purple | one metric cell | a different protocol for the same benchmark (e.g. MMVP scored on the 300-item variant instead of the official 150-pair) |
 | `#CCEFCC` green | the `Note` cell | freeze configuration matches original LLaVA stage-2 ("FREEZE OK") |
-| `#FFE2A5` amber | the `Note` cell | freeze **ablation**: deliberately not the reference freeze config |
+| `#FFE2A5` amber | the `Note` cell | freeze ablation: deliberately not the reference freeze config |
 | `#D0E2F3` light blue | the `WandB / run` cell only | the job was run through xm/XManager |
 | `#C6DBF9` blue, `#E0EAF4` pale blue, `#FFF2BF` yellow | whole row | structure: header row, block header, and the trivial-floor reference row |
 
-**Scope the job-level signals to the identity column and the value-level
-signals to the metric cell**, so two true statements never contend for one
-background: red is about a number, blue is about the run that produced it, and
-`WandB / run` already identifies the run. Verify a colour by reading it back —
-export the workbook to xlsx and resolve each cell's `fillId` against
-`styles.xml` to see every colour in use, and to check one is free before
-claiming it.
+Scope job-level signals to the identity column and value-level signals to the
+metric cell, so two true statements never contend for one background. Red is
+about a number, blue is about the run that produced it, and `WandB / run`
+already identifies the run. Verify a colour by reading it back: export the
+workbook to xlsx and resolve each cell's `fillId` against `styles.xml`. That
+shows every colour in use, and whether one is free before you claim it.
