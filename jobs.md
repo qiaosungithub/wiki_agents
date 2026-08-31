@@ -16,16 +16,16 @@ silently shipping a zombie XID, 0 work units. Only serial building cures it
 `cd` into the CODE directory before `tpu enqueue`: CWD becomes the job's
 `workdir`, staging the whole tree. From `~/work` it stages your entire home
 directory, dying with `produced no XID`, naming compilation for a staging
-failure. Check the `packaged from:` line (§The Local Queue).
+failure. Check the `packaged from:` line (§The Local Queue: `tpu enqueue` + Serial Build-Worker).
 
 | You want | Do | Details |
 |---|---|---|
-| One job (default) | `cd <code dir>`, `tpu enqueue …`, `tpu build-worker` up; auto cell | §The Local Queue |
-| A batch / sweep | `tpu enqueue` per arm; the same worker drains them | §The Local Queue |
+| One job (default) | `cd <code dir>`, `tpu enqueue …`, `tpu build-worker` up; auto cell | §The Local Queue: `tpu enqueue` + Serial Build-Worker |
+| A batch / sweep | `tpu enqueue` per arm; the same worker drains them | §The Local Queue: `tpu enqueue` + Serial Build-Worker |
 | Data locality | `--metro=<m>` (e.g. `cbf`); full metros refuse, never roam to no-data cells | §Choosing Where To Run |
-| Telling runs apart | `exp_name=` names the TASK, not just the model | §Name The Experiment After Its Job |
+| Telling runs apart | `exp_name=` names the TASK, not just the model | §Name The Experiment After Its Job, Not After Its Model |
 | Fallback, no worker | `tpu queue …`, synchronous, returns an XID; ONLY when nothing else builds | §Submission Contract |
-| PENDING past 10 min | router cancels, re-routes to a placeable cell | §The Local Queue |
+| PENDING past 10 min | OFF by default: arm the reroute sweep to cancel and re-route | §The Local Queue: `tpu enqueue` + Serial Build-Worker |
 
 Both share one submission contract (same flags, registry) and smart pick:
 least-oversold placeable cell. `--cell` is rarely needed, always wins.
@@ -37,7 +37,7 @@ least-oversold placeable cell. `--cell` is rarely needed, always wins.
 packaging costs minutes, allocators reject in seconds. Each step names its
 section.
 
-0. `cd` into the launched code directory (§The Local Queue): CWD becomes the
+0. `cd` into the launched code directory (§The Local Queue: `tpu enqueue` + Serial Build-Worker): CWD becomes the
    entry's `workdir`; the whole tree stages. Use a code subdir
    (`~/work/<repo>/torch_impl`), never `~/work`; check `tpu enqueue`'s
    `packaged from:` line.
@@ -63,7 +63,7 @@ section.
 4. Preflight, then verify the snapshot (§Choosing Where To Run, §Submission
    Contract). Green is necessary, not sufficient; CPU-only jobs use
    `--skip-preflight`. `diff` packaged config against intent.
-5. Submit, then confirm it is REAL (§`state: RUN`). An XID is not a job,
+5. Submit, then confirm it is REAL (§`state: RUN` Is Not Evidence That Anything Runs). An XID is not a job,
    `state: RUN` not evidence: check `VMGROUP_STATE_RUN` at the cluster layer
    before waiting.
 6. If PENDING, read the work unit's verdict (§When A Pending Job Should Move);
@@ -74,7 +74,7 @@ section.
 
 - **Submit through the wrapper**:
   `source ~/work/tpu_cmd/tpu_wrapper.sh && tpu enqueue ...` (default; a
-  `tpu build-worker` drains it serially, §The Local Queue). Never call
+  `tpu build-worker` drains it serially, §The Local Queue: `tpu enqueue` + Serial Build-Worker). Never call
   `xm launch` / `xmanager launch` directly; only the wrapper may, internally.
   `tpu` is a shell FUNCTION, not a binary on `PATH`, so a SCRIPT wrapping it
   (e.g. one sourcing a guard helper) must itself
@@ -157,7 +157,7 @@ means anything to anyone.
   unit/allocator for ground truth. Run evals only on BATCH. GPU nuance: most
   have a free (0.00) BATCH pool and cheap PROD, so a short smoke there is fine,
   but BATCH still preempts (`guarantee reclaim`). Use `--tier=PROD` once a GPU
-  run must finish. `gpu_on_borg.md` §Tiers owns this.
+  run must finish. `gpu_on_borg.md` §Rule 6 — Tiers owns this.
 - Priority <= 25 charges the person, above it the group. Free tiers spare the
   team's GCU allocation. `BATCH` reads cheap but is the opposite: a paying
   best-effort tier billing the group.
@@ -177,7 +177,7 @@ means anything to anyone.
   team's PROD accelerator alloc: a CPU-only controller costs that group almost
   nothing yet schedules immediately where the pool has zero. Archetype: a
   server-side data copy, a few cores driving storage-layer copies
-  (`§Where The Storage CLI Exists`). Use the same `(group, PROD)` as your long
+  (`§Where The Storage CLI Exists, And Where It Does Not`). Use the same `(group, PROD)` as your long
   jobs, pin a cell in the data's metro, add `--skip-preflight` (CPU-only cannot
   be preflighted), confirm `VMGROUP_STATE_RUN`. That covers genuinely-free
   best-effort batch, not a ban on PROD for CPU-only. Diagnose from your own
@@ -221,8 +221,8 @@ first. Decisions here, mechanism in `infra/`.
   | Group | Alloc (short) | Use for |
   |---|---|---|
   | 9 | `fr-dna-grand-challenge-team-resource` | TPU training default: nearly all our real v6p/v7/v4 floor, plus stable jobs. |
-  | 8 | `brain-vasp-shared-user-xm` | CPU-only, `--skip-preflight`. No TPU floor, `tpu quota` empty: size fan-outs by what schedules (§`state: RUN`), not quota. |
-  | 5 | `vqfree-xm` | Free pool, auto-injects PROD (§Requirements). |
+  | 8 | `brain-vasp-shared-user-xm` | CPU-only, `--skip-preflight`. No TPU floor, `tpu quota` empty: size fan-outs by what schedules (§`state: RUN` Is Not Evidence That Anything Runs), not quota. |
+  | 5 | `vqfree-xm` | Free pool, auto-injects PROD (§Requirements And Runtime). |
   | 1, 7 | `*-resources-prod-shared` | Shared prod, thin-to-zero floors. Contended-g9 fallback, not a default. |
   | 2, 3, 4 | `*viscam*` / `*interns*` | viscam/intern allocations. |
 
@@ -300,7 +300,7 @@ Rule out two non-capacity causes first; moving cell fixes neither:
   often a teammate's group-wide one applying to you silently. Check
   `tools/limit_order.sh status` for `BLOCKING` first (`infra/quota_market.md`).
 - It never reached the scheduler. An XID with no work unit, or no XID, is a
-  launcher-side failure, not a queue: a local problem (§Launcher-Side Failures).
+  launcher-side failure, not a queue: a local problem (§Launcher-Side Failures That Look Like Scheduler Failures).
 
 When the verdict is ambiguous, probe: a short submit of the real workload
 answers "can I get this slice here" at 100%, where the capacity table was ~12%
@@ -352,7 +352,7 @@ daemon started hours ago runs old code from memory. Running it tests a new
 process, not the daemon. The discriminator is start time versus source mtime
 (`ps -eo pid,lstart` against `stat -c %y`): an older process means the fix is
 not live. Restart and re-check the same way (`engineering.md`
-§Never kill by pattern: how not to restart).
+§External Writes Are Transactions, "Never kill by pattern").
 
 ## The Local Queue: `tpu enqueue` + Serial Build-Worker
 
@@ -394,7 +394,7 @@ operator may authorize a `priority>0`. It IS honored, unlike the dead
 | Command | Does |
 |---|---|
 | `tpu enqueue --power=v7-32 --archs=v7,v6p --launch=config=...` | Add a run. `--power` and `--archs` are REQUIRED together: `--power` the target, `--archs` the generations satisfying it, whichever has capacity (`--power_tolerance`, default 0.5, accepts 0.75x-1.5x). Not `tpu queue`, where `--power` and `--tpu_type` are exclusive. `--launch=k=v,flag` goes verbatim to `tpu queue` at submit; undeclared keys are REFUSED, so forward binary flags as `--launch=app.<flag>=<v>`. |
-| `tpu queue-status` (alias `tpu qs`) | Local queue plus, live, why each job waits or where it is placeable. Run before trusting the scheduler: §Verify The Scheduler Exists. |
+| `tpu queue-status` (alias `tpu qs`) | Local queue plus, live, why each job waits or where it is placeable. Run before trusting the scheduler: §Verify The Scheduler Exists Before You Rely On It. |
 | `tpu dequeue <job_id>` | Remove one before it is submitted. |
 | `tpu requeue [job_id...]` | Return HELD job(s) to QUEUED after you fix the cause (empty = all held). |
 | `tpu build-worker start` \| `stop` \| `status` | SERIAL build-worker, own tmux session: claims one QUEUED job as BUILDING, builds it, records the XID, repeats. One build in flight, the safe way to drain a batch. |
@@ -951,7 +951,8 @@ What counts toward the bar, and what is exempt:
 - Active = running, pending, or queued (option B). A job committed to the XM
   queue reserves budget before its Borg gang is RUNNING, so a backlog of pending
   jobs cannot each look free. The reroute lane (pending >10 min → auto-cancel)
-  bounds how long a pending job holds that reservation. Only terminal zombies
+  bounds how long a pending job holds that reservation, but only when it is
+  armed; it is off by default (§The Local Queue: `tpu enqueue` + Serial Build-Worker). Only terminal zombies
   are dropped.
 - g3/g5 are exempt: they draw on their own credit balance, not G9's income, so
   they neither count toward the aggregate nor are refused by it. The router
