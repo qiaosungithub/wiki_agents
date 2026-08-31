@@ -3,138 +3,135 @@
 Queue, inspect, resume, and debug a job on the internal XManager/Borg stack.
 `storage.md` owns where data and checkpoints live, `tpu_reference.md`
 accelerator naming and shapes, `infra/` the market, allocator, and CLI
-internals — read those only when the rules here do not explain what you see.
+internals. Read those only when the rules here do not explain what you see.
 
 ## The Submission Queue In One Screen
 
-**This is a SHARED workstation that chronically has several builds in flight, so
-the default submission path is `tpu enqueue` (instant, free) + one serial
-`tpu build-worker` draining builds one at a time.** A one-shot `tpu queue` races
-any other in-flight build on the blaze `output_base` (per checkout ROOT, not per
-copy dir) and silently ships a **zombie XID with 0 work units**; only serial
-building cures it (`infra/tpu_cli.md` §The Local-Queue Smart Router owns why).
+**Submit with `tpu enqueue` (instant, free) plus one serial `tpu build-worker`.**
+Builds are always in flight on this shared workstation, so one-shot `tpu queue`
+races them on blaze `output_base` (per checkout ROOT, not per copy dir),
+silently shipping a zombie XID, 0 work units. Only serial building cures it
+(`infra/tpu_cli.md` §The Local-Queue Smart Router).
+
+`cd` into the CODE directory before `tpu enqueue`: CWD becomes the job's
+`workdir`, staging the whole tree. From `~/work` it stages your entire home
+directory, dying with `produced no XID`, naming compilation for a staging
+failure. Check the `packaged from:` line (§The Local Queue).
 
 | You want | Do | Details |
 |---|---|---|
-| Launch one job (default) | `tpu enqueue …` with a `tpu build-worker` running — it builds serially, cell auto-picked | §The Local Queue |
-| Launch a batch / sweep | `tpu enqueue` each arm; the same worker drains them one at a time | §The Local Queue |
-| Keep a run in its data metro | add `--metro=<m>` (e.g. `cbf`); a full metro **refuses** rather than roaming to a no-data cell | §Choosing Where To Run |
-| Tell two of your own runs apart later | `exp_name=` must name the TASK, not just the model | §Name The Experiment After Its Job |
-| One-shot, no worker (fallback) | `tpu queue …` — synchronous, returns an XID; ONLY when no other build is in flight | §Submission Contract |
-| A job stuck PENDING past 10 min | the router cancels and re-routes it to a placeable cell | §The Local Queue |
+| One job (default) | `cd <code dir>`, `tpu enqueue …`, `tpu build-worker` up; auto cell | §The Local Queue |
+| A batch / sweep | `tpu enqueue` per arm; the same worker drains them | §The Local Queue |
+| Data locality | `--metro=<m>` (e.g. `cbf`); full metros refuse, never roam to no-data cells | §Choosing Where To Run |
+| Telling runs apart | `exp_name=` names the TASK, not just the model | §Name The Experiment After Its Job |
+| Fallback, no worker | `tpu queue …`, synchronous, returns an XID; ONLY when nothing else builds | §Submission Contract |
+| PENDING past 10 min | router cancels, re-routes to a placeable cell | §The Local Queue |
 
-Both paths share one submission contract (same flags, same registry) and the
-same smart cell pick — the least-oversold placeable cell, so you rarely pass
-`--cell` (it always wins; `TPU_NO_SMART_CELL=1` opts out; §Choosing Where To Run).
+Both share one submission contract (same flags, registry) and smart pick:
+least-oversold placeable cell. `--cell` is rarely needed, always wins.
+`TPU_NO_SMART_CELL=1` opts out (§Choosing Where To Run).
 
 ## The Launch Workflow
 
-Run this every launch. Each step names the section that explains it; this is the
-skeleton, the detail is below. Placement (steps 2–4) is cheap and settled
-*before* packaging, because packaging costs minutes and an allocator rejects in
-seconds.
+**Run this every launch; settle placement (steps 2–4) before packaging**:
+packaging costs minutes, allocators reject in seconds. Each step names its
+section.
 
-1. **Prepare the submission** (§Submission Contract). Semantics in versioned
-   config; on a shared checkout, edit the config in a COPY and launch from it;
-   `--tier=PROD` for training, `BATCH` only for eval.
-2. **Pick the group** (§Choosing Where To Run). Default **g9** for TPU (it holds
-   the floor), **g8** for CPU-only. `tpu quota` tells you WHICH GROUP holds a
-   floor for the accelerator — nothing about cells.
-3. **The cell is auto-picked — you usually skip this step** (§Choosing Where To
-   Run). The submit pins the most-free non-oversold placeable cell for you; add
-   `--metro=<m>` if the run is data-locality-locked. Only drop to the manual
-   probes below when you need to OVERRIDE the pick or understand a rejection:
-   - `tpu preflight --tpu_type=<t> --group=<g> --json` → the `cells_ok` list with
-     a per-cell **obtainable** count (the only cell-level view; `tpu quota` has
-     none). Obtainable means "can be *got*", not "can be *held*".
-   - `stubby call master.<cell>.borg:9413 BorgMaster.ProbeSliceAvailability` for
-     **free contiguous slices** — a cell can hold thousands of obtainable chips
-     and *one* placeable slice (shape uses UNDERSCORES; `research/v7_storage_placement.md`).
-   - Intersect with a cell where you hold a **floor** and your **data is
-     co-located** (§Choosing Where To Run; `storage.md`). Same obtainable number
-     is an idle guarantee in one (group,cell) and borrowed-reclaimable in another.
-4. **Preflight, then verify the snapshot** (§Choosing Where To Run,
-   §Submission Contract). Green is necessary, not sufficient; CPU-only jobs use
-   `--skip-preflight`. `diff` the packaged config against what you meant to run.
-5. **Submit, then confirm it is REAL** (§`state: RUN`). An XID is not a job and
-   `state: RUN` is not evidence — confirm a `VMGROUP_STATE_RUN` at the cluster
-   layer before you start waiting.
-6. **If it sits PENDING, read the work unit's own verdict before reacting**
-   (§When A Pending Job Should Move) — do NOT reflexively resubmit or wait. The
-   verdict, not the obtainable table, tells you whether to move cell, move
-   group, or leave it queued.
+0. `cd` into the launched code directory (§The Local Queue): CWD becomes the
+   entry's `workdir`; the whole tree stages. Use a code subdir
+   (`~/work/<repo>/torch_impl`), never `~/work`; check `tpu enqueue`'s
+   `packaged from:` line.
+1. Prepare the submission (§Submission Contract). Semantics in versioned config;
+   on a shared checkout edit a COPY and launch it. `--tier=PROD` trains, `BATCH`
+   evals only.
+2. Pick the group (§Choosing Where To Run): default g9 for TPU (it holds the
+   floor), g8 CPU-only. `tpu quota` names WHICH GROUP holds an accelerator's
+   floor, never cells.
+3. Cell auto-picked, usually skipped (§Choosing Where To Run). Submit pins the
+   most-free non-oversold placeable cell; add `--metro=<m>` if
+   data-locality-locked. Probes below only OVERRIDE it or explain rejections:
+   - `tpu preflight --tpu_type=<t> --group=<g> --json` → `cells_ok`, per-cell
+     obtainable counts, the only cell-level view (`tpu quota` has none).
+     Obtainable means "can be got", not "can be held".
+   - `stubby call master.<cell>.borg:9413 BorgMaster.ProbeSliceAvailability`
+     for free contiguous slices. A cell with thousands of obtainable chips may
+     hold one placeable slice (shape uses UNDERSCORES;
+     `research/v7_storage_placement.md`).
+   - Intersect: a cell with your floor and data (§Choosing Where To Run;
+     `storage.md`). The same obtainable number is idle-guaranteed in one
+     (group,cell), borrowed-reclaimable in another.
+4. Preflight, then verify the snapshot (§Choosing Where To Run, §Submission
+   Contract). Green is necessary, not sufficient; CPU-only jobs use
+   `--skip-preflight`. `diff` packaged config against intent.
+5. Submit, then confirm it is REAL (§`state: RUN`). An XID is not a job,
+   `state: RUN` not evidence: check `VMGROUP_STATE_RUN` at the cluster layer
+   before waiting.
+6. If PENDING, read the work unit's verdict (§When A Pending Job Should Move);
+   do NOT resubmit or wait reflexively. It, not the obtainable table, says: move
+   cell, move group, or stay queued.
 
 ## Submission Contract
 
-- **Submit through the wrapper**: `source ~/work/tpu_cmd/tpu_wrapper.sh &&
-  tpu enqueue ...` (the default path; a `tpu build-worker` drains it serially —
-  §The Local Queue). Never call `xm launch` / `xmanager launch` directly; only
-  the wrapper may do so internally.
-  `tpu` is a shell FUNCTION, not a binary on `PATH` — so a launcher SCRIPT that
-  wraps it (e.g. sourcing a guard helper) must `source
-  ~/work/tpu_cmd/tpu_wrapper.sh` in the SAME shell, or the call dies with `tpu:
-  command not found` (seen as an instant guard "DEAD", ~6 s, no stagedir).
-- **One shared launcher.** `~/work/tpu_cmd/xm_launcher.py` owns packaging,
-  staging, and job registration. Projects contribute versioned configuration,
-  not their own launcher.
-- **Put semantics in versioned config; keep only routing and transient
-  selectors on the command line.** Model, data, and training behavior belong in
-  the config file.
-- **Edit the run config in place and launch with no config argument.** Behavior
-  living in an invocation string is reproducible only while that string
-  survives, and it survives nowhere durable; naming configs also grows one file
-  per finished experiment. Nothing is lost — the snapshot is immutable and a
-  helper copies a past run's exact config back out (`infra/tpu_cli.md`).
-  **The default is `remote_run`; write the run into `remote_run_config.yml` and
-  DO NOT pass `--config`.** If a mode must be named, pass the BARE name
-  (`--config=trm_sudoku`), never a path or filename: the launcher wraps the
-  value into `configs/<mode>_config.yml`, so `--config=configs/x_config.yml`
-  double-wraps to `configs/configs/x_config.yml_config.yml` and the job dies at
-  startup with "Could not locate …". The launcher now normalises the value and,
-  on a resume, refuses a missing config before packaging — but the contract is
-  the bare mode, and a resume that skipped this check once shipped exactly this
-  bug.
-- **When the checkout is shared, edit the config in a COPY and launch from it.**
-  "In place" means in the file the launcher reads, not the shared worktree:
-  every launch overwrites that one file, so two agents launching minutes apart
-  package each other's experiment. Copy the checkout, write the config there,
-  launch, delete the copy — packaging rsyncs into a fresh snapshot anyway and
-  reads neither VCS state nor the launch directory. **Code changes are the
-  exception**: they belong in the shared checkout and must be committed there,
-  since a copy is deleted and its provenance with it.
-- **Confirm before launching**: checkout, branch, dirty state, effective config,
-  allocator, target. Use real attribution; never insert a placeholder to silence
-  a prompt.
-- **Verify the SNAPSHOT, not the file you edited.** One `diff` of the packaged
-  config against what you meant to run covers the whole path: the copy, the
-  overwrite, and the launcher's staging.
-- **The cell is auto-selected by default.** The submit pins the best placeable
-  cell for you (§Choosing Where To Run); pass `--cell` to override, `--metro=<m>`
-  to constrain the pick to a data-co-located metro, or `TPU_NO_SMART_CELL=1` to
-  opt out. This is transparent — no command changes.
-- **Packaging freezes the code.** The wrapper packages a snapshot; later edits
-  do not affect a queued or running job.
-- **Verify registration after submit** rather than assuming the launch
-  transaction completed.
-- **Default to `tpu enqueue` + one serial `tpu build-worker` — for a single job
-  as much as for a batch.** On this shared workstation a one-shot `tpu queue`
-  races other in-flight builds on the blaze `output_base` and ships a
-  0-work-unit zombie XID; the serial worker builds one at a time, the only thing
-  that avoids it. `tpu build-worker start` once, then `tpu enqueue` each run from
-  its own checkout and watch `tpu queue-status`. Mechanism, the failure modes it
-  cures, and the worker's guards: `infra/tpu_cli.md` §The Local-Queue Smart
-  Router. `tpu queue` (one-shot, synchronous) is the fallback for when you KNOW
-  no other build is in flight.
+- **Submit through the wrapper**:
+  `source ~/work/tpu_cmd/tpu_wrapper.sh && tpu enqueue ...` (default; a
+  `tpu build-worker` drains it serially, §The Local Queue). Never call
+  `xm launch` / `xmanager launch` directly; only the wrapper may, internally.
+  `tpu` is a shell FUNCTION, not a binary on `PATH`, so a SCRIPT wrapping it
+  (e.g. one sourcing a guard helper) must itself
+  `source ~/work/tpu_cmd/tpu_wrapper.sh` in the SAME shell. Else
+  `tpu: command not found`: instant guard "DEAD", ~6 s, no stagedir.
+- One shared launcher. `~/work/tpu_cmd/xm_launcher.py` owns packaging, staging,
+  and job registration. Projects contribute versioned config, not launchers.
+- Semantics go in versioned config: model, data, training behavior. Only routing
+  and transient selectors go on the command line.
+- Edit the run config in place; pass no `--config`. Invocation strings are not
+  durable, and named configs grow one file per finished experiment. Nothing is
+  lost: snapshots are immutable and a helper restores a past run's exact config
+  (`infra/tpu_cli.md`). The default is `remote_run`, so write the run into
+  `remote_run_config.yml`. Name a mode BARE (`--config=trm_sudoku`), never a
+  path or filename: the launcher wraps it into `configs/<mode>_config.yml`, so
+  `--config=configs/x_config.yml` becomes
+  `configs/configs/x_config.yml_config.yml`, dying at startup with "Could not
+  locate …". The launcher now normalizes the value and, on resume, refuses a
+  missing config before packaging. Still pass the bare mode: a resume skipping
+  this check shipped this bug.
+- On a shared checkout, edit the config in a COPY and launch from that. "In
+  place" means the file the launcher reads, not the worktree. Every launch
+  overwrites it: two agents launching minutes apart package each other's
+  experiment. Copy the checkout, write the config there, launch, delete the
+  copy; packaging rsyncs into a fresh snapshot regardless, reading neither VCS
+  state nor the launch directory. Code changes are the exception: commit them in
+  the shared checkout, since a deleted copy takes its provenance with it.
+- Confirm before launching: checkout, branch, dirty state, effective config,
+  allocator, target. Use real attribution, never a placeholder to silence a
+  prompt.
+- Verify the SNAPSHOT, not the file you edited: one `diff` of the packaged
+  config against what you meant covers the copy, the overwrite, and staging.
+- Cells are auto-selected (§Choosing Where To Run). Override with `--cell`,
+  constrain the pick to a data-co-located metro with `--metro=<m>`, or opt out
+  with `TPU_NO_SMART_CELL=1`. No command changes.
+- Packaging freezes the code: the wrapper snapshots it, so later edits cannot
+  affect a queued or running job.
+- Verify registration after submit; never assume the transaction completed.
+- Default to `tpu enqueue` plus one serial `tpu build-worker`, for one job as
+  much as a batch: `tpu build-worker start` once, then `tpu enqueue` each run
+  from its own checkout, watching `tpu queue-status`. On this shared
+  workstation, a one-shot `tpu queue` races in-flight builds on the blaze
+  `output_base` and ships a 0-work-unit zombie XID. Only the serial worker,
+  building one at a time, avoids that. Mechanism, cured failure modes, and
+  guards: `infra/tpu_cli.md` §The Local-Queue Smart Router. `tpu queue`
+  (one-shot, synchronous) is the fallback when you KNOW no other build is in
+  flight.
 
 ## Name The Experiment After Its Job, Not After Its Model
 
-**`exp_name=` is the only human-readable handle a run carries into
-`xmanager list`, the flatboard link, and its CNS log directory — so it must say
-what that particular launch was FOR, not merely which model it trained.** A
-line that launches a probe, a training run, and a resume in one night gives all
-three the same model name and then cannot tell three XIDs apart the next
-morning; the dashboards show three identical rows, and picking the wrong one to
-read is silent, because every one of them is a real run of the right model.
+**`exp_name=` must say what that launch was FOR, not merely which model it
+trained.** It is the only human-readable handle a run carries into
+`xmanager list`, the flatboard link, and its CNS log directory. Launch a probe,
+a training run, and a resume in one night under the same model name, and next
+morning the three XIDs are indistinguishable. The dashboards show three
+identical rows, and picking the wrong one fails silently, because each is a real
+run of the right model.
 
 Name the task and the state that distinguishes this launch:
 
@@ -145,539 +142,509 @@ parcae-140m-torch-repro-resume9216    the reproduction, resuming from step 9216
 ```
 
 The CNS log directory embeds it (`xid_<XID>_<ts>_<exp_name>/`), so a good name
-also makes `fileutil ls` self-describing months later — which is exactly when
-the XID has stopped meaning anything to anyone.
+also makes `fileutil ls` self-describing months later, when the XID no longer
+means anything to anyone.
 
 ## Requirements And Runtime
 
-- **Every TRAINING job must pass `--tier=PROD` explicitly. `BATCH` is for
-  eval-only jobs.** BATCH is best-effort and is preempted by any PROD demand the
-  instant a slot is contested. The launcher default IS PROD for every group
-  (g5 injects it; others inherit XManager's `_DEFAULT_SERVICE_TIER=PROD`), so
-  pass `--tier=PROD` for a clean audit trail, not to change behavior. `tpu
-  check`'s TIER column echoes the REQUESTED string from the local registry, not
-  Borg truth: a `-` means "untagged, so it ran the PROD default", NOT
-  "non-PROD" — read the work unit/allocator for ground truth. Only ever run
-  evals on BATCH.
-  **GPU is the one nuance:** most GPUs have a free (0.00) BATCH pool and GPU PROD
-  is cheap, so a short GPU *smoke* on BATCH is fine — but BATCH still preempts
-  (`guarantee reclaim`), so use `--tier=PROD` the moment a GPU run must actually
-  finish. `gpu_on_borg.md` §Tiers owns this.
-- **Priority <= 25 charges the person; above it charges the group.** The free
-  tiers simply do not touch the team's GCU allocation. `BATCH` reads like the
-  cheap option and is the opposite: a *paying* best-effort tier billing the
-  group.
-- **Set the tier with `--tier`, never `--priority`** (that wrapper flag is dead —
-  parsed, never read). Prefer the named tiers: a raw numeric `--tier=N` changes
-  who pays (`<= 25` bills you personally) and shrinks the per-cell task cap. A
-  bigger number does not win contention either — schedulability is set by the
-  quota floor/market, not the number (`infra/quota_market.md`).
-- **A CPU-only batch job does not belong in an accelerator group.** In GQM, CPU
-  and RAM are *ancillary* to accelerator usage, so a job asking for neither is
-  scheduled last, always — structural, and waiting never fixes it (a priority-0
-  probe sat in `starting` for 14 hours). Use the shared best-effort CPU pool
-  (`go/gdm-cpu-only-jobs`, `--group=8` in our launcher): **pre-authorised** —
-  own LDAP, no request, no approval — and it bills nothing. **Its ceiling is per
-  user** (order 1000 GCU, 1 TiB RAM), so two 900-task jobs evict *each other*;
-  run them serially.
-- **But the shared CPU pool can be empty for days, and then a CPU-only job never
-  schedules at all.** When it is dry, ride the team's PROD accelerator alloc
-  instead: a CPU-only *controller* (a server-side data copy is the archetype —
-  a few cores driving storage-layer copies, `§Where The Storage CLI Exists`)
-  costs the accelerator group almost nothing yet schedules immediately where the
-  shared pool has zero. Submit to the same `(group, PROD)` your long jobs already
-  run on, pin a cell in the data's metro, add `--skip-preflight` (CPU-only
-  cannot be preflighted), and confirm `VMGROUP_STATE_RUN`. The shared-pool
-  advice is for genuinely-free best-effort batch; it is **not** a prohibition on
-  PROD for CPU-only. Diagnose from your own fleet: two submits differing ONLY in
-  group — shared pool sits unscheduled for a day, PROD alloc reaches RUN in ~1
-  minute.
-- Container-style packaging requires the pool to have a mapped cloud project;
+- **Every TRAINING job must pass `--tier=PROD` explicitly; `BATCH` is for
+  eval-only jobs.** BATCH is best-effort, preempted the instant PROD demand
+  contests a slot. PROD is already the launcher default for every group (g5
+  injects it, others inherit XManager's `_DEFAULT_SERVICE_TIER=PROD`), so
+  `--tier=PROD` is for the audit trail, not behavior. `tpu check`'s TIER column
+  echoes the REQUESTED string from the local registry, not Borg truth: `-` means
+  "untagged, ran the PROD default", not "non-PROD". Read the work
+  unit/allocator for ground truth. Run evals only on BATCH. GPU nuance: most
+  have a free (0.00) BATCH pool and cheap PROD, so a short smoke there is fine,
+  but BATCH still preempts (`guarantee reclaim`). Use `--tier=PROD` once a GPU
+  run must finish. `gpu_on_borg.md` §Tiers owns this.
+- Priority <= 25 charges the person, above it the group. Free tiers spare the
+  team's GCU allocation. `BATCH` reads cheap but is the opposite: a paying
+  best-effort tier billing the group.
+- Set the tier with `--tier`, never the dead `--priority` wrapper flag (parsed,
+  never read). Prefer named tiers. A raw numeric `--tier=N` changes who pays
+  (`<= 25` bills you personally) and shrinks the per-cell task cap. Bigger
+  numbers win no contention: the quota floor/market sets schedulability, not the
+  number (`infra/quota_market.md`).
+- Keep CPU-only batch out of accelerator groups. In GQM, CPU and RAM are
+  ancillary to accelerator usage, so a job asking for neither always schedules
+  last. This is structural and waiting never fixes it: a priority-0 probe sat in
+  `starting` for 14 hours. Use the shared best-effort CPU pool
+  (`go/gdm-cpu-only-jobs`, `--group=8` in our launcher): pre-authorized (own
+  LDAP, no request, no approval), bills nothing. Its per-user ceiling (order
+  1000 GCU, 1 TiB RAM) makes two 900-task jobs evict each other; run serially.
+- That pool can sit empty for days, stranding CPU-only jobs. When dry, ride the
+  team's PROD accelerator alloc: a CPU-only controller costs that group almost
+  nothing yet schedules immediately where the pool has zero. Archetype: a
+  server-side data copy, a few cores driving storage-layer copies
+  (`§Where The Storage CLI Exists`). Use the same `(group, PROD)` as your long
+  jobs, pin a cell in the data's metro, add `--skip-preflight` (CPU-only cannot
+  be preflighted), confirm `VMGROUP_STATE_RUN`. That covers genuinely-free
+  best-effort batch, not a ban on PROD for CPU-only. Diagnose from your own
+  fleet: two submits differing ONLY in group, the pool unscheduled a day, the
+  PROD alloc at RUN in ~1 minute.
+- Container-style packaging needs the pool to have a mapped cloud project;
   native allocators without one need Bazel packaging.
-- **In JAX jobs, parse flags before distributed initialization**, and never
-  initialize at module import time. `projects/eqr_jax.md` has the
-  google3-specific startup order, stricter than the public contract.
+- In JAX jobs, parse flags before distributed initialization, never at module
+  import time. `projects/eqr_jax.md` has the google3-specific startup order,
+  stricter than the public contract.
 
 ## Choosing Where To Run
 
-Packaging costs minutes; an allocator rejects in seconds — settle placement
-first. The decisions are here; the mechanism is in `infra/`.
+Packaging costs minutes, an allocator rejects in seconds: settle placement
+first. Decisions here, mechanism in `infra/`.
 
-- **The cell is now chosen for you by default — you rarely pass `--cell`.**
-  Every submit first asks which cell can actually place the slice RIGHT NOW
-  (most free chips, not oversold) and pins it, so a submit stops landing on an
-  oversold cell while the same accelerator sits idle elsewhere (the disease that
-  once pinned 13 v7-32 jobs to an oversold `yulpptr` while `yukulwh` had 101 free
-  slices). It prints `Smart cell: pinned --cell=…`. Your own `--cell` always
-  wins; `--power` does its own pick; a comma `--tpu_type` list and
-  `TPU_NO_SMART_CELL=1` skip it; and if nothing can be recommended it silently
-  falls back to letting the allocator choose — it can only help, never block. So
-  the group still matters (below), but the cell usually does not.
-  - **A data-locality-locked run passes `--metro`, not a hand-pinned `--cell`.**
-    The pick ranks on free chips and oversold ONLY; it has no storage-co-location
-    dimension (next bullet), so left unconstrained it can send a run to a cell a
-    metro away from its checkpoint bucket — 4-5x throughput and the pruner kills
-    it (storage rule). But data-locality is a METRO-level constraint, not a
-    cell-level one: a whole metro shares one storage cell (cbf's `yucbfiv`,
-    `yucbful`, `yucbfwv`, `yucbfsl`, `je` all read `/cns/is-d`), so you do not
-    need to name a single cell. Pass **`--metro=<m>`** (e.g. `--metro=cbf`) and
-    the smart pick stays inside that metro while still choosing the least-oversold
-    cell in it — same-metro AND avoids the stall, both at once. `--metros=a,b`
-    allows several. `--metro` is a router selector only (it never reaches the
-    launcher). Reserve an explicit `--cell` for when you truly must pin one exact
-    cell; for storage locality, `--metro` is the right, less brittle tool. Only a
-    run with no storage constraint should let the default roam all metros.
-    - **`--metro` fails CLOSED when the metro is full.** If no cell in the named
-      metro can place the slice right now, the submit **refuses** (rather than
-      roaming to an out-of-metro, no-data cell where the dataloader
-      would crash — the exact incident that drifted 3 arms to `yuskedq`). Wait
-      and retry (the metro frees up), or pin an explicit `--cell=<in-metro cell>`
-      to stage-and-queue there. Only a run with NO data need should override with
-      `--force` / `TPU_METRO_FALLBACK=1` to permit an out-of-metro cell.
-- **Pick the group first, and default to the one that actually holds your floor.**
-  A PROD floor is per (group, accelerator, cell) (last bullet), so the group is
-  not cosmetic — it decides whether a slice sits inside an idle guarantee or is
-  borrowed and reclaimable. For this account:
+- **The cell is now chosen for you by default, so you rarely pass `--cell`.**
+  Each submit pins whichever cell can place the slice RIGHT NOW (most free
+  chips, not oversold), printing `Smart cell: pinned --cell=…`. Otherwise jobs
+  pile onto oversold cells while chips idle: 13 v7-32 on `yulpptr`, `yukulwh`
+  holding 101 free slices. `--cell` wins, `--power` picks for itself, a comma
+  `--tpu_type` list and `TPU_NO_SMART_CELL=1` skip it, and no candidate defers
+  silently to the allocator. It never blocks. The group below outranks the
+  cell.
+  - A data-locality-locked run passes `--metro`, not a hand-pinned `--cell`.
+    Ranking only free chips and oversold, it can strand a run a metro from its
+    bucket: 4-5x throughput, then a pruner kill (storage rule). Locality is
+    METRO-level: one metro, one storage cell (cbf's `yucbfiv`, `yucbful`,
+    `yucbfwv`, `yucbfsl`, `je` all read `/cns/is-d`). `--metro=<m>` (e.g.
+    `--metro=cbf`) takes that metro's least-oversold cell, `--metros=a,b`
+    several. A router selector never reaching the launcher, `--metro` beats a
+    `--cell` pin. Roam metros only with no storage need.
+    - `--metro` fails CLOSED. A full metro refuses rather than roaming
+      out-of-metro to a no-data cell whose dataloader crashes. That drift put
+      3 arms on `yuskedq`. Wait, or pin `--cell=<in-metro cell>` and
+      stage-and-queue. Only a NO-data run overrides: `--force` /
+      `TPU_METRO_FALLBACK=1`.
+- Pick the group holding your floor (last bullet): idle guarantee versus
+  borrowed and reclaimable.
 
   | Group | Alloc (short) | Use for |
   |---|---|---|
-  | **9** | `fr-dna-grand-challenge-team-resource` | **TPU training — the default.** Holds essentially all of this account's real v6p / v7 / v4 floor; where the stable jobs already run. |
-  | **8** | `brain-vasp-shared-user-xm` | **CPU-only jobs**, with `--skip-preflight`. No TPU floor at all — its `tpu quota` table is empty, so size a CPU fan-out by what actually schedules (§`state: RUN`), never by quota. |
-  | 5 | `vqfree-xm` | Free pool; auto-injects PROD (§Requirements). |
-  | 1, 7 | `*-resources-prod-shared` | Shared prod; thin-to-zero floors — a fallback when g9 is contended, not a default. |
-  | 2, 3, 4 | `*viscam*` / `*interns*` | viscam / intern allocations. |
+  | 9 | `fr-dna-grand-challenge-team-resource` | TPU training default: nearly all our real v6p/v7/v4 floor, plus stable jobs. |
+  | 8 | `brain-vasp-shared-user-xm` | CPU-only, `--skip-preflight`. No TPU floor, `tpu quota` empty: size fan-outs by what schedules (§`state: RUN`), not quota. |
+  | 5 | `vqfree-xm` | Free pool, auto-injects PROD (§Requirements). |
+  | 1, 7 | `*-resources-prod-shared` | Shared prod, thin-to-zero floors. Contended-g9 fallback, not a default. |
+  | 2, 3, 4 | `*viscam*` / `*interns*` | viscam/intern allocations. |
 
-  Full alloc strings are in `~/work/tpu_cmd/tpu_wrapper.sh::get_alloc_by_group_id`
-  (the single source of truth). "Default g9" is a starting point, not a law: if
-  g9's floor for the accelerator you want is already fully used, or your data
-  lives in a metro g9 has no floor in, fall back by the (group, accelerator,
-  cell) rule below.
-- **Convert power classes before you launch.** A chip count is not a size
-  (`tpu_reference.md`); `tpu route --power=` turns a power class into a concrete
-  allocation, type, and cell.
-- **Preflight before packaging.** Fifteen seconds, and it catches the common
-  rejections — illegal topology, minimum-slice rules, no capacity of that
-  platform, thin headroom (layers in `infra/tpu_cli.md`). The wrapper refuses to
-  submit on red without an override.
-- **Preflight cannot verdict a CPU-only job at all** (`Unknown accelerator arch
-  'cpu'`) — it models TPU allocations only. Submit those with
-  `--skip-preflight`: skipping a check with no opinion, not overriding a
-  warning.
-- **A green verdict is necessary, not sufficient.** It cannot see topology
-  fragmentation — free chips spread across cells with no contiguous slice make
-  the allocator accept the submit then reject it seconds later (the daemon
-  auto-retries that one rejection) — nor predict a market outcome, transient
-  attribution rejects, or prompts. Ask for several candidates and prefer cells
-  that historically work for you.
-- **`tpu quota` answers one question — which group holds a floor — and nothing
-  about cells or schedulability.** It prints Quota / Used / Available /
-  Obtainable aggregated per GROUP, with **no cell column**. Quota is the
-  guaranteed floor (a contract, not a ceiling); Available = Quota−Used reads ~0
-  almost always (the steady state in the next bullet); only Obtainable carries
-  live signal, and even that is group-aggregated. So use `tpu quota` to pick the
-  GROUP (who holds a floor for this accelerator), never to choose a cell or make
-  a go/no-go — the number that decides a launch is the per-CELL obtainable from
-  `tpu preflight --json`.
-- **A full or fully-consumed quota floor is NOT a blocker — it is the steady
-  state.** `used == quota, available 0` is normal for these allocs (a floor is a
-  guarantee, not a limit); the job still queues and runs, and preflight's YELLOW
-  about it is informational. The number that decides whether a job starts is the
-  **per-cell obtainable** count in `tpu preflight --json` (and, once submitted,
-  the work unit's own `GQM_RESOURCE_DEFICIT_INFO`). It is volatile and
-  uncorrelated with storage — the cell with the largest co-located quota can
-  read *zero* while middling cells run to completion — so re-check immediately
-  before launching and pick a cell currently good on both axes.
-- **`tpu route` and the market summary only SAMPLE cells — never read either as
-  the complete list.** Both show roughly one cell per accelerator, so treating
-  them as exhaustive says an accelerator exists only where the sample landed
-  (once `tpu route --power=v6p-64` reported v6p solely in `yuphxrp`, phx with no
-  team storage, while preflight's `cells_ok` listed nine cells including two
-  co-located with our data — nearly costing a run its locality). For *where can
-  this run at all*, ask `tpu preflight --json` for the full `cells_ok`, or read
-  the router's market cache (`infra/quota_market.md`), then intersect with
-  storage placement (`storage.md`).
-- **Prefer cells whose metro holds storage you can actually write** — the
-  scheduler ranks on capacity and price and knows nothing about your data, so
-  the cell with the most free chips is often the one with no team storage, where
-  everything lands on the personal per-cell ceiling (`storage.md` owns placement
-  and why distance kills a run). Make it a *preference* over a cell list, not a
-  ban: a storage-less cell is real capacity as long as something sweeps the
-  quota. The platform reads a multi-cell allow-list only in its
-  spatially-flexible mode, so set both together; pinning a cell bypasses both.
-- **A PROD floor is per (group, accelerator, cell) — a tier alone guarantees nothing.** A
-  RoboTwin DP smoke took FIVE launches to hold: `BATCH v6e-8` was preempted 4x by
-  higher-priority prod during the ~3-min cold-import; `PROD v6e-16` in `yucbfrl` was
-  guarantee-reclaimed twice because **group 1 has a ZERO v6e floor there** (`preflight`
-  still lists thousands of chips *obtainable* — obtainable is borrowed capacity a guarantee
-  holder can reclaim mid-compile, not a floor); `PROD v7-16 yutulpz` hit "cell oversold".
-  It only stuck on **`v7-16`, group 9, in `yulpptr`/`yutulpz`** — the exact (group,
-  accelerator, cell) where this account's STABLE jobs already run, co-located with the data
-  mirrors. **Diagnose capacity from your own fleet: launch where your long jobs already
-  survive, not where preflight says chips are obtainable.**
+  Full strings: `~/work/tpu_cmd/tpu_wrapper.sh::get_alloc_by_group_id`, the
+  single source of truth. g9 is only a start: fall back once its accelerator
+  floor is spent, or your data's metro has none.
+- Convert power classes first: a chip count is not a size (`tpu_reference.md`).
+  `tpu route --power=` turns one into an allocation, type, and cell.
+- Preflight before packaging: fifteen seconds, catching illegal topology,
+  minimum-slice rules, no platform capacity, thin headroom (layers in
+  `infra/tpu_cli.md`). Red submits are refused absent an override.
+- Preflight cannot verdict a CPU-only job (`Unknown accelerator arch 'cpu'`),
+  modeling TPU allocations only. Submit those with `--skip-preflight`: a
+  no-opinion check skipped, not a warning overruled.
+- A green verdict is necessary, not sufficient. It misses topology
+  fragmentation: non-contiguous free chips let the allocator accept, then
+  reject seconds later (the daemon auto-retries that one rejection). Market
+  outcomes, transient attribution rejects and prompts are invisible too. Ask
+  for several candidates, preferring proven ones.
+- `tpu quota` names which group holds a floor: Quota/Used/Available/Obtainable
+  per GROUP, no cell column, no schedulability. Quota is a guaranteed floor, a
+  contract not a ceiling. Available = Quota−Used reads ~0 almost always (next
+  bullet), and only Obtainable is live, group-aggregated. Read `tpu quota` per
+  GROUP with your accelerator's floor, never per cell or as go/no-go: launches
+  turn on `tpu preflight --json`'s per-CELL obtainable.
+- A fully-consumed floor is the steady state, not a blocker.
+  `used == quota, available 0` is normal for these allocs, the job queues and
+  runs, preflight's YELLOW informational. Starts turn on `tpu preflight --json`,
+  then the work unit's `GQM_RESOURCE_DEFICIT_INFO`. Obtainable is volatile and
+  storage-blind: the largest co-located quota can read zero while middling
+  cells finish. Re-check before launch, on both axes.
+- `tpu route` and the market summary only SAMPLE cells, roughly one per
+  accelerator, never the complete list. `tpu route --power=v6p-64` once put v6p
+  solely in `yuphxrp`, phx with no team storage, while preflight's `cells_ok`
+  listed nine cells, two co-located with our data: nearly a lost locality. Take
+  full `cells_ok` from `tpu preflight --json` or the market cache
+  (`infra/quota_market.md`), intersected with storage (`storage.md`).
+- Prefer cells whose metro holds storage you can write. The scheduler ranks
+  capacity and price, not data, so the freest cell often lacks team storage.
+  Writes then hit the personal per-cell ceiling (`storage.md` owns placement
+  and why distance kills a run). Preference, not ban: a storage-less cell is
+  real capacity while something sweeps the quota. A multi-cell allow-list reads
+  only in spatially-flexible mode, so set both; a pin bypasses both.
+- A PROD floor is per (group, accelerator, cell); a tier alone guarantees
+  nothing. A RoboTwin DP smoke took FIVE launches. `BATCH v6e-8` was preempted
+  4x by higher-priority prod during the ~3-min cold-import. `PROD v6e-16` in
+  `yucbfrl` was guarantee-reclaimed twice, group 1 having a ZERO v6e floor
+  there. The thousands `preflight` calls obtainable are borrowed capacity a
+  guarantee holder reclaims mid-compile, not a floor. `PROD v7-16 yutulpz` hit
+  "cell oversold". Only `v7-16`, group 9, in `yulpptr`/`yutulpz` stuck, where
+  STABLE jobs already run beside the data mirrors. Launch where long jobs
+  survive, not where preflight calls chips obtainable.
 
 ## When A Pending Job Should Move
 
-**A fresh submit already picks a placeable cell** (§Choosing Where To Run), so
-this section is mostly for a job that went PENDING AFTER it was placed, or one
-submitted with an explicit `--cell`. A fresh submit will avoid the oversold
-cell on its own.
+A fresh submit picks a placeable cell, avoiding the oversold one (§Choosing
+Where To Run); this covers PENDING after placement, or an explicit `--cell`.
 
-**Queued is not failed, and PENDING for hours can be normal** (an oversold pool
-leaves work units PENDING for hours). Do NOT reflexively resubmit — every
-resubmission stacks another work unit contending the same slice. Instead, **read
-the work unit's own verdict** (`deep_probe` / `why_probe` on the live unit, or
-its `GQM_RESOURCE_DEFICIT_INFO`) and act on THAT. The obtainable table cannot
-tell these cases apart — it reads the same in all of them.
+**Queued is not failed, and PENDING for hours can be normal** on an oversold
+pool. Do not resubmit reflexively: each stacks another work unit contending the
+same slice. Act on the live unit's verdict: `deep_probe`/`why_probe`, or its
+`GQM_RESOURCE_DEFICIT_INFO`. The obtainable table cannot tell these apart.
 
-| Work unit verdict | What it means | Move? |
+| Verdict | Means | Move? |
 |---|---|---|
-| `GQM_OVERSOLD_MARKET` "in cell X…" | that CELL is oversold | **Change cell** — the verdict names it; another cell may take it |
-| `GQM_RESOURCE_DEFICIT_INFO`, deficit N (names a cell) | short N chips in that cell | **Change cell** — pick one with a smaller/zero deficit |
-| `resource-guarantee-reclaim` | you held borrowed capacity; a floor holder took it back | **Change to a (group,cell) where YOU hold a floor**, don't re-fight for borrowed chips |
-| `dynamic root pool … capped by adjusted ceiling` (deficit names NO cell; g1/g5/g9 read identical) | pool-wide limit | **Cell won't help.** Change tier, change accelerator generation, or wait for the price to fall |
+| `GQM_OVERSOLD_MARKET` "in cell X…" | that cell is oversold | Yes; it names the cell, another may take it |
+| `GQM_RESOURCE_DEFICIT_INFO`, deficit N (names a cell) | short N chips there | Yes; pick a smaller/zero deficit |
+| `resource-guarantee-reclaim` | a floor holder reclaimed your borrowed capacity | Yes: to a (group,cell) where you hold a floor, not borrowed chips |
+| `dynamic root pool … capped by adjusted ceiling` (deficit names no cell; g1/g5/g9 identical) | pool-wide limit | No; change tier or accelerator generation, or wait for the price to fall |
 
-**Two false-pending causes to rule out first**, because neither is a capacity
-problem and neither is fixed by moving cell:
+Rule out two non-capacity causes first; moving cell fixes neither:
 
-- **A price cap (limit order) triggered.** A pending job is pulled from the queue
-  *before* any capacity check when the pool price exceeds the cap — free chips do
-  not help, and the cap is pool-wide so moving cell does nothing. It is often a
-  teammate's group-wide cap silently applying to you. Check
+- A price cap (limit order) triggered. Over the cap, the queue drops the job
+  before any capacity check, so free chips do not help. The cap is pool-wide,
+  often a teammate's group-wide one applying to you silently. Check
   `tools/limit_order.sh status` for `BLOCKING` first (`infra/quota_market.md`).
-- **It never actually reached the scheduler.** An XID with no work unit, or no
-  XID at all, is a launcher-side failure, not a queue — read it as a local
-  problem (§Launcher-Side Failures).
+- It never reached the scheduler. An XID with no work unit, or no XID, is a
+  launcher-side failure, not a queue: a local problem (§Launcher-Side Failures).
 
-**When the verdict is ambiguous, stop reading tables and queue a real probe.**
-A short submit with the real workload answers "can I get this slice here" at 100%;
-the capacity table was ~12% accurate against the live queue
-(`research/accelerator_choice.md`).
+When the verdict is ambiguous, probe: a short submit of the real workload
+answers "can I get this slice here" at 100%, where the capacity table was ~12%
+accurate against the live queue (`research/accelerator_choice.md`).
 
 ## Verify The Scheduler Exists Before You Rely On It
 
-**The scheduler's binaries live under a blaze output root that moves, and when
-it moves they vanish silently — `ps` still shows workers running while the
-filesystem no longer has the program.** Measured 2026-08-29: the output root
-moved five times in one shift (`blaze-bin` and even the absolute
-`blaze-out/k8-fastbuild/bin/...` layers repoint together, so a three-layer
-fallback does NOT protect against it). Each time `route_check` / `queue_cli` /
-`jobd` disappeared and every `tpu enqueue` subcommand answered *"not built"*,
-while long-lived `route_check --worker` processes kept running from an inode
-with no path to it — they work until they restart, then they are gone.
+**`tpu` answering "not built" usually means the PATH to its binaries moved, not
+that anything is missing; three faults share the symptom.** Blaze names an
+output_base after `md5(workspace_directory)`, or the `<md5>_buildrabbit` sibling
+root when `$BUILD_EXECROOT` is set. Two environments on one checkout own two
+roots; the last to build repoints `blaze-out`/`blaze-bin`, hiding
+`route_check` / `queue_cli` / `jobd`, binaries intact in the other root. It
+self-heals when the symlink swings back, reading as random drift (six
+occurrences in one shift, 2026-08-30).
 
-**So: run the tool, do not inspect it.**
+| Symptom | Cause | Do |
+|---|---|---|
+| `rc=127 command not found` | `tpu` off `PATH`; `~/.bashrc` sources `~/work/tpu_cmd/tpu_wrapper.sh` | `source ~/work/tpu_cmd/tpu_wrapper.sh` |
+| `rc=1 "not built"`, worker still submitting | symlink flipped to a root lacking them | nothing; the resolver searches real roots, else rebuild |
+| `rc=1 "not built"`, nothing ever built | genuinely absent | rebuild serially, never during another build |
+
+Fallbacks all beginning `$G3/blaze-out/...` are one path: `blaze-out` is the
+rewritten symlink, so all miss together. The wrapper enumerates real output
+roots (`$BUILD_EXECROOT`, the `md5(workspace)` root, its `_buildrabbit` sibling,
+the symlink last as a hint). It takes the newest that exists, failing closed.
+Fallbacks sharing a mutable component are not redundant.
+
+A long-lived worker keeps executing its original inode: a busy `ps` line is no
+evidence binaries are reachable, nor "not built" that it died. Run the tool, do
+not inspect it.
 
 ```bash
 tpu queue-status          # prints the queue => the scheduler is really there
 ```
-Rebuild when it says "not built" (serially, never while another build is in
-flight):
+Rebuild when it says "not built", serially:
 ```bash
 cd /google/src/cloud/qiaos/run_amply_workspace/google3 && \
   blaze build experimental/users/qiaos/tpu_utils:{route_check,queue_cli,jobd}
 ```
-★**`blaze` printing `Target up-to-date` does not mean your build produced
-anything — only a fresh mtime proves that.** But do not invert it either: for a
-`py_binary` the product is an ELF launcher whose SOURCE lives in
-`<target>.runfiles/`, so grepping the binary for your change finds nothing even
-on a correct build. Judge by running it.
+`blaze` printing `Target up-to-date` does not prove the build produced anything;
+only a fresh mtime does. Nor the converse: a `py_binary` product is an ELF
+launcher whose SOURCE lives in `<target>.runfiles/`, so grepping it finds nothing
+even on a correct build.
+
+For a LONG-RUNNING process, "it is in the runfiles" is a false green: those
+entries symlink at the workspace source, so an edit refreshes the file while a
+daemon started hours ago runs old code from memory. Running it tests a new
+process, not the daemon. The discriminator is start time versus source mtime
+(`ps -eo pid,lstart` against `stat -c %y`): an older process means the fix is
+not live. Restart and re-check the same way (`engineering.md`
+§Never kill by pattern: how not to restart).
 
 ## The Local Queue: `tpu enqueue` + Serial Build-Worker
 
-**`tpu enqueue` + a serial `tpu build-worker` is the DEFAULT submission path**
-(§Submission Contract), for a single job as much as for a batch: on this shared
-workstation the serial worker is the only thing that avoids the concurrent-build
-`output_base` race and its 0-work-unit zombie XID (`infra/tpu_cli.md`).
-Enqueuing is instant and free — a queued job costs nothing (PENDING does not
-bill) — and the worker builds one at a time. Beyond the single-job case the
-router also:
+**`tpu enqueue` plus a serial `tpu build-worker` is the DEFAULT submission path**
+(§Submission Contract), single job or batch. Only it dodges the concurrent-build
+`output_base` race and its 0-work-unit zombie XID (`infra/tpu_cli.md`). An
+`enqueue` is free and instant; PENDING does not bill. It also:
 
-- drains a **batch / sweep** as capacity frees up, no babysitting N submits;
-- **re-routes automatically** anything that goes PENDING after placement (the
-  10-minute sweep, below);
-- handles a **mixed batch across several checkouts** (each entry remembers its
-  own source dir).
+- drains a batch or sweep as capacity frees, no babysitting N submits;
+- re-routes anything PENDING after placement (the 10-minute sweep, below);
+- handles a mixed batch across checkouts, each keeping its dir.
 
-The mental model is two queues. The **local queue** is a durable, unlimited list
-of desired runs; the router drains it into the XM queue one placement at a time,
-choosing a cell that can place the slice **right now** (free chips, not the
-obtainable table; never an oversold or full cell) and re-routing anything stuck.
-`tpu queue` — the one-shot fallback — instead admits a job to ONE cell and waits.
+Two queues. The router drains a durable, unlimited local list of desired runs
+into the XM queue, one placement at a time. It places onto free chips now, not
+the obtainable table, and never onto an oversold or full cell. `tpu queue`
+takes one job to ONE cell.
 
-**`phx` and `ske` are refused at enqueue — do not try to route around it.** The
-group has no CNS storage registration in those two metros, so a launch there
-resolves, bills, and writes to the PERSONAL 500 GiB quota (~468G used, handle
-poisoned): the write fails with `resource_exhausted` **and still leaves a 0-byte
-file**, so the job looks like it produced output. This is worse than an unknown
-metro, which merely `SystemExit`s into an inert zero-work-unit shell. Three
-gates now refuse it — `queue_cli` at enqueue, `jobchain.validate_enqueue` at the
-v2 store, and `xm_launcher._local_bucket` which nothing bypasses — all at zero
-credits. The escape hatch is an explicit group-billed `--bucket`, which is
-honoured at every gate. Group-storage metros: `cbf ckv cmh dfw grq las lpp mrn
-sin tul`.
+`phx` and `ske` are refused at `tpu enqueue`; do not route around it. Unregistered
+for CNS storage, they bill the PERSONAL 500 GiB quota (~468G used, handle
+poisoned), fail `resource_exhausted`, and still leave a 0-byte file, so the job
+looks productive. An unknown metro only `SystemExit`s into an inert
+zero-work-unit shell. Three unbypassable gates refuse at zero credits:
+`queue_cli`, `jobchain.validate_enqueue` (v2 store),
+`xm_launcher._local_bucket`. Escape hatch: explicit group-billed `--bucket`.
+Group-storage metros: `cbf ckv cmh dfw grq las lpp mrn sin tul`.
 
-**`tpu queue` is deprecated (soft).** It prints a stderr warning pointing here.
-It is kept, not removed, for one reason: `enqueue` only PARKS a job and a serial
-`build-worker` drains it, so when that worker is down `tpu queue` is the only
-synchronous path — and `enqueue`'s own `--launch` args are passed verbatim *to*
-`tpu queue` at submit, so deleting it would break `enqueue` too.
+`tpu queue` is deprecated (soft): it warns on stderr and points here. It stays
+for two reasons. `enqueue` only PARKS a job for a serial `build-worker`, so
+`tpu queue` is the only synchronous path when that worker is down. And
+`enqueue`'s own `--launch` args pass verbatim to `tpu queue` at submit.
 
-**Never enqueue with `priority` > 0 without the operator's explicit permission.**
-The local queue drains highest-priority-first (`tpu enqueue --priority=N`; the
-router sorts by `-priority`, so a bigger number jumps the queue). On this shared
-workstation every line enqueues into the *same* local queue, so one line quietly
-setting `--priority=5` or `6` parks every default `priority=0` job behind it
-indefinitely — a line that never raised its priority can be starved for the whole
-shift while wondering why its arms never build. **The default is `priority=0` and
-you leave it there.** Raising it is a fleet-wide fairness decision, not a
-per-line optimization: only the operator, who can see all lines' needs, may
-authorize a `priority>0`. If your batch genuinely needs to go first, ask — do not
-self-assign. (This is distinct from the dead `tpu queue --priority` CLI flag
-above, which is parsed but never read; the *local-queue* priority field IS
-honored, which is exactly why misusing it starves peers.)
+Never enqueue with `priority` > 0 without the operator's explicit permission.
+The queue drains highest-priority-first (`tpu enqueue --priority=N`; the router
+sorts by `-priority`). All lines share it, so one setting `--priority=5` or `6`
+parks every `priority=0` job for a shift. The default is `priority=0`; only the
+operator may authorize a `priority>0`. It IS honored, unlike the dead
+`tpu queue --priority` flag, parsed but never read.
 
 | Command | Does |
 |---|---|
-| `tpu enqueue --power=v7-32 --archs=v7,v6p --launch=config=...` | Add a desired run. **`--power` and `--archs` are both REQUIRED and go together**: `--power` is the compute target, `--archs` the generations that may satisfy it, and the router picks whichever has capacity (`--power_tolerance`, default 0.5, accepts 0.75x–1.5x). The one-shot `tpu queue` cannot do this — there `--power` and `--tpu_type` are mutually exclusive. `--launch=k=v,flag` is passed verbatim to `tpu queue` at submit; a key it does not declare is REFUSED, so forward binary flags as `--launch=app.<flag>=<v>`. |
-| `tpu queue-status` (alias `tpu qs`) | The local queue plus, live, why each job waits or which cell it is placeable in now. **Run it once before trusting the scheduler** — see §Verify The Scheduler Exists. |
+| `tpu enqueue --power=v7-32 --archs=v7,v6p --launch=config=...` | Add a run. `--power` and `--archs` are REQUIRED together: `--power` the target, `--archs` the generations satisfying it, whichever has capacity (`--power_tolerance`, default 0.5, accepts 0.75x-1.5x). Not `tpu queue`, where `--power` and `--tpu_type` are exclusive. `--launch=k=v,flag` goes verbatim to `tpu queue` at submit; undeclared keys are REFUSED, so forward binary flags as `--launch=app.<flag>=<v>`. |
+| `tpu queue-status` (alias `tpu qs`) | Local queue plus, live, why each job waits or where it is placeable. Run before trusting the scheduler: §Verify The Scheduler Exists. |
 | `tpu dequeue <job_id>` | Remove one before it is submitted. |
 | `tpu requeue [job_id...]` | Return HELD job(s) to QUEUED after you fix the cause (empty = all held). |
-| `tpu build-worker start` \| `stop` \| `status` | The SERIAL build-worker (dedicated tmux session): claims one QUEUED job at a time as BUILDING, runs its build, records the XID, repeats. One build in flight at a time — the safe way to drain a batch. |
-| `tpu route-tick` | Run one router pass by hand (no daemon/worker): plan (dry-run) then, with `--nodry_run`, submit placeable jobs. `--reroute --nodry_run` cancels jobs stuck PENDING past 10 min and re-queues them. |
+| `tpu build-worker start` \| `stop` \| `status` | SERIAL build-worker, own tmux session: claims one QUEUED job as BUILDING, builds it, records the XID, repeats. One build in flight, the safe way to drain a batch. |
+| `tpu route-tick` | One router pass by hand (no daemon/worker): plan (dry-run), then submit placeable jobs with `--nodry_run`. `--reroute --nodry_run` cancels and re-queues jobs PENDING past 10 min. |
 
-A job's state moves QUEUED → **BUILDING** (a worker is running its build now, the
-one live build) → SUBMITTED → RUNNING; `tpu queue-status` and `tpu check` show
-which stage each is in. A build that produces no XID (a `found[]` zombie) is
-requeued, not left dangling; a crashed worker's stale BUILDING claim is reclaimed
-after `--build_stale_s`.
+A job moves QUEUED → BUILDING (the one live build) → SUBMITTED → RUNNING, shown
+by `tpu queue-status` and `tpu check`. A no-XID build (a `found[]` zombie) is
+requeued, not dangling; a crashed worker's stale BUILDING claim expires after
+`--build_stale_s`.
 
-**HELD is the anti-churn park.** An unattended worker must not spin forever on a
-job it can never build, so it moves such a job to **HELD** (skipped until a human
-acts) instead of requeuing it endlessly: a `--workdir` that does not exist (park
-immediately — the wrong source would be packaged), or a job that fails to produce
-an XID `--max_build_attempts` times (default 3). This is exactly what catches a
-stale/duplicate enqueue (e.g. entries whose runs are already on Borg) or an
-empty-workdir batch enqueued from the wrong directory — they sit HELD, not
-churning or double-firing. Fix the cause (usually: re-`tpu enqueue` from the
-right checkout so `workdir` is captured) and `tpu requeue` the rest; inspect why
-with `tpu queue-status`.
+A `found[]` / no-XID verdict is a symptom, and the two cheapest causes are not
+in your code. Read `last_reason`, then elapsed time: far LESS than a real build
+means blaze was never reached (134 s against a 236 s honest build), so staging
+or a gate is at fault. Two do:
 
-**A parked row records a workdir PATH, not a commit — so an old row is no longer
-the job it was enqueued as, and the older it is the more `tpu requeue` is the
-wrong verb.** The entry stores `workdir`; the packaging step rsyncs whatever that
-directory holds *at build time*. A row parked for hours therefore fires against a
-checkout that has since moved on, reproducing nothing it was meant to reproduce
-while looking like a faithful retry — the one failure mode a requeue is supposed
-to avoid. **Prefer a fresh `tpu enqueue` from the intended tree; requeue only when
-the workdir demonstrably has not moved** (and remember `--priority` is not yours
-to raise). The same reasoning retires a row outright: a job whose purpose was a
-one-off check against a specific tree is obsolete once that tree changes, not
-merely stale.
+- The stagedir completeness check verifies the entry source in the BUILD
+  target's `srcs`, NOT always `main.py` (one package's is `main_eqr.py`). It
+  refuses before the launcher's log, leaves the run directory empty, and prints
+  `[[STAGE_INCOMPLETE]]` naming the missing artifact.
+- A budget refusal parks `BUDGET_DEFERRED`, `attempts` untouched by design: a
+  fleet-wide transient, not a per-job defect, never counting toward HELD.
 
-**Before parking or releasing someone else's row, ask the line that owns it — and
-read the hold text as a claim, not as evidence.** `workdir` names the owner; the
-fleet roster names the session. An owner answers "still needed?" in one message,
-and the answer is regularly *no* for reasons invisible from the queue (a renamed
-experiment family, a generation superseded). Where the owning line is verifiably
-dead, the row's own history has to carry the decision on its own. And do not
-quote a `HELD:` reason back as fact: hold texts are copied between rows by the
-various watchers, so one can describe a *neighbouring* entry's kwargs entirely —
-re-derive the state from the entry's fields before acting on it.
+A `[[MARKER]]` in the reason is the machine-readable verdict; trust it over the
+prose around it. `[[STAGE_SRC_REFUSED]]`, `[[STAGE_RSYNC_TIMEOUT]]`,
+`[[STAGE_RM_REFUSED]]`, `[[STAGE_INCOMPLETE]]`, `[[BUDGET_DEFERRED]]`.
 
-**A checkpoint-sharded resume must pass `--topology_locked`.** Then the router
-only moves the job between shapes of the SAME mesh geometry — `v6p-32` and
-`v7-32` are both `2x4x4` and interchangeable, but `v6e-32` (`4_8`) is not, and a
-locked job is never placed on it. Omit the flag only for a run that can retrain
-from scratch. A chip count is not a size (see the top-level rule): give `--power`
-an explicit `arch-chips` so the lock has a mesh to anchor to.
+`waiting: <something>` is not always capacity; read the clause after the colon.
+An availability-fetch failure parks a job in QUEUED with `attempts` unchanged:
+never escalating to HELD, never billing, looking queued behind demand.
+`tpu route-tick` prints the live availability count; entries mean capacity is
+fine.
 
-**`tpu enqueue` captures the checkout you run it from, so enqueue from the right
-tree.** `tpu queue` packages its source by rsyncing the CURRENT directory into
-the stagedir, and the router runs the submit from the entry's `workdir`
-(defaulting to the CWD at enqueue time). A run whose config or edits live in a
-particular checkout — a per-arm snapshot dir, an edit not passed via `--config`
-— must be enqueued FROM that directory, or the router ships a copy of the wrong
-source. `tpu queue-status` and `tpu route-tick` print the packaging dir so you
-can check it before it submits; override with `tpu enqueue --workdir=<dir>`. Only
-a run whose every difference rides on an explicit flag is safe to enqueue from
-anywhere.
+`last_reason` is a snapshot, not a heartbeat, rewritten only on change. Text
+unchanged over N minutes proves the STATE has not changed, not that the failure
+continues. Re-derive with a probe.
 
-**Enqueuing alone submits nothing; a running `tpu build-worker` is what drains
-and submits it** (one build at a time). The separate AUTO-reroute sweep
-(cancel-and-requeue a job stuck PENDING past 10 min) is off by default: run
-`tpu route-tick --reroute --nodry_run` yourself, or arm the daemon's router lane
-with `TPU_ROUTE_ENABLED=1` (unset by default). Neither the worker nor the router
-ever submits into an oversold/full cell or cancels a job whose live status it
-cannot read. Tool internals: `infra/tpu_cli.md`.
+HELD is the anti-churn park: what an unattended worker can never build waits for
+a human. Two cases park: a `--workdir` that does not exist (at once, since the
+wrong source would ship), and failing an XID `--max_build_attempts` times
+(default 3). That catches stale or duplicate enqueues (already on Borg) and
+empty-workdir batches from the wrong directory. Fix it, usually a fresh
+`tpu enqueue` from the right checkout to capture `workdir`; then `tpu requeue`
+and `tpu queue-status`.
+
+A parked row records a workdir PATH, not a commit, so it is not the job it was
+enqueued as and `tpu requeue` is the wrong verb. Packaging rsyncs that directory
+at build time, so a row parked for hours fires against a moved-on checkout and
+reproduces nothing while looking faithful. Prefer a fresh `tpu enqueue` from the
+intended tree, requeuing only if `workdir` has not moved (`--priority` is not
+yours to raise); retire an obsolete one-off.
+
+Ask the owning line before parking or releasing its row; read the hold text as
+a claim, not evidence. `workdir` names the owner, the fleet roster the session,
+and an owner answers "still needed?" in one message, regularly no (a renamed
+family, a superseded generation). If that line is dead, the row's history
+decides. Never quote a `HELD:` reason as fact: watchers copy hold texts between
+rows, so one may describe a neighbor's kwargs.
+
+A checkpoint-sharded resume must pass `--topology_locked`; the router then moves
+it only within the SAME mesh geometry. `v6p-32` and `v7-32` are both `2x4x4` and
+interchangeable, `v6e-32` (`4_8`) is not, so a locked job never lands there.
+Omit it only for a run that can retrain from scratch. A chip count is not a size
+(top-level rule): give `--power` an explicit `arch-chips`.
+
+`cd` into the code directory before `tpu enqueue`: step one of submitting
+anything, not a refinement. `tpu enqueue` captures the CWD as the entry's
+`workdir` and rsyncs that whole tree into the stagedir, so point it at a code
+subdirectory (`~/work/<repo>/torch_impl`), never `~/work`.
+
+Enqueuing from `~/work` does not ship wrong code; it produces no job at all,
+reported as a crashed build. The packager recurses the home tree
+(`AGENT_STATUS.md`, `agent-web`, `.monitor_watch` backups, every sibling
+checkout) and times out or dies, so the run surfaces as
+`build produced no XID (found[]/crash?); retry N/3`: compilation, not staging.
+Each attempt leaves a stagedir behind (278 had accumulated).
+
+Tell it from an ordinary failed build by the SHAPE of the failure, not by a
+success rate. `found[]` also happens from a correct directory and usually
+succeeds on retry; the wrong-workdir version fails deterministically, every
+attempt at the same point, and its stagedir mirrors your home directory instead
+of a checkout. Read what was staged: that separates the two before the third
+attempt burns. Across 46 codi queue entries, 41 carried an XID and 5 did not,
+and the 5 are not one population: two were enqueued from `~/work` and burned all
+three attempts, two were retryable `found[]` from a correct
+subdirectory, and one was an administrative HELD that never built.
+
+Reading that field is not checking it: "differences all ride on explicit flags"
+answers whether the right source ships, not whether the packager finishes. One
+line reported `workdir=/…/work` half an hour before its builds failed, cleared
+on exactly those grounds. The hazard is tree size, not contents.
+
+Verify with the `packaged from:` line `tpu enqueue` prints, every time: it
+echoes the captured directory, so a wrong tree shows one line after you submit,
+not three failed builds later. `tpu queue-status` and `tpu route-tick` print it
+too; `--workdir=<dir>` sets it explicitly.
+
+The router submits from that captured `workdir`, while `tpu queue` rsyncs the
+CURRENT directory. So enqueue FROM the checkout holding the run's config or
+edits (a per-arm snapshot dir, an edit not via `--config`), or it ships the
+wrong source. `tpu queue-status` and `tpu route-tick` show the packaging dir
+before it submits; `tpu enqueue --workdir=<dir>` overrides. Only a run whose
+differences ride entirely on explicit flags is safe to enqueue anywhere.
+
+Enqueuing alone submits nothing: a running `tpu build-worker` drains and submits
+it, one build at a time. The separate AUTO-reroute sweep (cancel and requeue a
+job stuck PENDING past 10 min) is off by default; run
+`tpu route-tick --reroute --nodry_run`, or arm the daemon's router lane with
+`TPU_ROUTE_ENABLED=1` (unset). Neither submits into an oversold/full cell, nor
+cancels a job whose status it cannot read. Internals: `infra/tpu_cli.md`.
 
 ## The `LOAD_FROM` Contract
 
-**A scheduler tells a job where to resume from by setting the environment variable
-`LOAD_FROM` to the checkpoint path, VERBATIM — never by a config key, and never after
-"fixing up" the path.** Any new launcher, requeue path, or resume tool must follow this
-exactly; it is the one interface every family in this fleet already speaks.
+**A scheduler tells a job where to resume by setting the env var `LOAD_FROM` to
+the checkpoint path, VERBATIM: never a config key, never a "fixed up" path.**
+Every launcher, requeue path and resume tool follows it.
 
-**The contract is the ENV VAR, not the config key.** `LOAD_FROM` is what all consumers read.
-Which config key it lands in differs per project — EqR-jax family uses `load_from`, the
-codi/coconut family uses `load_model_path` — so a producer that writes the *key* instead of
-the *variable* keeps working on most lines and silently cold-starts the rest. That failure is
-partial by construction: a smoke test on any EqR-jax line passes and certifies the bug.
+Consumers read `LOAD_FROM`; the config key differs per project (EqR-jax
+`load_from`, codi/coconut `load_model_path`). Writing the key works on most
+lines and silently cold-starts the rest. The failure is partial: a smoke test
+on any EqR-jax line certifies the bug.
 
-**Never parse, normalise, or complete the path.** Four incompatible checkpoint shapes coexist,
-and every "helpful" transformation breaks at least one:
+Never parse, normalize, or complete the path: four incompatible shapes coexist
+and every "helpful" transformation breaks one.
 
 | Family | Shape | Note |
 |---|---|---|
-| EqR-jax (maze, trm-arc1, hrm-trm) | `step_<N>/` | the job appends `/state` itself |
-| codi, coconut | `step_<N>/` | flat, there is **no** `/state` subdirectory |
+| EqR-jax (maze, trm-arc1, hrm-trm) | `step_<N>/` | the job appends `/state` |
+| codi, coconut | `step_<N>/` | flat, no `/state` subdirectory |
 | paligemma, jax_llava | `checkpoint_<N>` | flax file |
-| torch ports | `step_<N>.pt` | **a single FILE, not a directory** |
+| torch ports | `step_<N>.pt` | a single FILE, not a directory |
 
-Store the string the job itself reported (its `latest_checkpoint()`), replay it unchanged.
-`LOAD_FROM` must point at the **leaf**; a bucket root or a `checkpoints/` parent raises
-`FileNotFoundError` — after first printing a reassuring metadata warning.
+Replay the job's reported string (its `latest_checkpoint()`) unchanged.
+`LOAD_FROM` names the leaf; a bucket root or `checkpoints/` parent raises
+`FileNotFoundError` after a reassuring metadata warning.
 
-**Clear `LOAD_FROM` once the job has written its own first checkpoint, or set it only for the
-first dispatch.** An explicit `LOAD_FROM` wins unconditionally and disables the job's own
-auto-resume, so leaving it pinned makes every later preemption reload the same old
-checkpoint: a run measured at step 380k restarted from 298k, and it reads as training
-instability rather than as an infra fault.
+Clear `LOAD_FROM` once the job writes its first checkpoint, or set it on first
+dispatch only. It wins unconditionally and disables auto-resume, so a pinned
+`LOAD_FROM` reloads one old checkpoint at every preemption: a run at step 380k
+restarted from 298k, reading as instability, not an infra fault.
 
-**Setting `LOAD_FROM` is the contract; DELIVERING it has exactly one working channel —
-`tpu enqueue --launch="...,load_from=<path>"`.** The variable name is what the job reads,
-but nothing in the submission path picks it up from your shell. Two plausible-looking
-routes fail, and they fail asymmetrically:
+`LOAD_FROM` has one working delivery channel,
+`tpu enqueue --launch="...,load_from=<path>"`. Two plausible routes fail
+asymmetrically:
 
 | What you type | What happens |
 |---|---|
-| `LOAD_FROM=<path> tpu enqueue ...` | **Silently dropped.** The job cold-starts from step 0, trains happily, and reports SUCCESS. `LOAD_FROM` reaches the job only as a launcher flag (`xm_launcher.py`, `--load_from` → `job_env_vars`), never by shell inheritance. |
-| `tpu enqueue --load_from=<path>` | Loud `FATAL Flags parsing error: Unknown command line flag 'load_from'`. The wrapper's passthrough list allows it, the downstream binary does not declare it. Cheap, because it refuses. |
-| **`tpu enqueue --launch="...,load_from=<path>"`** | **Works.** `--launch` k=v pairs are handed verbatim to `tpu queue` at submit time. |
+| `LOAD_FROM=<path> tpu enqueue ...` | Silently dropped: the job cold-starts from step 0, trains happily, reports SUCCESS. `LOAD_FROM` arrives only as a launcher flag (`xm_launcher.py`, `--load_from` → `job_env_vars`), never by shell inheritance. |
+| `tpu enqueue --load_from=<path>` | Loud `FATAL Flags parsing error: Unknown command line flag 'load_from'`: the wrapper's passthrough allows it, the binary does not declare it. Cheap: it refuses. |
+| `tpu enqueue --launch="...,load_from=<path>"` | Works: `--launch` k=v pairs go verbatim to `tpu queue` at submit. |
 
-The first row is the expensive one and it is the fleet's standard silent failure: a resume
-that quietly becomes a cold start looks identical to a healthy run for the first hour.
-**Never treat a resume as done until the job's own log says so** — `resumed from <path> at
-step <N>` with the N you expected. A watcher on a resumed run should match `cold start` and
-a low step number as FAILURE conditions, not just crash keywords.
+Row one is the standard silent failure: a cold start looks healthy for an hour.
+Confirm from the job's own log, `resumed from <path> at step <N>`, with the N
+you expected. Its watcher treats `cold start` and a low step as FAILURE, not
+only crashes.
 
-**`CHECKPOINT_BUCKET` is a separate variable and must not be repointed on resume.** It says
-where the job *writes*; `LOAD_FROM` says where it *reads*. The torch ports derive their whole
-working directory from it, so moving it silently restarts them from scratch.
+`CHECKPOINT_BUCKET` is separate, never repointed on resume: it says where the
+job writes, `LOAD_FROM` where it reads. Torch ports take their working
+directory from it, so moving it restarts them from scratch. `CHECKPOINT_BUCKET`
+is also the launcher's ONLY write-location statement: it never forwards
+`--bucket`, and exports `<root>/logs/<project>/<folder>`, not the root passed.
+A binary reading `--bucket` gets its Borg default (empty, in a careful
+implementation), so records degrade to stderr, unreadable behind the LOAS wall.
+Hence the costliest symptom: `state=SUCCESS`, zero bytes written, the run
+genuinely happened (peak RSS showed torch loaded at 9.7 GB) and left nothing.
+Resolve as `--bucket` or `$CHECKPOINT_BUCKET`, in that order, so an explicit
+flag stays authoritative as in the launcher, and log which won. Suffix trap:
+`--bucket=/cns/X/eqr_data` writes under
+`/cns/X/eqr_data/logs/<project>/<folder>`: its root looks empty and reads as
+failure. Never read through `CHECKPOINT_BUCKET`; that is `LOAD_FROM`'s job
+(§The `LOAD_FROM` Contract).
 
-**And `CHECKPOINT_BUCKET` is the ONLY way the launcher tells a job where to write — it does
-NOT forward `--bucket` on the command line, and what it exports is
-`<root>/logs/<project>/<folder>`, not the root you passed.** A binary that reads its output
-location from a `--bucket` flag therefore gets the flag's *default* on Borg — empty, in a
-careful implementation — and every record degrades to stderr, which the LOAS wall makes
-unreadable. **The symptom is a job that reaches `state=SUCCESS` and writes zero bytes**, the
-most expensive shape to diagnose: the run genuinely happened (peak RSS showed torch fully
-loaded at 9.7 GB) and left nothing to show for it. Resolve the location as
-`--bucket` **or** `$CHECKPOINT_BUCKET`, in that order — an explicitly passed flag stays
-authoritative, matching the launcher's own rule — and log which one won. The suffix
-difference is the second trap: a run told `--bucket=/cns/X/eqr_data` writes under
-`/cns/X/eqr_data/logs/<project>/<folder>`, so looking for output at the root finds nothing
-and reads as failure. Do not repurpose `CHECKPOINT_BUCKET` for reads; that is `LOAD_FROM`'s
-job (§The `LOAD_FROM` Contract).
+Read remote if you must; write local always. A cross-metro restore read is
+survivable: 6.0 GiB across the Atlantic at ~14 s. A write across one is not:
+throughput falls ~6x same-continent, ~94x cross-continent. Blocking saves push
+duty cycle under the 0.20 floor and the WIM pruner deletes the job, with no
+preemption notice and no crash. Copy the checkpoint to the compute cell's CNS
+prefix first (swap the prefix, keep the tail verbatim) and point `LOAD_FROM`
+there.
 
-**Read remote if you must; write local always.** A cross-metro restore read is survivable
-(6.0 GiB across the Atlantic measured at ~14 s). A training loop *writing* checkpoints across
-a metro is not: throughput falls ~6x same-continent and ~94x cross-continent, blocking saves
-push duty cycle under the 0.20 floor, and the WIM pruner deletes the job — no preemption
-notice, no crash. Prefer copying the checkpoint to the compute cell's own CNS prefix before
-launch (swap the prefix, keep the tail verbatim) and point `LOAD_FROM` at the local copy.
-
-**A job that cannot find its `LOAD_FROM` must fail closed.** Cold-starting instead is the
-expensive silent failure: it looks like a successful launch, burns the full run, and only the
-loss curve shows it began from scratch.
+A job that cannot find its `LOAD_FROM` must fail closed: cold-starting looks
+like a successful launch, burns the run, and shows only in the loss curve.
 
 ## Preemption, Restart, And Resume
 
 - **A restart restores nothing.** The binary re-executes from the top on a fresh
-  machine with the same arguments: no process state, memory image, accelerator
-  snapshot, or execution position. Continuity is the application's job, via
-  checkpoints.
-- **A job with no restart budget dies on its first preemption.** The preemption
-  is a free failure, but the non-zero task exit when the gang is torn apart is
-  counted and the job declared dead. Always pass an explicit scheduling policy —
-  ours allows unlimited task failures but at most one per task per credit window,
-  so a long run survives unrelated preemptions while a task that keeps dying is
-  declared dead rather than retried forever.
-- **⚠️ In a preemption STORM (thin/borrowed capacity, no floor), the default
-  `borg_max_per_task_failures=1` will kill a job that is merely trying to hold
-  its ground — this is NOT the same as "never restart".** The `xm_launcher.py`
-  defaults are actually `borg_max_task_failures=-1` (unlimited),
-  `borg_max_task_evictions=-1` (unlimited), but `borg_max_per_task_failures=1`
-  with a 7200s credit window. A *clean* preemption counts as an eviction (budget
-  unlimited, fine), BUT when the gang is torn apart the surviving tasks often
-  exit non-zero — counted as a per-task *failure*, not an eviction. On a cell
-  where you have no floor and get ABORTed repeatedly, each task burns its single
-  failure credit within one 7200s window and the whole job flips to FAILED
-  (signature: `task_states=[ABORT×N, FAILURE×k]`, WU=FAILED). Observed 2026-08-21:
-  four PaliGemma v4-256 arms on `oe` (no v4 floor) all died this way, repeatedly,
-  even though a pure-PENDING job would have waited harmlessly for hours.
-  **To "queue and ride out the storm" — i.e. keep re-attempting until a window
-  holds, instead of dying — you MUST raise the per-task budget explicitly:**
-  `tpu queue ... --borg_max_per_task_failures=100` (with the default unlimited
-  eviction budget). Then repeated ABORTs re-queue instead of failing the job.
-  A job that stays PENDING and never schedules is NEVER failed for waiting
-  (board routinely shows others pending 2d+); only a schedule-then-abort with an
-  exhausted per-task budget dies. **If you have a real floor elsewhere (see the
-  survival test above), prefer that — the budget knob is for riding out a storm
-  on borrowed capacity, not a substitute for a floor.**
-- **Checkpoints must not live in the working directory.** It is task-local and
-  wiped by the very event the restart budget exists to survive; a budget without
-  durable checkpoints only buys the right to redo the run from step zero.
-- **A preempted job can stay `running` and never progress again.** Where each
-  task walks a fixed list of work items, an index already passed is never
-  revisited, so once the tail is preempted the job holds its slot, reports
-  healthy, and produces nothing forever. **Gate completion on progress, not
-  liveness** — poll finished units and act when the count *stalls*, not when the
-  job disappears. Two corpora each stopped a handful of units short this way, so
-  budget for finishing a tail by other means.
-- **Size a work unit against the preemption window, not against convenience.** A
-  unit longer than the mean uninterrupted window can never complete, and the
-  failure is silent: every task busy, nothing emitted, no error. A ~6-minute
-  window against a 195-minute shard is permanent zero progress that looks
-  exactly like a healthy job; re-slicing to minutes costs nothing when the work
+  machine, same arguments. No process state, memory image, accelerator snapshot
+  or execution position survives, only application checkpoints.
+- Without a restart budget the first preemption is fatal. Set an explicit
+  scheduling policy: unlimited task failures, one per task per credit window.
+  Long runs then survive unrelated preemptions, and a repeat offender is declared
+  dead, not retried forever.
+- In a preemption STORM (thin/borrowed capacity, no floor) the default
+  `borg_max_per_task_failures=1` kills a job merely holding ground. It is not a
+  never-restart setting. `xm_launcher.py` defaults: `borg_max_task_failures=-1`
+  and `borg_max_task_evictions=-1`, both unlimited, plus
+  `borg_max_per_task_failures=1` on a 7200s credit window. A clean preemption is
+  an eviction, harmless against an unlimited budget. A torn-apart gang leaves
+  survivors exiting non-zero, a per-task failure. With no floor, repeated ABORTs
+  burn each task's one credit inside one 7200s window and the job flips to FAILED
+  (`task_states=[ABORT×N, FAILURE×k]`, WU=FAILED). On 2026-08-21 four PaliGemma
+  v4-256 arms on `oe` (no v4 floor) died this way repeatedly. Ride out a storm on
+  `tpu queue ... --borg_max_per_task_failures=100`, evictions unlimited: ABORTs
+  re-queue instead of failing the job. Waiting is never fatal: a never-scheduled
+  job is NEVER failed for it, and the board routinely shows others pending 2d+.
+  Only schedule-then-abort on an exhausted budget dies. A real floor beats this
+  knob, a borrowed-capacity stopgap (see the survival test above).
+- Keep checkpoints out of the working directory: task-local, wiped by the event
+  the budget exists to survive. Without them the budget buys only a step-zero
+  rerun.
+- A task walking a fixed list never revisits a passed index. Preempt the tail and
+  the job stays `running`: slot held, healthy, nothing emitted. Gate on finished
+  units, not liveness. Act on a stalled count. Two corpora each stopped a handful
+  of units short, so finish tails by other means.
+- Size a work unit against the preemption window, not convenience. A unit longer
+  than the mean uninterrupted window never completes and fails silently: every
+  task busy, nothing emitted, no error. A ~6-minute window against a 195-minute
+  shard never finishes and looks healthy. Re-slicing to minutes is free when work
   is a pure function of its index.
-- Two settings worth copying into any launcher: **open log-read access**, so
-  anyone including future-you reads logs without an ACL dance; and **no
-  interconnect-resilient slice** for accelerator jobs, since resilience costs
-  roughly a third of throughput and rescheduling onto a healthy slice beats
-  finishing much slower.
-- **A restart loop is not evidence of a crash, or of slowness.** A training loop
-  producing zero steps returns normally, exits 0, and the scheduler starts it
-  again — forever, with nothing in the logs but successful runs. Use the
-  kill-versus-exit tests in `engineering.md` before blaming infrastructure, and
-  verify a resume by **step progress**, never by exit status.
+- Two launcher settings. Open log-read access, sparing an ACL dance. No
+  interconnect-resilient slice for accelerator jobs: resilience costs roughly a
+  third of throughput, and rescheduling onto a healthy slice beats finishing much
+  slower.
+- A restart loop proves neither a crash nor slowness. A training loop producing
+  zero steps exits 0 and restarts forever, logging only successes. Use the
+  kill-versus-exit tests in `engineering.md` before blaming infrastructure.
+  Verify a resume by step progress, never exit status.
 
-**Resuming an experiment is not pointing at a checkpoint.** The resume flag
-appends a work unit to an existing experiment, and since the checkpoint prefix
-derives from the experiment id, the new attempt lands on the same prefix where
-auto-resume finds the newest complete checkpoint. The launcher must **not** also
-pass an explicit load path: only the job knows which step finished writing, and
-auto-resume yields to an explicit request, so a guess both supplies an unusable
-path and disables the mechanism that would have found the right one. Reserve one
-for a genuinely external checkpoint, at a concrete step directory.
+Resuming is not pointing at a checkpoint. The resume flag appends a work unit to
+an existing experiment. The prefix comes from the experiment id, so the attempt
+lands there and auto-resume picks the newest complete checkpoint. The launcher
+must not also pass an explicit load path. Auto-resume yields to explicit
+requests, and only the job knows which step finished writing. A guess disables it
+with an unusable path. Reserve explicit paths for external checkpoints, at a
+concrete step directory.
 
-**A resume re-runs the ORIGINAL snapshot, never the current checkout.** That
-snapshot is immutable and already built; packaging the working tree instead
-resumes a checkpoint into code it has never seen, and an active checkout drifts
-away within days — retired config keys are *refused* by the newer validator, so
-a run's own config dies at flag-parse time after a full packaging round, and a
-new default that adds or renames a module makes the checkpoint unrestorable,
-surfacing minutes in as a model mismatch. So resolve the stagedir from the job
-registry and re-run that, treating a missing or unknown stagedir as an error:
-falling back to "package whatever is here now" is the bug, not the recovery.
-**A deliberate code change belongs in a new experiment**, where the comparison
-is honest, not in a resume where nothing records that the code changed.
+A resume re-runs the ORIGINAL snapshot, immutable and prebuilt, never the current
+checkout, which drifts within days. Package the working tree and the checkpoint
+resumes into code it never saw. The newer validator refuses retired config keys,
+killing the run's own config at flag-parse time, a packaging round wasted. A new
+default adding or renaming a module leaves the checkpoint unrestorable, surfacing
+minutes in as a model mismatch. Re-run the stagedir from the job registry.
+Missing or unknown is an error, never a cue to package what is here now.
+Deliberate changes belong in a new experiment: a resume records nothing about
+code changing.
 
-**Auto-resume must live in the application**, in-process at startup: read the
-checkpoint prefix, skip if an explicit load was requested or the run is
-eval-only, enumerate the step directories, **ignore any directory missing the
-marker file written last** (its absence means the write was interrupted), and
-resume from the highest surviving step. Enumerating the prefix beats parsing
-logs, which a rotation would restart from zero.
+Auto-resume belongs in the application, in-process at startup. Read the
+checkpoint prefix, skip an explicit load or an eval-only run, and enumerate step
+directories. Ignore any without the last-written marker file, whose absence means
+an interrupted write. Resume from the highest surviving step. Enumerating the
+prefix beats parsing logs, which a rotation restarts from zero.
 
 ## Where The Storage CLI Exists, And Where It Does Not
 
@@ -685,315 +652,285 @@ logs, which a rotation would restart from zero.
 container**, which decides where a data-movement job should run.
 
 A container ships the path-library client and nothing else, so shelling out to
-the CLI there does not fail loudly — it **hangs until the timeout with no
-output**, in state `RUN`, with nothing in the termination records because
-nothing terminated. Two assembly jobs burned half an hour each that way.
+the CLI there does not fail loudly. It hangs until the timeout with no output,
+in state `RUN`, with nothing in the termination records because nothing
+terminated. Two assembly jobs burned half an hour each that way.
 
-The consequence is not merely "handle both backends". Server-side concatenation
-and cross-cell copy exist only on the workstation path; in a container the same
-operation degrades to carrying every byte through the task — slow enough that a
-tens-of-GB copy cannot finish inside a preemption window on the cluster but
-finishes comfortably from a workstation (not preemptible, acting only as a
-controller). Probe which backend is live at runtime and branch; keep a local
-branch too, or the code is untestable off distributed storage — where the last
-several bugs in ours survived.
+This is more than "handle both backends". Server-side concatenation and
+cross-cell copy exist only on the workstation path; in a container the same
+operation carries every byte through the task. A tens-of-GB copy therefore
+cannot finish inside a preemption window on the cluster, but finishes
+comfortably from a workstation (not preemptible, acting only as a controller).
+Probe which backend is live at runtime and branch. Keep a local branch too, or
+the code is untestable off distributed storage, where the last several bugs in
+ours survived.
 
 ## `state: RUN` Is Not Evidence That Anything Runs
 
-**Check the VM-group states, not the job state.** A job reports `state: "RUN"`
-while every one of its groups sits in `ASSIGN`/`PENDING`, and it will sit there
-for hours:
+**Check the VM-group states, not the job state.** A job reads `state: "RUN"`
+for hours, all groups in `ASSIGN`/`PENDING`:
 
 ```
 borg --borg=<cell> findjobs --name_re="<user>_group_<XID>\..*" \
   | grep -oE "VMGROUP_STATE_[A-Z]+"
 ```
 
-**No `VMGROUP_STATE_RUN` means nothing is running**, whatever the job says.
+No `VMGROUP_STATE_RUN` means nothing runs, whatever the job says.
 
-**And a job that DID reach the machines can stop advancing while every status
-source still says it is fine — judge liveness by the artefacts the job writes,
-never by a query that describes it.** A training run hung mid-epoch with no
-crash, no NCCL error, no rank exit and no new attempt; XM `cancel --dry-run`
-reported `RUNNING` and `tpu queue-status` reported `SUBMITTED` for the entire
-17 minutes it was frozen. **Two independent status sources agreed, and both were
-wrong** (`borg findjobs` returned empty, but that tool is separately unreliable
-and its silence proves nothing either way — do not count it as a third).
+Judge liveness by artifacts, not status queries. One run hung mid-epoch: no
+crash, NCCL error, rank exit or new attempt. For 17 frozen minutes XM
+`cancel --dry-run` said `RUNNING`, `tpu queue-status` `SUBMITTED`, both wrong.
+(`borg findjobs` was empty, but separately unreliable, not a third source.)
+Frozen: log mirror, newest checkpoint `mtime`, step counter. Hangs are
+invisible to grep; watchers need a stall probe on step numbers minutes apart.
 
-What did tell the truth was the run's own output: the `mtime` of its log mirror
-and of its newest checkpoint, both frozen, and a step counter that had not
-moved. A stall probe belongs in every long-run watcher — compare the last step
-number across a few minutes and escalate on no change, because the failure mode
-is silence, not an error string. Grep-for-keywords cannot see a hang.
-
-**Read the mtime of EVERY rank's newest attempt, not "the log" — all three
-qualifiers are load-bearing, and each one is a separate way to read a corpse as
-healthy.** A watcher pinned to `rank_0_attempt1.log` reported "step 8097, no
-change" three samples running while training had moved on to `attempt3` and was
-advancing normally; the file existed, parsed, and its number was real. Then the
-same watcher, fixed to follow the newest attempt, was pointed at a *dead* XID
-after a requeue and froze again. So:
+Read every rank's newest attempt, not one log file; each qualifier fails alone.
+A watcher pinned to `rank_0_attempt1.log` read "step 8097, no change" three
+times while training ran on `attempt3`. Refitted to the newest, it froze on a
+post-requeue dead XID.
 
 | qualifier | what it defends against |
 |---|---|
-| **every rank**, not rank 0 | rank 0 exiting while peers still write, or the reverse |
-| **newest attempt**, resolved each poll | a preemption starting `attempt<N+1>` while the old file stays perfectly readable |
-| **the artefact**, never a status query | XM and the local queue both reporting a job that has been dead for an hour |
+| every rank, not rank 0 | rank 0 exits while peers write, or the reverse |
+| newest attempt each poll | preemption starts `attempt<N+1>`; old files read |
+| artifact, not status query | XM and the queue report a dead job an hour |
 
-**The checkpoint directory is the strongest single probe, because it is
-independent of the logging path entirely**: with a known checkpoint interval,
-"no new `step_<N>` in more than one interval's worth of wall-clock" is a
-verdict, not a hint (measured: 45 minutes with no `step_10240` at a 1024-step
-cadence — conclusive, while XM still said `RUNNING`).
+The checkpoint directory is the strongest probe, independent of the log path.
+No new `step_<N>` past one known wall-clock interval is a verdict, not a hint:
+45 minutes without `step_10240` at a 1024-step cadence, XM still `RUNNING`.
 
-**Do not put a bound on how stale XM can be.** The 17-minute case above reads
-as a lag; a later one on this fleet had XM reporting `RUNNING` **63 minutes**
-after the job's last byte, with the local queue simultaneously stuck at
-`SUBMITTED`, and a *different* XID in the very same query batch correctly
-showing `NOT_RUNNING` — so the tool was fine and the record was simply wrong.
-**The pair that failed together was XM *and* the local queue**, and two
-separate lines hit that same pair independently on one night, so it is not a
-one-off. Treat XM state as unusable for liveness, not merely delayed.
+XM state is unusable for liveness, not merely delayed; never bound its
+staleness. The 17-minute case reads as lag. XM later said `RUNNING` 63 minutes
+past a job's last byte, queue stuck at `SUBMITTED`. Another XID in that batch
+showed `NOT_RUNNING`: tool fine, record wrong. Two lines hit that pair in one
+night.
 
-The scheduling ceiling this exposes is much lower than the advertised quota: on
-the shared CPU pool, large fan-outs (order several hundred GiB of total RAM) sat
-unscheduled for hours while a job a fraction that size reached RUN in seconds.
-Size a fan-out against what actually schedules, and confirm it with the command
-above before waiting on it.
+The scheduling ceiling sits far below the advertised quota. On the shared CPU
+pool, fan-outs totaling several hundred GiB of RAM sat unscheduled for hours;
+a fraction of that size reached RUN in seconds. Size fan-outs against what
+schedules, using the command above.
 
-Related launcher hygiene, each of which cost a real launch:
+Launcher hygiene, each having cost a launch:
 
-- **An XID is not a job.** Confirm at the cluster layer after launching; a
-  launcher can print a normal-looking XID for something that never scheduled.
-- **Truncate a launcher log before scraping it.** Scraping the last "Launched
-  experiment" line picks up a killed earlier attempt's id, so the confirmation
-  then checks a job that does not exist.
-- **Stop takes the experiment flag**, not a positional or an abbreviated one.
-- **A jobs-board entry outlives the experiment.** A queue entry can show
-  `PENDING` for 21 hours after the experiment itself reports "not found";
-  archive stale entries off the board rather than treating them as live work.
-- **A killed launcher tool-call does not stop the launch.** A detached/`setsid`
-  submit keeps running after the shell that started it is killed; relaunching
-  "because the first one died" then double-submits. Confirm what actually
-  launched (the launcher's results file + `tpu check`) before any relaunch.
-- **A worker can be alive-but-wedged: board `running`, logs frozen, no
-  restart.** Distinct from the unscheduled case above (there the groups never
-  reached RUN). Here the task *did* schedule and start, then hung mid-startup —
-  the classic form is frozen at `Downloading dataset ...` (staging the ~69G
-  Maze mirror to the worker's `/tmp`). The board keeps showing `running` with
-  `1 active` WU because the Borg task is alive; the training process inside is
-  stuck, so **no new log lines and no `attemptN+1`** (Borg only restarts a task
-  that *dies* — a hung-but-alive task never trips the watchdog, so it burns the
-  PROD slot indefinitely). Diagnosis: compare the newest log mtime to wall
-  clock — a download that normally finishes in ~5 min but shows **>30 min of
-  zero log growth across all ranks** is wedged, not slow. Rule out a data
-  problem before blaming the worker: if a *sibling* job downloaded the same
-  source path fine (check its `step_*` ckpts advancing), the source is good and
-  it's these specific workers. Fix: `tpu cancel <xid>` then relaunch the same
-  validated config — a fresh launch re-rolls worker placement and usually
-  clears it. Always re-verify a relaunched job actually passes download into
-  `step>0` — the same bug can re-roll onto another bad node.
+- An XID is not a job: launchers print normal-looking ones for jobs that never
+  scheduled. Confirm at the cluster layer.
+- Truncate a launcher log before scraping: its last "Launched experiment" line
+  may be a killed attempt's, naming a nonexistent job.
+- Stop takes the experiment flag, not a positional or an abbreviated one.
+- A jobs-board entry outlives the experiment: `PENDING` 21 hours after it
+  reports "not found". Archive them, they are not work.
+- A killed launcher tool-call does not stop the launch: a detached/`setsid`
+  submit outlives its shell, so relaunching double-submits. Check the results
+  file and `tpu check` first.
+- Alive-but-wedged: board `running`, logs frozen, no restart. It started,
+  unlike the unscheduled case, then hung mid-startup, classically at
+  `Downloading dataset ...` staging the ~69G Maze mirror into `/tmp`. The Borg
+  task lives, the process inside stuck: `running`, `1 active` WU, no new log
+  lines, no `attemptN+1`. Borg restarts only dead tasks, so nothing trips the
+  watchdog and the PROD slot burns indefinitely. Diagnose by newest log mtime
+  against wall clock: >30 min of zero growth on all ranks, against a normal
+  ~5 min download, is wedged, not slow. A sibling reading the same path fine,
+  `step_*` ckpts advancing, blames these workers, not the data. Fix:
+  `tpu cancel <xid>`, relaunch the validated config; fresh placement usually
+  clears it. Verify `step>0`: the bug can re-roll onto another bad node.
 
 ## Identity, Paths, And Local Disk On A Worker
 
 - **A cluster job is a different security principal from you.** Nothing you read
   interactively is automatically readable from a worker, and the same wall
-  blocks log mirroring to a personal bucket. Cheapest fix by far is the internal
-  distributed filesystem, which the job identity reads and writes natively —
+  blocks log mirroring to a personal bucket. The cheapest fix is the internal
+  distributed filesystem, which the job identity reads and writes natively,
   usually a one-line path change. Otherwise a bucket owner must grant the job's
   principal access; an org-level deny policy can block even owners, and
   service-account keys are not an option.
-- **The temporary directory is a RAM disk you must size yourself.** The default
-  is small and every task stages its own private copy of what it downloads, so
-  an undersized value surfaces mid-run as "no space left on device". A job
-  moving large files should stream through a bounded buffer instead.
-- **The RAM disk and the memory limit are two different knobs** the launcher
-  must pass explicitly; sizing `/tmp` does nothing for a process that allocates.
+- The temporary directory is a RAM disk you must size yourself. The default is
+  small and every task stages its own private copy of what it downloads, so an
+  undersized value surfaces mid-run as "no space left on device". A job moving
+  large files should stream through a bounded buffer instead.
+- The RAM disk and the memory limit are two different knobs the launcher must
+  pass explicitly; sizing `/tmp` does nothing for a process that allocates.
   Watch for a resource that must be named in its own field: appended to the
-  accelerator string it reads as a second *accelerator*, accepted and ignored.
-- **Shell file utilities do not exist inside the container**, and **the standard
-  library breaks on a distributed path or remote URI** — `os.path` raises a
+  accelerator string it reads as a second accelerator, accepted and ignored.
+- Shell file utilities do not exist inside the container, and the standard
+  library breaks on a distributed path or remote URI. `os.path` raises a
   permission error or silently answers False, a bucket URI fails a directory
-  check, and normalization mangles the URI, which is how a valid remote load
+  check, and normalization mangles the URI. That is how a valid remote load
   path becomes a bogus "does not exist". Route every existence check and remote
   read through the project's path helpers. This survives a green build and a
   local smoke test, because it only fires remotely.
-- **The launcher-to-application contract travels as environment variables**, not
+- The launcher-to-application contract travels as environment variables, not
   config flags: the external checkpoint to load, the tracking run to continue,
   and the durable checkpoint prefix. That prefix derives from the experiment id,
-  so every restart resolves to the same location — the stability that makes
-  in-process auto-resume well defined. Do not inject a checkpoint path as a
-  config flag if the config schema is locked; every job dies at startup.
+  so every restart resolves to the same location, which is what makes in-process
+  auto-resume well defined. Do not inject a checkpoint path as a config flag if
+  the config schema is locked; every job dies at startup.
 
 ## Status And Diagnosis
 
-1. Start from `tpu check` and resolve the exact experiment and work unit.
-   Experiment-level "running" does not prove hardware was allocated — use
-   work-unit state, allocation, logs, and activity to tell queued from
-   executing.
-2. **Read the failure classification before anything else.** A code-bug verdict
-   means the fix is in your source, so hunting preemption or quota is wasted
-   time. The column comes from a cache refreshed about once a minute, so run the
-   checker binary directly for an immediate answer; a blank verdict on a pending
-   job means "queued, nothing wrong".
-3. Read the complete relevant failure, not the final status string: an immediate
-   failure with no logs can be allocator, topology, packaging, or authorization.
+1. From `tpu check`, resolve the exact experiment and work unit:
+   experiment-level "running" is not allocated hardware. Work-unit state,
+   allocation, logs, and activity tell queued from executing.
+2. Read the failure classification first: a code-bug verdict puts the fix in
+   your source, so preemption/quota hunting wastes time. Its cache refreshes
+   about once a minute; run the checker binary directly. Blank on a pending job
+   means "queued, nothing wrong".
+3. Read the whole failure, not the final status string: immediate failure
+   without logs can be allocator, topology, packaging, or authorization.
 4. If the error explicitly names expired credentials, ask the user to
-   re-authenticate and retry — do not diagnose every access failure as a
-   credential problem.
-5. If log access still fails with a valid identity, use the supported API or the
-   checker tools to read the work-unit status message. Do not patch shared
-   scripts with hard-coded job ids, and do not assume an alternate API bypasses
-   authorization.
+   re-authenticate and retry. Not every access failure is credentials.
+5. If log access still fails with a valid identity, read the work-unit status
+   message via the supported API or checker tools. Never hard-code job ids in
+   shared scripts, nor assume another API skips authorization.
 
-The job registry, its archived predecessor, config recovery from a snapshot, and
-cancel-versus-clear semantics are in `infra/tpu_cli.md`.
+### Checking Whether One XID Is Still Alive
 
-**"Clean up the finished runs" means `tpu clear`, not deleting data.** The word
-is ambiguous and the two tools are unrelated: `tpu clear` tidies the BOARD,
-archiving finished and failed registry entries to `~/.tpu_jobs_legacy.json`
-(never deleting them, and config recovery still resolves archived ids), while
-`tpu gc` is the checkpoint sweeper on CNS. Reach for `clear` when `tpu check` is
-cluttered; reach for `gc` only when a cell is filling up. Allow one daemon cycle
-(~60s) for cleared entries to leave the board.
+**`xmanager` is a shell function and `xmanager.par` is NOT on `PATH`; a bare
+`xmanager.par ...` exits 127, which behind a `| grep` reads as "the job is
+gone".** One line took three blank greps as three vanished jobs, all fine:
+
+```bash
+# Preferred: self-documenting, prints Status, no side effect on a live job.
+source ~/work/tpu_cmd/tpu_wrapper.sh
+tpu cancel --dry-run <xid>
+
+# When sourcing the wrapper is inconvenient: ABSOLUTE path, capture rc.
+XM=/google/bin/releases/xmanager/cli/xmanager.par
+out=$("$XM" list --experiment_id=<xid> --archived=no \
+        --columns=ID,Name,Status,FailedWorkUnits 2>&1); rc=$?
+echo "rc=$rc"; echo "$out"
+```
+
+Note the `/cli/`: `/google/bin/releases/xmanager/xmanager.par` does not exist.
+Never pipe it (`| grep`, `| head`): a pipeline reports its LAST stage's exit
+status, hiding a missing binary as success-with-no-output.
+
+Both exit 0 for a nonexistent XID: `rc=0` only means the query ran. Read the
+`Status` line; silence answers only if it ran. `NOT_RUNNING` covers success and
+failure: `FailedWorkUnits 0/1` is a clean finish, `1/1` a failed one.
+
+Job registry, archived predecessor, snapshot config recovery,
+cancel-versus-clear: `infra/tpu_cli.md`.
+
+"Clean up the finished runs" means `tpu clear`, not deleting data: ambiguous
+word, unrelated tools. `tpu clear` tidies the BOARD, archiving (never deleting)
+finished and failed entries to `~/.tpu_jobs_legacy.json`, which config recovery
+still resolves. `tpu gc` sweeps CNS checkpoints. Use `clear` for a cluttered
+`tpu check`, `gc` only for a filling cell; cleared entries leave the board one
+daemon cycle (~60s) later.
 
 ## Debugging A Job That Dies With No Log
 
-**Reproduce locally first.** The staged package is an ordinary build target, so
-the exact artifact the cluster will run builds and runs on the workstation, and
-`--help` is enough: flags parse only after every module-level import, so
-import-time failures surface in seconds. Do this before any launch that changes
-imports or dependencies.
+**Reproduce locally first**, before any launch that changes imports or
+dependencies. The staged package is an ordinary build target: the cluster's
+exact artifact runs locally. `--help` suffices: flags parse only after every
+module-level import, so import failures surface in seconds.
 
-**Reproduce in the RENAMED stagedir, not in place — the launcher rsyncs only the
-CWD into `.../eqr_run_<ts>/` and builds `//<stagedir>:main`, which destroys the
-google3 module path the code had at authoring time.** So a hardcoded absolute
-import (`from google3.<original.pkg.path> import sibling`) or a cross-package
-BUILD `dep`/`data` label points at something ABSENT from the staged binary, and
-the worker dies at import time before `main()` — no marker, behind the log wall.
-It builds and runs in your workspace only because the original package still
-physically exists there, which is exactly what MASKS the bug. The fix is the
-EqR-jax `eqr_run_*` idiom: the entry point does
-`sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))` and imports
-siblings by BARE name; the sibling `.py` ride along as a BUILD `data` glob
-(`strict_deps = False`), carried as relative SYMLINKS to the one source of truth
-so two copies cannot drift (`rsync -aL` materializes them as real files). A
-package-relative import (`from . import x`) does NOT work — a `py_binary` main
-runs as `__main__` with no parent package. **Verify by building
-`//<a-renamed-throwaway-dir>:main` with the sibling package ABSENT and running
-`--help`**; testing in place proves nothing.
+Reproduce in the RENAMED stagedir. The launcher rsyncs only the CWD into
+`.../eqr_run_<ts>/` and builds `//<stagedir>:main`, destroying the
+authoring-time google3 module path. A hardcoded absolute import
+(`from google3.<original.pkg.path> import sibling`) or cross-package BUILD
+`dep`/`data` label names something ABSENT from the staged binary: the worker
+dies at import, before `main()`, no marker, behind the log wall. It builds
+locally: that package is present.
 
-**Recognize a pre-`main()` death by its shape**: an empty status message, no
-application log anywhere including any the app mirrors, and no surviving job
-handle. Seeing all three at once *is* the diagnosis — do not re-launch to
-collect logs that cannot exist. **But check the storage quota before trusting
-that shape**: an over-quota cell yields the same evidence from a job that ran
-for hours, because the log file is *created* and its first write refused, so a
-0-byte log means either "never started" or "could not write". Artefacts
-timestamped long after launch settle it instantly (`storage.md` §An Over-Quota
-Cell Looks Like A Broken Program).
+Use the EqR-jax `eqr_run_*` idiom:
+`sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))` in the entry
+point, siblings imported by BARE name. Sibling `.py` ride along in a BUILD
+`data` glob (`strict_deps = False`), relative SYMLINKS to one source of truth,
+no drift; `rsync -aL` gives real files. `from . import x` fails: a
+`py_binary` main runs as `__main__`, no parent package. Verify: build
+`//<a-renamed-throwaway-dir>:main` without the sibling package, then `--help`.
+In-place testing proves nothing.
+
+Three signs diagnose a pre-`main()` death: empty status message, no application
+log anywhere including mirrors, no surviving job handle. Do not re-launch for
+impossible logs. Check quota first: an over-quota cell looks identical after
+hours, log created, first write refused. A 0-byte log means never started or
+unable to write; artifacts timestamped long after launch settle which
+(`storage.md` §An Over-Quota Cell Looks Like A Broken Program).
 
 Getting logs, most reliable first:
 
 | Source | Caveat |
 |---|---|
-| **The staged binary run locally** — ★try this FIRST, it is not a "log source", it is the whole answer | Only reproduces import- and startup-time failures — but that is most of them. **The launcher stages a per-run SNAPSHOT (`.../eqr_run_<ts>_<hash>/`) and THAT is what executed, not your workspace**, which keeps being edited: measured 2026-08-29, the two `main.py` differed by 45 lines and a md5, so every line number read from the workspace described a file the job never ran. The snapshot carries its own `BUILD`, so `blaze build <snapshot_path>:main` and run it with the job's own argv — ~40 s, zero credits. This answered in one shot what 47 credits of probe launches and four log instruments could not: did the flag arrive, did torch load, does the beacon fire, what is the normal startup latency. ★When a wall blocks observation, first ask whether the thing can be REPRODUCED on your side of it. |
-| The work unit's job state — cell, user, job name, task counts, status message | Ask the API for *detailed* status explicitly or the field is silently empty, reading exactly like "the job is gone". The job is garbage-collected within minutes; the status message survives much longer and usually carries the actual exception. |
-| **Application-level log mirroring to durable storage**, teed from program start and flushed on error lines | Outlives task, work unit, and experiment, but only covers failures after the program starts. Under Borg it is often the *only* log, so protect it (`engineering.md`: handlers steal streams). |
-| The log-tailing CLI | Works sometimes. |
-| The log-search CLI | May be blocked by workstation permissions. |
+| Staged binary run locally: try FIRST | Covers most import and startup failures. The staged per-run SNAPSHOT (`.../eqr_run_<ts>_<hash>/`) ran, not your edited workspace: the two `main.py` differed by 45 lines and a md5 on 2026-08-29, so workspace line numbers describe a file never run. It carries a `BUILD`: `blaze build <snapshot_path>:main`, job's argv, ~40 s, zero credits. Answered what 47 credits of probe launches and four log instruments could not: flag arrival, torch load, beacon fire, startup latency. |
+| Work unit job state: cell, user, job name, task counts, status message | Request detailed status explicitly, or it returns silently empty, like a gone job. Garbage-collected in minutes; the status message lasts far longer, usually with the exception. |
+| App log mirrored to durable storage, teed from program start, flushed on error lines | Outlives task, work unit, and experiment; covers only post-start failures. Often Borg's only log, so protect it (`engineering.md`: handlers steal streams). |
+| Log-tailing CLI | Works sometimes. |
+| Log-search CLI | May be blocked by workstation permissions. |
 
-**When restricted-LOAS walls off EVERY worker-log service, make the application
-write its own diagnostics to CNS.** From a workstation credential, `borg
-tasklog`, `analog --remote`, and the F1/`get_job` path can all return
-`PERMISSION_DENIED` (and `borg tasklog` itself SIGABRTs on it) — do not keep
-retrying them once one fails that way. The reliable substitute is application
-diagnostics on the destination filesystem, readable with `fileutil`: a numbered
-startup marker written as the FIRST action in `main()`, one marker per stage,
-and a `try/except` that dumps the traceback to CNS. This is the concrete form of
-`storage.md` §"write a copy's evidence to the destination, not to a log". A
-marker written before the first guard also splits the two look-alike deaths
-apart: **`VMGROUP_STATE_RUN` then an empty status, zero output, no readable log
-is NOT necessarily a pre-`main()` death** — it may be an ordinary failure you
-simply cannot see. If the startup marker landed, the process reached `main()`
-and the cause is downstream; if no marker exists anywhere, the death is before
-logging existed (or an over-quota cell refused the first write — rule that out
-per `storage.md`).
+Restricted-LOAS walls off EVERY worker-log service: from a workstation
+credential, `borg tasklog`, `analog --remote`, and the F1/`get_job` path can
+all return `PERMISSION_DENIED` (`borg tasklog` SIGABRTs on it), so stop after
+the first. Write diagnostics to the destination, read with `fileutil`: a
+numbered startup marker as the FIRST action in `main()`, one per stage, plus a
+`try/except` dumping the traceback to CNS. Per `storage.md` §"write a copy's
+evidence to the destination, not to a log".
 
-**Two failure modes survive a green build and a local smoke test** because both
-only fire remotely: **standard-library file APIs against a distributed path**
-(§Identity, Paths, And Local Disk On A Worker), and **mocked third-party
-libraries**, where the build substitutes stubs for some external packages
-(`engineering.md` §Failure Modes That Only Appear On The Long Path).
+That marker splits two look-alike deaths. `VMGROUP_STATE_RUN`, empty status,
+zero output, no readable log is NOT necessarily a pre-`main()` death, only one
+you cannot see. Present: reached `main()`, cause downstream. Absent: death
+before logging, or an over-quota cell refused the first write (`storage.md`).
+
+Two failure modes fire only remotely, past a green build and smoke test. First,
+standard-library file APIs on a distributed path (§Identity, Paths, And Local
+Disk On A Worker). Second, mocked third-party libraries, the build stubbing some
+externals (`engineering.md` §Failure Modes That Only Appear On The Long Path).
 
 ## Launcher-Side Failures That Look Like Scheduler Failures
 
-The submit path runs on the workstation and several of its failure modes produce
-an XID with no work unit, or no XID at all. **A job that never created a work
-unit, or a launch that produced no XID, never reached the scheduler** — read
-those as local problems, not allocator or quota rejections.
+**A job that never created a work unit, or a launch that produced no XID, never
+reached the scheduler.** Such submit-path failures are workstation-local, not
+allocator or quota rejections.
 
-- **Never pipe content into the submit command, and always redirect stdin from
-  `/dev/null` for a backgrounded launch.** Each attribution question is
-  satisfied by an EOF, so `< /dev/null` answers all of them, and piping
-  something like `yes` segfaults the underlying CLI outright — no XID, no
-  diagnostic. **A `nohup`/`setsid` launch WITHOUT `< /dev/null` is the
-  dangerous case**: the attribution prompt reads EOF, but instead of exiting the
-  CLI can re-loop and SUBMIT AGAIN — one `tpu queue` then yields TWO experiments
-  on the same out_dir (two writers = corruption), and the shared `~/.tpu_jobs.json`
-  records only one, so the survivor has no registry entry. Always background as
-  `tpu queue ... < /dev/null`, and after launch confirm EXACTLY ONE experiment
-  with `xmanager.par list | grep <name>` before walking away.
-- **Do NOT build a home-grown "anti-dup" wrapper that kills the launcher on the
-  `Experiment id: N` line.** That line prints at experiment *creation* — BEFORE
-  the blaze build (minutes) and BEFORE any work unit is added. Killing the
-  launcher there leaves a RUNNING-forever **zombie**: an experiment shell with
-  "No work units found", no log dir, and an out_dir that is never created. The
-  ONLY line that means "launch truly finished" is `Launched experiment N` (or,
-  for a resume, `Added N work unit(s) to experiment`), printed AFTER the build +
-  work-unit add. The wrapper already self-guards against dup retries (it retries
-  only when that line is ABSENT), so with `< /dev/null` you do not need any
-  kill logic — just let the launcher exit on its own and then confirm exactly
-  one experiment. If you must detect completion programmatically, grep for
-  `Launched experiment|work unit\(s\) to experiment`, never for `Experiment id:`.
-- **ANSI-strip wrapper output before grepping for the XID.** XManager prints the
-  XID wrapped in color codes: `Launched experiment \e[1m\e[34m281839914\e[0m
-  "name"`. A pattern like `Launched experiment \K\d+` then matches nothing
-  (the char after the space is ESC, not a digit) and you get a false "launch
-  failed" verdict on a perfectly healthy job. Always pipe through
-  `sed 's/\x1b\[[0-9;]*m//g'` first. (Same rule applies to parsing step numbers
-  / status out of the log mirror — colored `SUBMITTED`/`Preempted.` have bitten
-  watchers before.)
-- **A full `/tmp` breaks the submit with `SIGBUS`.** `/tmp` is RAM-backed tmpfs,
-  so a core dump from a local repro fills it and the next writer dies on a page
-  it cannot get. Disable cores for local repro runs and check free space before
-  submitting; every byte in `/tmp` is RAM taken from the machine doing the cold
-  imports.
-- **Bazel refuses to glob a package containing an absolute symlink**
-  ("Absolute symlinks are forbidden"), so a checkout that symlinks the shared
-  launcher must be copied in with symlinks dereferenced. The rejection is cached
-  in the package glob cache, so fixing the tree is not enough — restart the
-  build server.
-- **The launcher forwards flags as a `key=value` dict, so the binary must
-  survive that shape.** `--app.<flag>=<v>` passes one flag verbatim, but a
-  *positional* argument is inexpressible and a `store_true` flag arrives as
-  `--flag=` and is rejected by argparse. Both kill every task inside argument
-  parsing, before any logging, and with an unlimited restart budget the job
-  churns forever writing nothing — exactly like a scheduler problem. Select
-  subcommands with a valued flag; give every boolean an explicit value.
-- **A flag must behave correctly for BOTH "absent" and "present but empty".**
-  A default of `""` collapses two different inputs: the flag was passed, parsed
-  as empty, took the default branch, and the fleet silently ran the wrong mode.
-  Default to `None` and test all spellings.
-- **Have each task record its own identity and mode where you can read it
-  later.** On a job whose tasks never log, a startup marker written to
-  distributed storage may be the only diagnostic that exists — and it is how the
-  next trap gets caught: **`$BORG_TASK_INDEX` is never set by XManager**; use
-  the BCL `%task%` macro.
+- Never pipe into the submit command; background launches take stdin from
+  `/dev/null`. Attribution prompts need only EOF, supplied by `< /dev/null`;
+  piping `yes` segfaults the CLI, no XID, no diagnostic. WITHOUT `< /dev/null`,
+  `nohup`/`setsid` reads EOF, re-loops, SUBMITS AGAIN: one `tpu queue` gives
+  TWO experiments on one out_dir (two writers = corruption), while
+  `~/.tpu_jobs.json` records one, leaving the survivor unregistered. Launch
+  `tpu queue ... < /dev/null`; confirm EXACTLY ONE experiment with
+  `"$XM" list --experiment_name=<name>`, rc captured. Never bare
+  `xmanager.par ... | grep` (§Checking Whether One XID Is Still Alive:
+  unresolved binary + pipeline reads like "no such job").
+- No anti-dup wrapper killing the launcher on `Experiment id: N`. It prints at
+  creation, BEFORE the blaze build (minutes) and any work unit; killing there
+  leaves a RUNNING-forever zombie: experiment shell, "No work units found", no
+  log dir, no out_dir. Only `Launched experiment N`, or on resume
+  `Added N work unit(s) to experiment`, means finished; both print after the
+  build and work-unit add. Retry on that line's ABSENCE, needing no kill logic
+  under `< /dev/null`. Grep
+  `Launched experiment|work unit\(s\) to experiment`, never `Experiment id:`.
+- ANSI-strip output before grepping the XID. XManager colors it:
+  `Launched experiment \e[1m\e[34m281839914\e[0m "name"`, so
+  `Launched experiment \K\d+` matches nothing (ESC follows the space, not a
+  digit) and a healthy job reads as "launch failed". Pipe through
+  `sed 's/\x1b\[[0-9;]*m//g'` first. Likewise log-mirror step numbers and
+  status: colored `SUBMITTED`/`Preempted.` have bitten watchers.
+- A full `/tmp` breaks the submit with `SIGBUS`. `/tmp` is RAM-backed tmpfs, a
+  repro's core dump fills it, the next writer dies on an unobtainable page.
+  Disable repro cores, check free space first: every `/tmp` byte is RAM stolen
+  from the machine doing cold imports.
+- Bazel will not glob a package holding an absolute symlink ("Absolute symlinks
+  are forbidden"). Dereference when copying a checkout that symlinks the shared
+  launcher in. The package glob cache keeps that rejection: fixing the tree is
+  not enough, restart the build server.
+- The launcher forwards flags as a `key=value` dict the binary must accept.
+  `--app.<flag>=<v>` passes one flag verbatim, but positionals are
+  inexpressible and `store_true` arrives as `--flag=`, rejected by argparse.
+  Both kill every task in parsing, before logging, and an unlimited restart
+  budget churns forever writing nothing, like a scheduler problem. Select
+  subcommands with a valued flag, booleans with explicit values.
+- A flag must handle BOTH "absent" and "present but empty". A default of `""`
+  collapses them: passed, parsed empty, default branch taken, fleet silently in
+  the wrong mode. Default to `None`; test all spellings.
+- Record each task's identity and mode somewhere readable: when tasks never log,
+  a startup marker on distributed storage may be the only diagnostic.
+  `$BORG_TASK_INDEX` is never set by XManager, so use the BCL `%task%` macro.
 
 ## Metrics And Curves
 
-There is no external experiment tracker here; the internal equivalent stores
+There is no external experiment tracker here. The internal equivalent stores
 scalars in a table service and plots them in a dashboard service, both keyed by
 experiment id. `research/result_logging.md` owns the URL forms, how to verify a
 run actually wrote metrics, and the settings that are easy to get wrong
@@ -1004,10 +941,25 @@ this guide whenever implementation details change.
 
 ## Budget Checking
 
-Before launching a job, the launcher automatically invokes `tools/budget_check.py`: the projected GQM credits/hr of this job **plus all active jobs** must not exceed **1/10 of G9 income** (boss directive, tightened from 1/3). Over the bar, the launch is halted. The `npu` aliases run their own separate identical check.
+**Before launching a job, the launcher automatically invokes
+`tools/budget_check.py`: the projected GQM credits/hr of this job plus all
+active jobs must not exceed 1/10 of G9 income** (boss directive, tightened from
+1/3). Over the bar, the launch is halted. The `npu` aliases run their own
+separate identical check.
 
 What counts toward the bar, and what is exempt:
-- **Active = running, pending, or queued** (option B): a job the scheduler has committed to the XM queue reserves budget even before its Borg gang is RUNNING, so a backlog of pending jobs cannot each look free. The reroute lane (pending >10 min → auto-cancel) bounds how long a pending job holds that reservation. Only terminal zombies are dropped.
-- **g3/g5 are exempt**: they draw on their own credit balance, not G9's income, so a g3/g5 job neither counts toward the aggregate nor is refused by it. The router (`tpu route`/`--power`) also *prefers* g3/g5 over g9 for the same reason (`infra/tpu_cli.md`).
-- **BATCH and CPU-only are exempt** (free pool / no chips).
-- On over-bar the gate prints `[[BUDGET_DEFERRED]]` and exits 3; the local-queue worker reads that marker and parks the job **BUDGET_DEFERRED** (auto-retried when headroom opens), never as a build failure. A running-job enforcer (`tools/budget_enforcer.py`) separately cancels over-cap RUNNING jobs.
+- Active = running, pending, or queued (option B). A job committed to the XM
+  queue reserves budget before its Borg gang is RUNNING, so a backlog of pending
+  jobs cannot each look free. The reroute lane (pending >10 min → auto-cancel)
+  bounds how long a pending job holds that reservation. Only terminal zombies
+  are dropped.
+- g3/g5 are exempt: they draw on their own credit balance, not G9's income, so
+  they neither count toward the aggregate nor are refused by it. The router
+  (`tpu route`/`--power`) also prefers g3/g5 over g9 for the same reason
+  (`infra/tpu_cli.md`).
+- BATCH and CPU-only are exempt (free pool / no chips).
+- Over the bar, the gate prints `[[BUDGET_DEFERRED]]` and exits 3. The
+  local-queue worker reads that marker and parks the job BUDGET_DEFERRED,
+  auto-retried when headroom opens, never as a build failure. A running-job
+  enforcer (`tools/budget_enforcer.py`) separately cancels over-cap RUNNING
+  jobs.
