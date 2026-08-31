@@ -59,7 +59,18 @@ three walls, each an operator-level grant or a wait:
 ### 2b. B200 = the IMEX-free NVLink path  [HYPOTHESIS, v3 verifying]
 - `b200` (card 87) is a DISTINCT card from `gb200` (card 89), single-node NVLink,
   so `IsGpuWithNvlinkDomain()` is false → no IMEX sidecar → no CA-pool grant
-  needed. Source-confirmed. B200 PROD is free-pool (0.0 cr/chip-hr).
+  needed. Source-confirmed.
+- 🔴 **PRICE CORRECTION 2026-08-31 by monitor-v58 (this line's "B200 PROD is
+  free-pool (0.0 cr/chip-hr)" was WRONG and is struck).** Measured: **B200 PROD
+  ~100–120 cr/chip-hr — ABOVE its own limit order (20.00), so it reads
+  `BLOCKS ALL` and the job never launches** (queue row `b200-8-6232b8` died with
+  `b200 @ 120.07 cr/chip-hr`). **B200 BATCH ~2.15**, cheaper than H100 PROD, and
+  BATCH is eval-only. The canonical numbers live in `tpu_reference.md`
+  §NVIDIA GPUs — read them there, do not copy them here again.
+  ★Why this correction is in a handoff doc at all: a wrong price of **0.0** does
+  not read as an error, it reads as **an invitation**; the same stale figure had
+  three copies and the other two (`tpu_reference.md`, `gpu_on_borg.md`) were
+  already fixed while this one still said "free".
 - ★**But "b200-8 actually completes device_count==8 + NCCL end-to-end" is NOT
   yet proven** — treat it as a hypothesis until a real job writes a success
   verdict to CNS. Source only rules out THIS wall, not others. v3 is running a
