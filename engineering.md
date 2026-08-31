@@ -110,6 +110,31 @@ staging), not to re-find what the local run already covers.
   `max_idle_secs` is not self-enforcing: `blaze shutdown` can return rc=0 with no
   output and leave the server running (seen on a server whose lock holder had
   died), so a reaper must escalate to signals and confirm the pid is gone.
+- **Serialize `blaze` and `hg status` with a shim on PATH, and give the shim its
+  OWN lock — never the launch path's lock, whose hold time is set by the slowest
+  unrelated caller.** `~/.tpu_bin/shims/{blaze,hg}` delegate to
+  `~/.tpu_bin/serialize_heavy.sh`, which takes `/tmp/host_heavy.<uid>.lock` around
+  the heavy command only. Reusing the tpu CLI's `/tmp/tpu_build.host.lock` was
+  tried and reverted: `tpu queue` holds it across an entire launch
+  (build + xmanager + envelope upload), so a one-second `hg id` sat behind a car
+  being dispatched for 300s — a lock held across an unrelated slow phase is a
+  queue, not a mutex. Four properties keep the gate from becoming the outage:
+  it DEGRADES TO PARALLEL after `-w` rather than refusing (a wedged holder must
+  never block every build on the host), cheap verbs (`blaze info/help`, every
+  `hg` verb but `status`) pass straight through, `TPU_SERIAL_HEAVY=0` opts out,
+  and the lock is per-fd so a killed build cannot leak it. Resolve the real
+  binary from a CACHED absolute path: `type -ap` on the hot path can itself
+  block for minutes on CitC, turning the shim into the stall it exists to
+  prevent. Verify by racing two builds and reading the `waited Ns` line — a
+  serializer that never logs a wait has not been shown to serialize anything.
+- **Count blaze SERVERS by process identity, never by grepping for "blaze" in
+  argv.** Every binary blaze ever built runs from a path containing
+  `_blaze_qiaos/.../blaze-out/`, so `ps | grep blaze | wc -l` counts agent
+  workers and daemons and reads as a build storm: 24 matches totalling 7.3 GB
+  resolved to ONE real JVM (0.9 GB) with ZERO builds running. Match the JVM
+  (`blaze(NNN)` / `BlazeServer_deploy.jar`) or count `blaze (build|test|run)`
+  invocations, and state which of the two you measured — "concurrent blaze" is
+  ambiguous between them and the two differ by an order of magnitude.
 - **A cron job's `flock` fd is INHERITED by any blaze server it spawns, so the
   lock is held for the server's whole `max_idle_secs`, not the script's run.**
   A `*/5` cron then fires once per idle window instead (measured 61.9min against
@@ -445,7 +470,10 @@ enforcer, which sat dead until the gap was noticed by hand). Resolve to PIDs
 first (`ss -ltnp` for a port, `pgrep -a` / `/proc/<pid>/cmdline` to confirm what
 each is), then signal those PIDs. `fuser -k` on a port is the same trap: check
 who holds it first, and never assume a port is unused (8891 was a real service
-someone else had added).
+someone else had added). A process group id is not owned by the process you read
+it from either: an unrelated process can share it (measured, pid 2947733 had
+pgid 513289), so `kill -TERM -<pgid>` reaches processes you never enumerated.
+Reading `pid -> pgid` does not answer `pgid -> members`.
 
 **The same pattern used to judge a process ALIVE fails in the opposite
 direction: it revives a shadow.** A watchdog whose liveness test spells out the

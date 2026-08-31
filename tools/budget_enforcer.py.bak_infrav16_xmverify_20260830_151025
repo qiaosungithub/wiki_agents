@@ -137,73 +137,6 @@ def plan_cancellations(prod, prod_total, limit):
     return to_cancel, running
 
 
-# ★THE LEDGER IS NOT THE FLEET. `~/.tpu_jobs.json` keeps `status=SUBMITTED`
-# long after a job is dead (measured 2026-08-30: 284948672 / 284838424 /
-# 284364771 all NOT_RUNNING on XM, all still SUBMITTED locally with
-# cost/state/last_seen = None). The two existing filters both miss it: the
-# check-cache filter needs the xid to BE in the cache (these were absent, and
-# the cache itself was 40h stale), and the STALE_HOURS filter needs a timestamp
-# that these rows do not carry.
-#
-# Cancelling a corpse is not harmless: the planner counts its cost as budget
-# RECLAIMED, so the pass reports success, stops early, and the job that is
-# actually burning money is never touched. The kill list was, at 15:0xZ,
-# three dead jobs and 1557 credits of imaginary savings.
-#
-# So: verify each CANDIDATE against XM before acting. Only candidates, not the
-# whole active set -- one batched lookup, not 36.
-XMANAGER_PAR = '/google/bin/releases/xmanager/cli/xmanager.par'
-
-
-def live_status(xids, timeout_s=180.0):
-    """{xid: Status} from XManager for the given xids. Missing key = unknown.
-
-    Absolute path on purpose: `xmanager` is a shell function and `xmanager.par`
-    is not on PATH, so a bare name exits 127 -- which, behind a pipe, is
-    indistinguishable from 'the experiment does not exist'.
-    """
-    xids = [str(x) for x in xids if str(x).isdigit()]
-    if not xids:
-        return {}
-    try:
-        p = subprocess.run(
-            [XMANAGER_PAR, 'list', '--experiment_id=' + ','.join(xids),
-             '--archived=no', '--columns=ID,Name,Status'],
-            capture_output=True, text=True, timeout=timeout_s)
-    except (subprocess.TimeoutExpired, OSError) as e:
-        print(f"[enforcer] {_ts()} WARN: XM status lookup failed ({e}); "
-              f"treating every candidate as UNKNOWN (fail-safe: no cancels).",
-              file=sys.stderr)
-        return {}
-    out = {}
-    for ln in (p.stdout or '').splitlines():
-        f = ln.split()
-        if len(f) >= 3 and f[0].isdigit():
-            out[f[0]] = f[-1]
-    return out
-
-
-def drop_dead_candidates(to_cancel):
-    """(live, skipped): candidates XM still reports as running, and the rest.
-
-    FAIL-SAFE DIRECTION: a job we cannot get a status for is treated as DEAD
-    (skipped), never cancelled on a guess. Cancelling the wrong job destroys
-    work; skipping one only defers enforcement to the next pass.
-    """
-    if not to_cancel:
-        return [], []
-    status = live_status([r['xid'] for r in to_cancel])
-    live, skipped = [], []
-    for r in to_cancel:
-        st = status.get(str(r['xid']))
-        if st and st.upper() == 'RUNNING':
-            live.append(r)
-        else:
-            r['_skip_reason'] = st or 'no XM status'
-            skipped.append(r)
-    return live, skipped
-
-
 def cancel_job(xid, jobs_file, dry_run):
     """Cancel one xid via the sanctioned `tpu cancel` path (xmanager stop +
     mark CANCELLED). Returns (ok, output)."""
@@ -240,67 +173,7 @@ def _archs_for(tpu_type):
     return _ARCH_FAMILY.get(arch, [arch])
 
 
-# --- ledger <-> queue pairing (added 2026-08-31, lyy) ---
-# resume 在两处都按 $TPU_JOBS_FILE 查,而那个变量由**排这条队列的 worker**的环境
-# 决定,不是入队时的环境:
-#   tpu_wrapper.sh:1163-1177  查 stagedir(查不到 -> return 1 -> 没有 XID -> 3 次后 HELD)
-#   xm_launcher.py:1678-1691  查 bucket_cp_path
-# 所以把 lyy 的 XID 排进 sqa 的队列必然 HELD。实测 08-30 10:10Z-14:11Z 有 14 条
-# 这样的行,last_reason 全是 "a resume must re-run the original snapshot"。
-_LEDGER_TO_QUEUE = {
-    os.path.abspath(os.path.expanduser('~/.tpu_jobs.json')):
-        os.path.abspath(os.path.expanduser('~/.tpu_local_queue.json')),
-    os.path.abspath(os.path.expanduser('~/lyy-work/.npu_jobs.json')):
-        os.path.abspath(os.path.expanduser('~/lyy-work/.npu_local_queue.json')),
-}
-
-# 被 pause 但无法忠实 resume 的作业记在这里,等人处理。原子替换写(先写 .tmp 再
-# os.replace),因为满盘时 open(w) 会先把文件截成 0 字节。
-_PENDING_RESUMES = os.path.expanduser('~/lyy-work/.npu_pending_resumes.json')
-
-
-def _record_pending_resume(r, jobs_file):
-    """把一条待人工重投的记录追加到持久文件。返回 (ok, path_or_err)。"""
-    rec = {'xid': r.get('xid'), 'tpu_type': r.get('tpu_type'), 'tier': r.get('tier'),
-           'name': r.get('name'), 'cost': r.get('cost'), 'jobs_file': jobs_file,
-           'cancelled_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
-           'reason': 'paused by budget_enforcer; auto-resume withheld (no faithful config)'}
-    try:
-        cur = []
-        if os.path.exists(_PENDING_RESUMES):
-            with open(_PENDING_RESUMES) as f:
-                cur = json.load(f) or []
-        cur.append(rec)
-        tmp = _PENDING_RESUMES + '.tmp'
-        with open(tmp, 'w') as f:
-            json.dump(cur, f, indent=1)
-        os.replace(tmp, _PENDING_RESUMES)
-        return True, _PENDING_RESUMES
-    except Exception as e:
-        return False, f'{type(e).__name__}: {e}'
-
-
-def _has_checkpoint_on_disk(r):
-    """物理校验 CNS 上真有 checkpoint。查不到 -> 不该 pause(砍了就回不来)。
-    返回 (verdict, detail);verdict: True=有 / False=确定没有 / None=查不了。"""
-    b = (r.get('bucket_cp_path') or '').strip()
-    if not b:
-        return False, 'no bucket_cp_path in ledger'
-    try:
-        p = subprocess.run(['timeout', '120', 'fileutil', 'ls', b],
-                           capture_output=True, text=True, timeout=150)
-    except Exception as e:
-        return None, f'fileutil failed to run: {type(e).__name__}'
-    if p.returncode != 0:
-        err = ((p.stderr or '') + (p.stdout or ''))
-        if 'not_found' in err or 'No parent directory' in err:
-            return False, f'CNS says not found: {b}'
-        return None, f'fileutil rc={p.returncode} (CNS unreachable?)'
-    return True, b
-
-
-def pause_and_requeue(r, jobs_file, dry_run, local_queue_file=None,
-                      unsafe_blind_resume=False):
+def pause_and_requeue(r, jobs_file, dry_run, local_queue_file=None):
     """PAUSE a job instead of killing it: cancel the XID (frees chips, stops
     billing) then re-enqueue it as a QUEUED resume (launch=resume_xid=<xid>),
     so the reroute daemon re-launches it FROM ITS CHECKPOINT once the price
@@ -314,31 +187,6 @@ def pause_and_requeue(r, jobs_file, dry_run, local_queue_file=None,
     (nothing to resume from) and say so.
     """
     xid = r['xid']
-
-    # 闸 1:台账与队列必须配对。未传就按表自动补(修好而不是拒绝);
-    # 传了但不配对 = 唯一还能真出事的情形,拒绝;未知台账,拒绝。
-    _jf = os.path.abspath(os.path.expanduser(jobs_file))
-    _want_q = _LEDGER_TO_QUEUE.get(_jf)
-    if _want_q is None:
-        return False, (f"REFUSED to pause {xid}: 未知台账 {jobs_file},"
-                       f"无法确定 resume 该进哪个队列(配对表: "
-                       f"{sorted(_LEDGER_TO_QUEUE)})。不动这个作业。")
-    if not (local_queue_file or ''):
-        local_queue_file = _want_q
-    elif os.path.abspath(os.path.expanduser(local_queue_file)) != _want_q:
-        return False, (f"REFUSED to pause {xid}: 台账 {jobs_file} 的 resume 必须进 "
-                       f"{_want_q},当前 --local-queue-file={local_queue_file}。"
-                       f"错配会让排那条队列的 worker 用错台账查 stagedir,必然 HELD。")
-
-    # 闸 2:pause 的前提是"以后能从 checkpoint 接着跑"。CNS 上没有 checkpoint 就
-    # 不是 pause,是永久丢进度 —— 方向必须是"查不到就不砍"。
-    if not dry_run:
-        _ck, _ckdetail = _has_checkpoint_on_disk(r)
-        if _ck is not True:
-            return False, (f"REFUSED to pause {xid}: checkpoint 未确认 "
-                           f"({_ckdetail})。砍了就回不到 {r.get('name')} 的进度,"
-                           f"不动它;预算这一轮少停一个作业。")
-
     if not r.get('has_stagedir'):
         ok, out = cancel_job(xid, jobs_file, dry_run)
         return ok, f"[no stagedir -> plain cancel, cannot auto-resume] {out}"
@@ -362,21 +210,7 @@ def pause_and_requeue(r, jobs_file, dry_run, local_queue_file=None,
     ok, cout = cancel_job(xid, jobs_file, dry_run=False)
     if not ok:
         return False, f"cancel failed, NOT re-queued (job left as-is): {cout}"
-    # 2) 本来这里 re-enqueue 成 resume。**默认不再这么做。**
-    # 原因:enforcer 造的队列条目 launch_kwargs 只有 {resume_xid},没有 config。
-    # 而 xm_launcher.py:25-26 是 _CONFIG = DEFINE_string('config', 'remote_run', ...)
-    # —— 空壳 resume 会用 **remote_run** 这个默认配方跑,落在原 XID 的 checkpoint
-    # 前缀上。台账里没有 config 字段,launch_log 里也没有,今天没有任何代码路径
-    # 能补上它。所以这样的 resume 一旦真跑起来就是拿错配方覆盖真 checkpoint,
-    # 比卡在 HELD 更糟。改为:记一条待办,让人拿正确的 config 重投。
-    if not unsafe_blind_resume:
-        ok2, where = _record_pending_resume(r, jobs_file)
-        if ok2:
-            return True, (f"cancelled; auto-resume WITHHELD (blind resume would run "
-                          f"config=remote_run over this checkpoint). NEEDS MANUAL RESUME "
-                          f"-> recorded in {where}")
-        return True, (f"cancelled; auto-resume WITHHELD, and FAILED to record the "
-                      f"pending-resume note ({where}) -- NEEDS MANUAL RESUME, xid={xid}")
+    # 2) re-enqueue as a resume so it re-launches when cheap again
     enq = (f'export TPU_JOBS_FILE={json.dumps(jobs_file)}; '
            f'{lq_prefix}'
            f'source {json.dumps(WRAPPER)} >/dev/null 2>&1; '
@@ -442,24 +276,6 @@ def one_pass(args):
           f"each is cancelled + re-queued as a resume, relaunched from checkpoint when cheap):")
     for r in to_cancel:
         print(f"[enforcer]     - xid={r['xid']} cost={r['cost']:.0f} {r['tpu_type']} {r['tier']} {r['name']}")
-
-    # ★Verify against XM before acting: the ledger keeps dead jobs SUBMITTED,
-    # and cancelling one books its cost as savings that never materialise.
-    to_cancel, skipped = drop_dead_candidates(to_cancel)
-    for r in skipped:
-        print(f"[enforcer]     ~ SKIP xid={r['xid']} cost={r['cost']:.0f} {r['name']}: "
-              f"XM says {r['_skip_reason']}, not RUNNING -- cancelling it would "
-              f"free nothing and would hide the job that is actually spending. "
-              f"(ledger still says SUBMITTED; stale row)")
-    if skipped and not to_cancel:
-        print(f"[enforcer] {_ts()} every candidate was already dead; nothing to pause "
-              f"this pass. The overage is an accounting artefact of the stale "
-              f"ledger, not live spend.")
-        return
-    if skipped:
-        freed = sum(r['cost'] for r in to_cancel)
-        print(f"[enforcer] {_ts()} after XM verification: pausing {len(to_cancel)} live "
-              f"job(s), freeing {freed:.0f} (skipped {len(skipped)} dead).")
     if len(to_cancel) > args.max_cancels:
         print(f"[enforcer] {_ts()} SAFETY: plan wants {len(to_cancel)} pauses > --max-cancels="
               f"{args.max_cancels}; capping to {args.max_cancels} this pass (rest next pass).")
@@ -469,8 +285,7 @@ def one_pass(args):
         return
     for r in to_cancel:
         ok, out = pause_and_requeue(r, args.jobs_file, dry_run=False,
-                                    local_queue_file=args.local_queue_file,
-                                    unsafe_blind_resume=args.unsafe_blind_resume)
+                                    local_queue_file=args.local_queue_file)
         tag = "OK" if ok else "FAILED"
         print(f"[enforcer] {_ts()} pause {r['xid']} -> {tag}. {_tail(out)}")
 
@@ -496,13 +311,6 @@ def main():
                     help='Registry to enforce (default ~/.tpu_jobs.json; point at npu/lyy for that agent).')
     ap.add_argument('--cache-file', default=os.path.expanduser('~/.tpu_check_cache.txt'),
                     help='Check-cache for the zombie filter.')
-    ap.add_argument('--unsafe-blind-resume', action='store_true',
-                    help='DANGEROUS. Restore the old behaviour of re-enqueueing a '
-                         'bare --launch=resume_xid=<XID> after pausing. That entry '
-                         'carries no --config, so xm_launcher falls back to its '
-                         'default (remote_run) and writes over the original '
-                         "checkpoint prefix with the wrong recipe. Default off: "
-                         'the pause is recorded for manual resume instead.')
     ap.add_argument('--sustained-over-seconds', type=float, default=0.0,
                     help='Only pause after PROD cost has stayed OVER the cap for this '
                          'many CONSECUTIVE seconds (any pass back under cap resets the '
@@ -520,7 +328,6 @@ def main():
     print(f"[enforcer] start {_ts()} interval={args.interval}s arm={args.arm} "
           f"max_cancels={args.max_cancels} jobs_file={args.jobs_file} "
           f"sustained_over={args.sustained_over_seconds:.0f}s "
-          f"blind_resume={'ON(DANGEROUS)' if args.unsafe_blind_resume else 'off(records pending)'} "
           f"local_queue={args.local_queue_file or '<UNSET -- resumes leak to default tpu queue!>'}")
     while True:
         try:

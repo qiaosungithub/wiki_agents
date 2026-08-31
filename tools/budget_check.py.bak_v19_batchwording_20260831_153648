@@ -488,16 +488,8 @@ def main():
     # when BATCH is the correct escape hatch. `new_cost` is already 0 for BATCH
     # (get_job_cost), so admit it regardless of current_cost.
     if new_tier.upper() == 'BATCH':
-        # WORDING IS LOAD-BEARING. "free pool, 0 PROD cost" reads as "free",
-        # and was read that way (it misled a line for hours). BATCH is a PAYING
-        # best-effort tier -- AGENTS.md: "it bills the group, it is not the free
-        # option". What is actually 0 is its draw on the PROD income/10 bar,
-        # which is a different quantity from its bill. Measured 2026-08-31: v7
-        # BATCH cleared at 0.15 and 1.94 cr/chip-hr seven minutes apart, so the
-        # price is neither zero nor stable.
-        print(f"\033[32m[budget check] new job is BATCH: does not draw on the "
-              f"PROD income/10 bar (still billable at the BATCH clearing "
-              f"price) -- admitted regardless of PROD aggregate.\033[0m")
+        print(f"\033[32m[budget check] new job is BATCH (free pool, 0 PROD cost) -- "
+              f"admitted regardless of PROD aggregate.\033[0m")
         sys.exit(0)
 
     # A CPU-ONLY ask has no chips, so it cannot consume the budget this gate
