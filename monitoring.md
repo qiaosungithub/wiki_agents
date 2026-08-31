@@ -445,7 +445,8 @@ went out unnamed because that line reads like noise. It now exits non-zero.
 ## Handoffs: Let The Line Summarize Itself
 
 When a line's context gets heavy (slow, repetitive, tool calls timing out), hand
-it to a fresh session. **The retiring session writes its own handoff doc: it is
+it to a fresh session. The numeric trigger is one bar, stated once, in
+§Auto-Handoff On Context Growth. **The retiring session writes its own handoff doc: it is
 far more accurate than one written from the outside.** Protocol:
 
 1. Message the line: write a self-contained doc (every run-id / XID / cell /
@@ -607,21 +608,23 @@ hands off to a fresh version when it crosses the bar; and its watcher watches
 the MANAGED lines' context too and makes them self-hand-off when they cross it.
 
 ### The bar
-`prompt_tokens > 400k` is the handoff bar (operator lowered it from 500k on
-2026-08-27; `ctx_watch.py` `HANDOFF_BAR` is the authority — if this prose and the
-constant disagree, the constant wins and this line is the stale one).
-`WATCH_BAR` (450k) now sits ABOVE the handoff bar and only annotates a line
-already past it. The bar reads `prompt_tokens`, the post-compaction prompt the
-worker actually carries each turn, from
-`chat_status(rid)['latest_assistant_usage']['prompt_tokens']` — NOT the
+**`prompt_tokens > 400k` is the handoff bar, and it is the same bar for the
+monitor itself and for every line it manages.** `ctx_watch.py` `HANDOFF_BAR` is
+the authority; if this prose and the constant disagree, the constant wins and
+this line is the stale one. Quote the bar from here, not from memory: it has
+moved once already (500k before 2026-08-27), and a second copy elsewhere in this
+file went stale the same day. `WATCH_BAR` (450k) sits ABOVE the handoff bar and
+only annotates a line already past it. The bar reads `prompt_tokens`, the
+post-compaction prompt the worker actually carries each turn, from
+`chat_status(rid)['latest_assistant_usage']['prompt_tokens']`, not the
 cumulative token counter.
 
 ### The monitor watches ITSELF
 `ctx_watch.py` iterates `runs.txt` and the monitor's own run is listed there
 (`monitor-vNN <rid>`), so it is already scanned; the one requirement is keeping
 that `runs.txt` line current on every takeover. When the monitor's own
-`prompt_tokens` crosses 500k the watcher fires the same READY nudge at it, and
-the monitor must:
+`prompt_tokens` crosses the bar above, the watcher fires the same READY nudge at
+it, and the monitor must:
 1. Finish the in-flight decision wave (do not hand off mid-decision — that loses
    work, same rule as for the lines).
 2. Write its own handoff doc + refresh `AGENT_STATUS.md` (newest-on-top).
