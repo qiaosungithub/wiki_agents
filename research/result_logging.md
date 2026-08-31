@@ -83,6 +83,50 @@ comparison.
 | A train run and its eval | Two paired rows, eval directly under, titled `  ↳ eval of the row above`. Different job ids, configs and failure modes, so collapsing them loses which half went wrong. A train row without an eval row has no conclusion: mark it, and never quote its in-training numbers as results. |
 | A run past the block's budget | Two rows, same job id: metric columns compare only if every row stopped at the same step. Put the block-budget value in the run's own row, and pair the longer result beneath as `  ↳ @<steps>, same run`, `Details` naming each segment. Still rising at the budget: that point is also its peak; otherwise record the pre-budget peak. Never widen the tab with a second set of metric columns: empty on every normal-budget row, they read as a missing measurement, not an inapplicable one. |
 
+## A Row That Is Already Filled Can Still Be Wrong
+
+**Before adding a rung to a ladder, re-derive the ladder head's summary from the
+same source — a summary row is a claim about cells that have since changed.** A
+head row reading "FINAL 0/5 at every rung" was written when that was true; one
+rung later finished 2/5 and nobody re-read the head, so the tab asserted the
+opposite of its own data while every individual cell row stayed correct. The
+head is the row people quote. Re-derive it whenever you touch any rung under it,
+and say `CORRECTED <date>` in the note rather than silently swapping the number.
+
+**When a tab carries two pre-registered metrics, check whether they peak at
+DIFFERENT rows before writing "single peak".** The phrase is almost always
+produced by quoting one metric and reading it as a property of the ladder. Two
+metrics that disagree are the finding; collapsing them re-picks the metric after
+seeing the data, which is what pre-registration exists to prevent.
+
+**Re-harvest from the ARCHIVE, not from the working copy, before overwriting a
+row that already holds numbers.** A relaunch overwrites the on-disk log of the
+batch that finished, so the disk holds the corpse of the retry while the tracker
+still holds both. Correcting a completed 60k row from a crashed 30k retry's log
+reads as diligence and destroys the result. When the two disagree, the archive
+wins and the discrepancy itself goes in the note.
+
+**Mark a row harvested mid-run as `NOT FINAL` in the note and put the step in the
+verdict cell.** A verdict cell reading `FINAL 1/5` is indistinguishable from a
+finished cell six weeks later; `FINAL 1/5 -- STILL RUNNING at 50800/60000` cannot
+be quoted by accident.
+
+## Row Numbers Are Invalidated By Your Own Write
+
+**`insert-rows` shifts every row below it, so any row index resolved before the
+insert is stale — including the ones in the note you are about to write.** Cite
+rows as "content + row N", never a bare `row N`, and re-read the neighbourhood
+after any structural write. `mutate clear` is worse: it DELETES the row and
+shifts everything up, so it is never the way to blank a cell — write an empty
+value to the specific range instead.
+
+**A full-sheet read collapses blank rows, so line numbers computed from it are
+not the sheet's row numbers.** Always read a bounded range (`A176:J198`) when you
+need true indices.
+
+**`Wrote 1 rows.` absent, with rc=0, means the write did not happen.** Read the
+cell back every time; rc is not evidence.
+
 ## Short Cells; Formatting Is Part Of The Result
 
 **Do not write essays in a spreadsheet.** A cell helps the next reader find and

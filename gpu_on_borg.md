@@ -740,7 +740,9 @@ Key facts:
 - Single-node `gb200-8` hits the wall too. From source: the IMEX sidecar starts
   iff `IsGpuWithNvlinkDomain()` is true, only for GB200/GB300/VR200, keyed on
   CARD TYPE not node count. Every GB200 slice, even an 8-GPU tray, needs a
-  grant.
+  grant. (`VR200` is quoted from that source predicate; it is not in
+  `tpu_reference.md` §NVIDIA GPUs and we have never been able to request one, so
+  treat it as a third card behind the same wall, not as an option.)
 - Only cross-node NVLink cards (GB200/GB300) need IMEX authorization.
   Single-node cards (B200/B300, H100/H200, A100) never start the sidecar, per
   the same `IsGpuWithNvlinkDomain()`. So `b200` is the shortest Blackwell-class

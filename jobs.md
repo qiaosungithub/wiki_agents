@@ -5,6 +5,11 @@ Queue, inspect, resume, and debug a job on the internal XManager/Borg stack.
 accelerator naming and shapes, `infra/` the market, allocator, and CLI
 internals. Read those only when the rules here do not explain what you see.
 
+**Before you submit anything after a large code change, run the CPU
+`local_debug` path first** (`engineering.md` §Debug Locally On CPU Before You
+Spend A Remote Round Trip). A build plus a queue wait plus a schedule is the
+expensive way to find a bug a workstation finds in two minutes.
+
 ## The Submission Queue In One Screen
 
 **Submit with `tpu enqueue` (instant, free) plus one serial `tpu build-worker`.**

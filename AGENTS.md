@@ -37,6 +37,7 @@ and each has a `README.md` index.
 | Task | Read |
 |---|---|
 | Anything, before you start | `engineering.md` |
+| **After a large code change, before submitting a job** | `engineering.md` §Debug Locally On CPU Before You Spend A Remote Round Trip |
 | Find a checkout or its boundaries | `projects/README.md` |
 | Queue, inspect, resume, debug a job | `jobs.md`, then the project guide |
 | **Resume a job / write anything that passes a checkpoint to a job** | `jobs.md` §The `LOAD_FROM` Contract |
@@ -104,6 +105,13 @@ deletion (`engineering.md` §External Writes Are Transactions).
 
 **Committing.** git push is your friend. You can push regularly, but need to be
 careful which branch to push.
+
+**Debug locally on CPU first.** After any large code change, run the whole path
+(training step, logging, visualization, checkpoint save/restore, online and
+offline eval) on CPU with the repo's `local_debug` config and
+`scripts/local_debug.sh` before spending a remote round trip. Remote debugging
+is slow, and most of what dies on the accelerator dies on a workstation too
+(`engineering.md` §Debug Locally On CPU Before You Spend A Remote Round Trip).
 
 **Jobs.** On this SHARED workstation, submit through `tpu enqueue` plus one
 serial `tpu build-worker`; that is the default that dodges the concurrent-build

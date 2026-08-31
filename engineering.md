@@ -30,6 +30,52 @@ infrastructure.
   relevant checks, read their COMPLETE output, and compare the result against
   the request rather than against your patch. State whatever remains unverified.
 
+## Debug Locally On CPU Before You Spend A Remote Round Trip
+
+**After any large code change, run the whole path on CPU with a `local_debug`
+config before submitting a job.** A remote round trip costs a build, a queue
+wait, a schedule and a stagedir; a CPU run costs a couple of minutes and catches
+most of what would have died on the accelerator. Five consecutive TPU launches
+on one line were burned on bugs a workstation would have found in two minutes.
+
+Each repo carries the runner: `scripts/local_debug.sh` (some repos put it at the
+root; `tpu_scripts/debug.sh` is the older shape of the same idea). Read the one
+in your checkout before writing anything new. The mechanism is two parts:
+
+| Part | What it does |
+|---|---|
+| Force CPU with an env var | `JAX_PLATFORMS=cpu` for JAX. Set it before `import jax`; it cannot be set afterwards. Pair it with `XLA_FLAGS=--xla_force_host_platform_device_count=N` to simulate N chips in one process, so sharding and per-device code run too |
+| Point the binary at a `local_debug` config | `--config=configs/load_config.py:local_debug`. It shrinks steps, batch and data so the run finishes in minutes, and keeps every stage the real config has |
+
+**Cover the side paths, not just the training step, because they are where the
+remote-only bugs live.** Logging, visualization, checkpoint save and restore,
+and both online and offline eval each need to execute in the local run. A step
+loop that trains fine and then dies at the first checkpoint has cost the whole
+launch. Concretely, these fire only when the code actually runs:
+
+- A stubbed library raises at CALL time, not import time, so a wandb or plotting
+  stub only fails at the first log or figure, thousands of steps in.
+- A checkpoint save is a multi-host collective; if non-chief ranks skip it, the
+  job HANGS rather than failing. Run `--procs 2` where the script supports it,
+  because a single process cannot exercise a barrier.
+- Distributed paths need a timeout. A deadlock produces no traceback, so an
+  untimed smoke hangs and proves nothing; the EqR runner uses 300s, about 6x its
+  healthy runtime.
+- `/cns` paths reject stdlib file APIs, and eval or checkpoint code is usually
+  where a plain `open()` survives review.
+
+**Make the local run a positive test.** Print a token like `LOCAL_DEBUG_OK` on
+the last line and check for it, rather than trusting the exit code: a piped
+runner reports the last stage's status (§Verify The Premise Before Changing
+Anything), and a timeout kills the wrapper, not the child. If a dependency the
+test needs is unreachable, say so loudly rather than skipping it, or the run
+passes while proving nothing (§A Test That Cannot Fail).
+
+Then, and only then, do the remote debug run. Keep it small and treat it as a
+separate step: it exists to catch what CPU cannot see (real accelerator
+topology, cross-host collectives at true scale, the launcher's own argv and
+staging), not to re-find what the local run already covers.
+
 ## Diagnose From Evidence, Not From The Most Available Story
 
 - **Read the deepest relevant failure, not the last line.** A traceback string
