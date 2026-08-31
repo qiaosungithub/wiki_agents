@@ -290,7 +290,7 @@ no real external tracker unless current code proves one was created.
 - Log a run that reaches a conclusion to the `EqR-refactored` tab, never
   `EqR-reproduction` (history); `../research/result_logging.md` owns how,
   including which column holds per-token versus whole-board accuracy.
-- Maze runs use `v7-32`: the 16-chip half buys half the compute for the same
+- Maze runs use `v7-32`: dropping to `v7-16` buys half the compute for the same
   wall clock, and the family's published rows are all v7-32. One ACT step is
   `H_cycles * (L_cycles + 1) * L_layers` layers (84 at the 3/6/4 default) and
   training unrolls the full `halt_max_steps`, so a 100k-step maze leg already

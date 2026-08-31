@@ -44,14 +44,18 @@ gid for different projects, plus dated backup tabs of each other. A gid writes
 into a frozen snapshot nobody reads. A new line of work opens a titled BLOCK at
 the bottom of the live tab, as every family there does; not a new tab.
 
-The two EqR tabs disagree on columns I and J in the direction that hurts:
-per-token and whole-board trade places. Appending to `EqR-reproduction`, or
-copying between tabs without re-deriving the map, swaps a 99.2 with a 34.8.
+**The two EqR tabs use the same column positions but opposite metric NAMES, so
+copying a number by name swaps a 99.2 with a 34.8.** In both tabs I is per-token
+and J is whole-board exact; it is the names that trade places. `acc` means
+whole-board exact in `EqR-refactored` and `accuracy` means per-token in
+`EqR-reproduction`, so the shorter name flips meaning between the two. Map by
+position and semantics, never by metric name, and re-derive from the live header
+(row 2; row 1 is a banner, and `EqR-refactored`'s banner states the rename).
 
-| Tab | I | J | columns the other lacks |
+| Tab | I (per-token) | J (whole-board exact) | columns the other lacks |
 |---|---|---|---|
-| `EqR-refactored` | `final train/token_acc` (per-token) | `final train/acc` (whole-board exact) | S `final train/total_loss`, T `in-train eval: acc / token-acc @ step` |
-| `EqR-reproduction` | `accuracy` (per-token) | `exact_accuracy` (whole-board) | — |
+| `EqR-refactored` | `final train/token_acc (SMOOTHED)` | `final train/acc (SMOOTHED)` | S `final train/total_loss`, T `in-train eval: acc / token-acc @ step` |
+| `EqR-reproduction` | `final train/accuracy (SMOOTHED)` | `final train/exact_accuracy (SMOOTHED)` | — |
 
 ## Re-Read The Header Every Time
 

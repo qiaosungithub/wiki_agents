@@ -175,8 +175,10 @@ shares the operator's default tmux socket, so plain `tmux` reaches `amply_ux`.
 Use `--dry-run` when unsure; the script bounded-verifies revival (polls
 `dashboard_url` + `/api/runs` 200) unless `--no-verify`. Flags/env:
 `--warmup`/`--wait`, `AMP_UX_TMUX` / `AMP_UX_WORKSPACE` / `AMP_UX_ALIAS`. Never
-use the deprecated `~/.amply/bin/ux_launch.py`: it exec's a server on any
-invocation, the 3-server split-brain footgun.
+use the deprecated `~/.amply/bin/ux_launch.py`: it used to exec a server on any
+invocation, the 3-server split-brain footgun, and is now gated behind
+`AMPLY_UX_LAUNCH=really-launch` (verify with `grep AMPLY_UX_LAUNCH` on the
+script; without the gate it exits 2).
 
 **Never start a second UX server to work around an unreachable one; find the
 one already running** (`ss -ltnp | grep amply`; wildcard 0.0.0.0 binds are

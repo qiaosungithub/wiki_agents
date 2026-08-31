@@ -21,7 +21,7 @@ weighting *breadth of cells*: a one-cell metro is one stockout from useless.
 | `lpp` | v7 | `yulpptr` | `li-d` 85.3 PiB sp50 | ran to step 6 | European leg; largest storage of the three originals |
 | `dfw` | v4 | `yudfwra` | `rs-d` 48.5 PiB sp50 | loader-resolve + read PASS | 4th FULL mirror (all 16 datasets). v4 is ~8x cheaper/chip than v7; ckpt bucket `_CELL_BUCKETS['yudfwra']` → rs-d |
 | `las` | v4 | `dl` | `dl-d` 31.6 PiB sp10 | loader-resolve + read PASS | PARTIAL: only the maze v4 working set (64x64-offline + companions + settingA/B), NOT settingB_v3 / 128x128. Non-oversold fallback when `dfw` v4 fragments. ckpt bucket `dl` → dl-d |
-| `sin` | B200 + v7 | `sk`, `sn`, `so` (v7); `sj` (B200) | `si-d` 9.25 PiB sp50 | crc32c mirror verified | PARTIAL: the only metro with B200 compute next to data. Holds ARC-1, ARC-2, parcae (`strict-4d1138c` + `nobos` + eval-assets), codi/`coconut_data`; NOT the maze or VLM sets |
+| `sin` | B200 + v7 | `sk`, `sn`, `so` (v7); `sj` (B200) | `si-d` 9.25 PiB sp50 | completed 12/12; crc32c mirror verified | PARTIAL: the only metro with B200 compute next to data. Holds ARC-1, ARC-2, parcae (`strict-4d1138c` + `nobos` + eval-assets), codi/`coconut_data`; NOT the maze or VLM sets |
 
 **`las`/`dl-d` and `sin`/`si-d` are partial mirrors, so do not assume a dataset
 is there.** `las` holds maze64's v4 working set. `sin` holds only the four
