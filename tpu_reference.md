@@ -226,16 +226,11 @@ Always cross the rounded count with a live `tpu preflight`. The legal ceiling
 is not one fully-connected slice (see NVLink Domain above).
 
 Price inverts the TPU intuition, but not uniformly, and the exception is
-expensive. Most GPU PROD is cheap (H100 ~1.0–1.2 cr/chip-hr; A100 ~0.16;
-GB200/GB300/H200 free pool) and most GPUs have a free or near-free BATCH pool,
-but BATCH is preemptible (`gpu_on_borg.md` Rule 6).
-
-**A free price on `gb200`/`gb300` is not an offer: we have no IMEX grant, so
-those jobs reach RUNNING and then fail 100% at CUDA/NVLink init.** Read the
-price column for them as "not obtainable", whatever it says. The grant is an
-operator-level IAM action and was still outstanding when this was written;
-`gpu_on_borg.md` §GB200 Needs IMEX NVLink Authorization owns the detail and the
-test. `b200`/`b300`, single-node, need no such grant.
+expensive. Most GPU PROD is cheap (H100 ~1.0–1.2 cr/chip-hr; A100 ~0.16; H200
+free pool) and most GPUs have a free or near-free BATCH pool, but BATCH is
+preemptible (`gpu_on_borg.md` Rule 6). `gb200`/`gb300` also price as free pool,
+but we cannot run them at all (`gpu_on_borg.md` §GB200 / GB300 Are Not
+Obtainable), so read that price as "not obtainable".
 
 B200 PROD is the exception: ~100–120 cr/chip-hr, ~100x H100, above its own limit
 order (20.00) and therefore `BLOCKS ALL`. A `b200-8` PROD job does not merely

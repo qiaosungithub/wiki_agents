@@ -84,9 +84,14 @@ and each has a `README.md` index.
 Each rule below is enforced in full by the guide named beside it. These are the
 ones expensive enough to state twice.
 
-**With the user** — Converse in Chinese; write artifacts in English, except
-paper reports (`reports/README.md`). Lead with the outcome; stay concise and
-plain.
+**With the user — write plain language, not agent jargon.** Converse in Chinese;
+write artifacts in English, except paper reports (`reports/README.md`). Lead
+with the outcome, and say it the way you would to a colleague who does not read
+your logs. Name the thing that happened rather than the internal token for it:
+"the job never started" beats "BUILD_REQUESTED never transitioned". Spell out an
+identifier the first time it appears, keep literal names (`PROD`, an XID, a cell)
+because they are what the user greps for, and cut the rest. §Maintaining Memory
+carries the same rule for what you write into these files.
 
 **Delegating work: default to a NEW amply session, not a sub-agent.** When the
 user asks to "open a session", "hand this off", or otherwise delegate a task,
@@ -320,3 +325,12 @@ or when violating it has a real cost.** Everything else dilutes what matters.
   whichever half is copied still carries the other.
 - **Prefer a table to five parallel bullets.** Delete audit snapshots once they
   are too old to be evidence.
+- **Write plain sentences, not the house dialect.** No literary metaphor, no
+  aphorism, no bolding a whole paragraph, no em-dash chains, no 40-word
+  sentences. One bold phrase per section, for the rule. This is the same
+  standard as the user-facing one above, and it is why the guides read the way
+  they do.
+- **When a fact stops being true, delete it; do not append a correction.** A
+  note that says "X, but actually now Y" makes the reader hold both, and the
+  wrong half travels just as far. Cut what is dead: git history is the archive
+  (`archive/README.md`).

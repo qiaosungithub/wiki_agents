@@ -681,72 +681,36 @@ may have any. "In stock" and "out of budget" are true at the same time, routinel
 | rank 0 dies with SIGSEGV in its first collective; NCCL logs `Init COMPLETE` and no WARN | torch's `LOG(INFO)` hitting a broken debug-log sink, not NCCL; raise absl `minloglevel` in each child before the first collective (B200 notes) |
 | a `faulthandler` dump file is created but stays 0 bytes | absl owns SIGSEGV from import time; capture fd 2 with `dup2` instead (B200 notes) |
 
-## GB200 Is ARM (Grace) — The Build Cross-Compiles To aarch64
+## GB200 / GB300 Are Not Obtainable — Do Not Plan Around Them
 
-`gb200`/`gb300` are Grace(ARM CPU)+Blackwell(GPU). `xm.ResourceType.GB200`
-has `architecture() == ARM`, so `xm_abc.bazel_args.gpu(GB200)` automatically
-adds `--cpu=arm` and `--define=cuda_target_sm100=1` (Blackwell sm100; the
-launcher delegates per-SM enables to xmanager's `GPU_TO_SM` table, so you do NOT
-hardcode sm90 as for H100). A `gb200` job therefore cross-compiles the WHOLE
-torch binary + CUDA deps to aarch64, a heavier and less-trodden path than x86
-H100. A dep with no ARM build sends the job HELD at BUILD. That is a real build
-gap (fix the dep), unlike the Rule-7 budget stall, which never reaches BUILD.
-Check sizing first: `gb200-72` rounds to the nearest legal slice (`gb200-64`) at
-placement time (see `tpu_reference.md` round-to-nearest-legal-slice rule).
-
-### Chips Are Not The GB200 Bottleneck — The Budget Gate Is
-
-**What holds a GB200 job back is the Rule 7 budget gate, not free chips.** Read
-free chips and obtainable slices per cell with `slice_probe
---accel=gb200 --topology=<n> --group=9`, then pick the cell with the most free
-chips. The budget gate decides whether the job ever builds, so a placeable cell
-is not a schedulable one.
-
-## GB200 Needs IMEX NVLink Authorization; B200 Does Not
-
-**A GB200 job runs on Borg but crashes at CUDA/NVLink init unless your MDB role
-is in the IMEX authorization group; B200 and the single-node GPUs have no such
-dependency.** GB200 is NVL72: its NVLink domain spans nodes, so the runtime
-brings up an IMEX (Internode Memory EXchange) fabric that authenticates to a
-per-region IMEX-proxy CA pool. Without membership the task reaches RUNNING, then
-dies (a failed work unit, not a preemption):
+**Both cards need an IMEX NVLink authorization we do not have, so a job reaches
+RUNNING and then fails 100% at CUDA/NVLink init.** Their price reads as free
+pool, which is not an offer. Use `b200` instead: single-node, no grant needed,
+and the shortest Blackwell-class path.
 
 ```
 PERMISSION_DENIED: MDB role <user> is not allowed to send request to CA pool
   projects/mn-nvlink-imex-proxy/locations/<region>
 ```
 
-Key facts:
+The judge is that runtime crash, not `aclcheck`, which fails here on the
+environment's own LOAS restriction and answers whether you may READ the ACL.
+The grant is MDB group membership (`security/ca/ra/imex/service/config/
+startup.pi` maps the CA pool to a `*-imex-ra-users` group), requested through
+the MDB/ganpati group-add flow with owner approval, covering both staging and
+prod RA. It is an operator-level action, escalated and still outstanding.
 
-| arch | NVLink domain | IMEX proxy needed? |
-|---|---|---|
-| `gb200` / `gb300` | cross-node (NVL72) | **yes**, at ANY size, even a single 8-GPU slice |
-| `b200` / `b300` | single node (8 GPU) | no |
-| `h100` / `h200` / `a100` | single node | no |
+Size is irrelevant to this: the IMEX sidecar starts on CARD TYPE, not node
+count, so even a single 8-GPU `gb200-8` tray hits the wall. If a grant ever
+lands, the rest of the GB200 story is in git history (these cards are Grace ARM,
+so the build cross-compiles the whole torch binary to aarch64 via
+`--cpu=arm`; and the Rule 7 budget gate, not free chips, is what holds the job).
 
-- The judge is the runtime crash, not `aclcheck`: a GB200 job reaches RUNNING,
-  then fails 100% at CUDA/NVLink init with the
-  `PERMISSION_DENIED ... CA pool ...` above. Do NOT cite an `aclcheck` result.
-  `aclcheck` fails on the environment's LOAS restriction (no ACL-proxy /
-  ganpati-read access). Its DENIED answers *whether you may query the ACL*, not
-  *whether you are in the group*.
-- The grant is MDB group membership; the CA-pool→group mapping is in
-  source: `security/ca/ra/imex/service/config/
-  startup.pi` maps the IMEX CA pool to a `*-imex-ra-users` group, mirrored in
-  `production/borg/pod/miba/private-ca-front-end/server.pi`. Request it via the
-  MDB/ganpati group-add flow with owner approval, not a job flag. Cover BOTH
-  staging and prod RA (borglets default to STAGING), or the job fails on the
-  ungranted arm.
-- Single-node `gb200-8` hits the wall too. From source: the IMEX sidecar starts
-  iff `IsGpuWithNvlinkDomain()` is true, only for GB200/GB300/VR200, keyed on
-  CARD TYPE not node count. Every GB200 slice, even an 8-GPU tray, needs a
-  grant. (`VR200` is quoted from that source predicate; it is not in
-  `tpu_reference.md` §NVIDIA GPUs and we have never been able to request one, so
-  treat it as a third card behind the same wall, not as an option.)
-- Only cross-node NVLink cards (GB200/GB300) need IMEX authorization.
-  Single-node cards (B200/B300, H100/H200, A100) never start the sidecar, per
-  the same `IsGpuWithNvlinkDomain()`. So `b200` is the shortest Blackwell-class
-  NVLink path pending a GB200 grant.
+`b200`/`b300`, `h100`/`h200` and `a100` are single-node, so
+`IsGpuWithNvlinkDomain()` is false, the sidecar never starts, and none of the
+above applies to them. The B200 evidence below is what
+we actually run on.
+
 - Confirmed by a running job: `b200-8` initializes CUDA and sees all 8 GPUs, no
   CA-pool authorization. A `b200-8` soak on `sj` wrote from inside:
 
