@@ -241,7 +241,7 @@ but only if you read stderr deliberately instead of folding it into the answer.
 a distributed path must test size, not presence.** A task killed mid-copy leaves
 a file that exists and is zero bytes, and `exists()` cannot tell it from a good
 one; a name-only check makes a truncated write permanent, because resume then
-skips it forever. Four silent failures here, each with its fix:
+skips it forever. The silent failures seen here, each with its fix:
 
 | Silent failure | Fix |
 |---|---|

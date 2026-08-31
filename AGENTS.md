@@ -117,10 +117,13 @@ bills the group, it is not the free option, and any PROD demand preempts it the
 instant a slot is contested. A training run on BATCH is silently starved and
 still costs. Never train on BATCH (`jobs.md` §Requirements And Runtime).
 
-**A chip count is not a size.** Per chip, `v7 = v6p ≈ 2x v6e ≈ 4x v5p ≈ 8x v4`,
-so matching a `v6p-16` needs a `v6e-32`. Asking for `v6e-16` silently buys HALF
-the compute, and the run is then compared as if the hardware were equal.
-`tpu route --power=` does the arithmetic (`tpu_reference.md`).
+**A chip count is not a size.** Per chip, `v7 = v6p ≈ 2.17x v6e ≈ 4.34x v5p ≈
+7.23x v4 ≈ 10.09x v5e`, so matching a `v6p-16` needs a `v6e-32`. Asking for
+`v6e-16` silently buys HALF the compute, and the run is then compared as if the
+hardware were equal. Do not round these ratios: rounding is the same mistake as
+matching on chip count, one order of magnitude smaller. `tpu route --power=`
+does the arithmetic, and `tpu_reference.md` owns the table (both are generated
+from `router.py::_V5P_MULTIPLIER`; never hand-copy a third version).
 
 **Storage.** Keep compute and storage co-located; a job far from its data is
 killed by the pruner, not merely slowed. Never move Type 1 payloads across

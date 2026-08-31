@@ -134,6 +134,19 @@ mistake rather than quoting it, since quoting the markup back adds another
 example to copy. Same reason `tests/test_watchdog.py` builds its fixture from
 fragments.
 
+`event_loop.py` now also catches the leak inline, so the idle gap above should
+not recur on this workstation: after an assistant turn with no `tool_calls`, it
+regex-matches the content for `invoke name` / `function_calls` / `parameter
+name` markup, appends a `UserEvent` system correction, and continues the loop
+without sleeping. Two caveats before relying on it. It is a LOCAL change in the
+CitC workspace, absent from submitted HEAD, so a fresh workspace or a rebuilt
+binary from depot does not have it. And it is an inline `re.search`, not a
+named constant, so grep for the warning string `Detected malformed tool call
+markup` to check whether a given binary carries it. The 24.7-minute figure and
+the rule behind it (`engineering.md` §A Tool Call Only Fires As A Structured
+Call) describe model behaviour and still hold; this guard only shortens the
+recovery.
+
 ## Restarting The Amply UX Server
 
 **`amply` and `amply-launch` are `blaze run`, so they work only inside a google3
@@ -223,9 +236,6 @@ objfs keeps alive, falling back to `sys.argv[0]`. See
 `third_party/py/simply/amply/ux/server.py:_resolve_amply_bin`. A gateway running
 the old cached path must still be restarted once: the value was captured at
 import time, and the patch only helps future boots.
-
-
-*Update*: a patch in `third_party/py/simply/amply/agents/event_loop.py` (local CitC workspace) detects tool-call leaks inline (`TOOL_MARKUP_RE.search(content)`) and immediately appends a system correction without sleeping, eliminating the idle time.
 
 ## Host Quick-Stats Utils (`memavail` / `cpuload` / `hstat`)
 

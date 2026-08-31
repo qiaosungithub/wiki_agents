@@ -8,7 +8,7 @@ or an infra failure is not (`result_logging.md`).
 |---|---|
 | `result_logging.md` | Writing a result into the shared experiment spreadsheet, or finding the chart for a job. Read it **every** time you log: headers and layout drift. |
 | `accelerator_choice.md` | Choosing between v6p / v6e / v5p, or a preemptible slice keeps being lost: measured hold times, why a capacity table does not predict acquisition, and how to probe before committing. |
-| `v7_storage_placement.md` | Choosing a metro for a v7 run: the standing three-metro decision, and how to regenerate the survey behind it. |
+| `v7_storage_placement.md` | Choosing a metro for a v7 run: the standing decision on which metros carry a full mirror, and how to regenerate the survey behind it. |
 
 ## The Research Loop Preserves Reasoning, Not Just Jobs
 

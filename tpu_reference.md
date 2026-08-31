@@ -83,16 +83,20 @@ per-chip compute. Before picking a family for a long preemptible run, read
 
 ## Converting Between Generations
 
-Per chip, `v7 = v6p ≈ 2x v6e ≈ 4.34x v5p ≈ 7.23x v4`, so
+Per chip, `v7 = v6p ≈ 2.17x v6e ≈ 4.34x v5p ≈ 7.23x v4 ≈ 10.09x v5e`, so
 `v6p-8 ≈ v7-8 ≈ v6e-16 ≈ v5p-32`. `tpu route --power=` does the arithmetic and
-encodes this table in `router.py::_V5P_MULTIPLIER`.
+encodes this table in `router.py::_V5P_MULTIPLIER`, which is the single source:
+`v5e 0.43, v4 0.60, v5p 1.0, v6e 2.0, v6p 4.34, v7 4.34` in v5p-chip units.
+This file and `AGENTS.md` quote it; never hand-copy a third version, and do not
+round (`4x v5p` and `8x v4` were both carried here once, under- and over-sizing
+a match by 8% and 11%).
 
 **Read the relation the other way when sizing a run against a baseline.**
 Matching a `v6p-16` needs `v6e-32`, `v5p-64`, or `v4-128`: 115.7 chips rounded
 up to the next legal v4 shape. The conversion gives a number; the legal-shape
 table decides what you can ask for. Getting this wrong is silent: the job runs
 at half the compute and is compared against siblings as if the hardware matched.
-`AGENTS.md` carries it as a hard rule. Three traps in using a single scalar:
+`AGENTS.md` carries it as a hard rule. Traps in using a single scalar:
 
 | Trap | Detail |
 |---|---|
@@ -130,7 +134,7 @@ is not a supported slice size (Borg has no legal locus for it). Supported sizes
 for v5e: [8, 16, 32, 64]"`. That is a shape/pool ceiling, not a quota or credit
 shortfall; credit only lets you bid, and the topology must be legal first. The
 256 row above is the physical torus, and this pool caps the obtainable slice
-lower. Since v7 = 8x v4 = 8x v5e per chip, one v7-32 needs 256 v5e chips: four
+lower. Since v7 = 10.09x v5e per chip, one v7-32 needs 323 v5e chips: six
 v5e-64 slices, not power-equivalent as one job. Treat v5e as unusable for
 v7-scale training and skip it in surveys.
 

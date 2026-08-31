@@ -147,6 +147,11 @@ storage column is the slow one. Smokes are not repeated per row:
 | `lhr` | europe-west2 | `yulhrp`(154) | 154 | 3 | none team-wide (only `yulhrp-d` 500 TiB sp20) |
 | `atl` | us-east2 | `yo`(112) | 112 | 0 | `yo-d` 65.8 PiB sp500, `ym-d` 6.81 PiB sp50 |
 
+Capacities in this survey table and in the standing-decision table above were
+read at different times and have drifted (`rs-d` 49.3 vs 48.5 PiB, `oi-d` 28.4
+vs 29.6 PiB). Neither is authoritative; re-run the regeneration procedure below
+rather than copying either number into a new document.
+
 A chip count cannot see fragmentation, so read the slice column beside it. `tul`
 carries thousands of obtainable chips and, on this sample, exactly ONE placeable
 v7-32: rich in chips, unable to start your job. That is the green-preflight then
