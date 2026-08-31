@@ -19,7 +19,7 @@ two marked values. Naive BPTT gradients vanish for early timesteps. Probes:
 | Code + notebook (local mirror) | `~/work/rnn_unroll/` (`train.py`, `unroll_util.py`, `unroll_optimizer.py`, `model.py`, `data.py`, `dynamic_precision.py`, `grad_probe.py`) |
 | Lab notebook (READ FIRST, bottom-up) | `~/work/rnn_unroll/research/AUTORESEARCH_LOG.md` |
 | Launch/watch scripts | `~/work/rnn_unroll/scripts/` |
-| **Compute (REMOTE)** | TWO 4×A100-40GB GCE boxes in project viscam-cloud, usable IN PARALLEL: `deepflow-4a100-40gb-junhwahur-1` (us-central1-b) and `qiaos-4a100` (us-central1-f, ours). Local `logs_*` are empty — real logs live on the boxes. SSH via `../gcp_gpu_ssh.md`. |
+| **Compute (REMOTE)** | FOUR 4-card GCE boxes in project viscam-cloud, usable IN PARALLEL = **16 GPUs**: `qiaos-4a100` (us-central1-f, 40GB), `qiaos-4a100-2` (us-east1-b, 40GB), `qiaos-4a100-3` (us-central1-a, **80GB**), `deepflow-4a100-40gb-junhwahur-1` (us-central1-b, 40GB, lent). Local `logs_*` are empty — real logs live on the boxes. SSH + full box table in `../gcp_gpu_ssh.md`. |
 | W&B | project `rnn-unroll-adding` (entity zhh24-massachusetts-institute-of-technology); group = experiment name |
 | Results spreadsheet | EqR workbook `17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0`, tab `RNN-unroll-adding (qiaos)` (sheet-id 960697842). Log conclusions here (`../research/result_logging.md`). |
 
@@ -30,12 +30,27 @@ driven by a `scripts/run_*.sh` scheduler that writes `_sched*.log` and a final
 `ALL DONE` marker. A `watch_*.sh` polls over SSH and pings the owning session via
 `~/.amply/bin/amply_notify <session_id> -`.
 
-Two boxes = 24 lanes, but keep a sweep on ONE box. Split work by *sweep*, not by
+Four boxes = 48 lanes, but keep a sweep on ONE box. Split work by *sweep*, not by
 arm: a scheduler assumes it owns the GPUs it sees, so two schedulers on one box
 oversubscribe it. Give each box its own sweep, its own isolated launch dir, and
-its own watcher. `qiaos-4a100` is a fresh DLVM image (torch 2.9.1+cu129, driver
-580, NV12 all-pairs). It has no `.venv` and none of the repo yet, so a first run
-there must clone/rsync the code and build the venv.
+its own watcher. **There is no shared filesystem between boxes** — each holds its
+own copy of the code and its own logs; W&B is the only common sink, which is why
+cross-host duplicate cells cannot be detected locally and the CALLER must assign
+disjoint cells.
+
+**Setting up a new box is a copy, not a build: the DLVM image already carries
+torch, so the venv is `python3 -m venv --system-site-packages .venv` and nothing
+heavy is downloaded.** Copy `*.py` + `run_t500.sh` + `preflight.sh` from a
+working box (compare md5s afterwards, so arm spellings cannot silently diverge),
+plus `~/.netrc` for W&B and `launch_u2.sh` to `/tmp/`. Ubuntu 24.04 DLVM may lack
+`python3.12-venv`; `apt install` it if `ensurepip` errors, and delete the
+half-built `.venv` before retrying. Verify with the repo's own `test_unroll.py`
+(it pins the zero-delta identity) and a short real train — two boxes running the
+same seed must produce bit-identical loss.
+
+`qiaos-4a100-3` has **80GB** cards, double the rest. Cells use ~5GB/lane, so
+memory has never been the binding constraint; the 3-lanes/GPU convention is a
+CPU/thread limit that `preflight.sh` enforces, so measure before raising it there.
 
 ## How The Mechanism Works (the code)
 - `model.py` VanillaRNN: `h_t=tanh(x_t W_ih^T + h_{t-1} W_hh^T + b)`, readout on

@@ -84,15 +84,27 @@ instance-level keys leaves their access alone.
 
 ## Our Own Boxes (we created them; we can delete them)
 
-**`qiaos-4a100` — `a2-highgpu-4g`, 4×A100-SXM4-40GB, us-central1-f, on-demand
-(STANDARD, not preemptible).** Built with `enable-oslogin=FALSE` plus a metadata
-ssh-key, so the login user is `qiaos@`, not the `qiaos_google_com@` the OS-Login
-boxes want. Image is DLVM `pytorch-2-9-cu129-ubuntu-2404-nvidia-580` (driver
-preinstalled, torch 2.9.1+cu129, NV12 all-pairs NVLink), 1TB pd-ssd.
+**Three boxes, all `enable-oslogin=FALSE` + metadata ssh-key, so the login user
+is `qiaos@`, not the `qiaos_google_com@` the OS-Login boxes want. All DLVM
+`pytorch-2-9-cu129-ubuntu-2404-nvidia-580` (driver preinstalled, torch
+2.9.1+cu129, NV12 all-pairs NVLink), on-demand STANDARD, not preemptible.**
+
+| Box | Shape | Cards | Zone | Disk |
+|---|---|---|---|---|
+| `qiaos-4a100` | `a2-highgpu-4g` | 4×A100-SXM4-**40GB** | us-central1-f | 1TB pd-ssd |
+| `qiaos-4a100-2` | `a2-highgpu-4g` | 4×A100-SXM4-**40GB** | us-east1-b | 1TB pd-ssd |
+| `qiaos-4a100-3` | `a2-ultragpu-4g` | 4×A100-SXM4-**80GB** | us-central1-a | 1TB pd-ssd |
 
 ```bash
-gcloud compute ssh qiaos@qiaos-4a100 --zone=us-central1-f --project=viscam-cloud
+gcloud compute ssh qiaos@qiaos-4a100   --zone=us-central1-f --project=viscam-cloud
+gcloud compute ssh qiaos@qiaos-4a100-2 --zone=us-east1-b     --project=viscam-cloud
+gcloud compute ssh qiaos@qiaos-4a100-3 --zone=us-central1-a  --project=viscam-cloud
 ```
+
+Others' boxes we are lent time on live in the same project and are NOT ours to
+delete — notably `deepflow-4a100-40gb-junhwahur-1` (us-central1-b, 4×A100-40GB).
+List what actually exists rather than trusting any table, including this one:
+`gcloud compute instances list --project=viscam-cloud --filter="status=RUNNING"`.
 
 **Creating a 4-card box is a capacity fight, not a quota fight.** Free quota
 tells you nothing. Every 4-card shape in us-central1 can be STOCKOUT at once:
@@ -109,6 +121,44 @@ So retry in a loop across zones and shapes, drop optional attachments (8 local
 SSDs sharply cut the odds), and verify `RUNNING` before reporting success. H100
 quota exists only in us-central1 and europe-west4. Everywhere else
 `GPUS_PER_GPU_FAMILY` is 0 and no amount of retrying helps.
+
+## A Hunt Loop Silently Full Of Impossible Targets
+
+**A retry loop hides its own dead entries: every target fails every round
+anyway, so a permanently-impossible one is indistinguishable from a
+contended one.** One loop ran 253 rounds with 4 of its 15 targets unable to
+succeed under any circumstances. Audit a target list against three
+INDEPENDENT gates, because passing one says nothing about the others:
+
+| Gate | How a target dies | Check |
+|---|---|---|
+| Shape exists in that zone | `a2-ultragpu-4g` is absent from us-east4-a/b, `a2-highgpu-4g` from us-east1-c | `gcloud compute machine-types list --zones=<z> --filter="name=<mt>"` |
+| Matching per-family quota > 0 | us-east7 offers `a2-highgpu-4g` but holds A100-**80GB** quota only, so `NVIDIA_A100_GPUS=0` | quota metric for the exact family, not "A100" generally |
+| Boot disk fits regional disk quota | 1000GB pd-ssd against a 500GB `SSD_TOTAL_GB` limit (us-east7) | shrink size; **pd-balanced counts against `SSD_TOTAL_GB` too**, so switching type is not a fix, shrinking is |
+
+**Read the error text as the instrument that tells you which gate you are
+at.** Changing one variable and watching the error CHANGE is the cheap probe:
+at us-east7 the 1000GB request said `Quota 'SSD_TOTAL_GB' exceeded` and the
+400GB one said `STOCKOUT` — proof the quota gate had been passed and only
+capacity remained. Same trick in reverse at europe-west4: shrinking the disk to
+100GB surfaced `GPUS_PER_GPU_FAMILY exceeded`, proving the disk was never the
+blocker there and the real one was H100 quota held by someone else's VM.
+
+**Restarting a hunter resets counters it should inherit.** Seed "how many boxes
+do I already hold" and "which names are taken" from the on-disk won-list, or a
+restart re-wins its full quota on top of what it already has and reuses a live
+VM's name.
+
+## Quota Readings Are Stale; Only An Insert Is Evidence
+
+**Cloud Quotas API reported `NVIDIA_H100 used=0` in a region where 8 of 8 were
+held by a running VM.** The `limit` is trustworthy, the `usage` is not. To learn
+whether capacity is obtainable, attempt the insert — the error text is the only
+reliable reading. Also note H100/H200/B200 have **no** per-card quota metric:
+they are all governed by `GPUS-PER-GPU-FAMILY` keyed on `gpu_family`, and legacy
+`gcloud compute regions describe` cannot see them at all; use
+`gcloud alpha quotas info describe GPUS-PER-GPU-FAMILY-per-project-region
+--service=compute.googleapis.com`.
 
 ## Access Prerequisites (usually already true)
 
