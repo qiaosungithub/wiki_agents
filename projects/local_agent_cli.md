@@ -152,23 +152,75 @@ recovery.
 **`amply` and `amply-launch` are `blaze run`, so they work only inside a google3
 workspace.** They are shell functions, not aliases: typed from `~/work`, they
 `cd` to `$AMPLY_WORKSPACE` in a subshell. `amp`'s automatic restart drives tmux
-for that reason and one more. The alias needs an *interactive* shell, and a tmux
+for that reason and one more. The function needs an *interactive* shell, and a tmux
 pane outlives the `amp` process that started it.
 
 When srcfsd restarts, every new worker dies at startup inside `sysconfig` at
-`os.getcwd()`, with `OSError: [Errno 107] Transport endpoint is not
-connected`. The server's cwd sits inside a citc client (the binary chdirs there
-itself) and workers inherit it. The traceback names Python's stdlib, nowhere
-near the cause: check `readlink /proc/<ux-server-pid>/cwd`, then restart the
-server. Workers reparent to init and survive the UX server dying, so a run that
-looks lost usually needs the server back, not `amp start`.
+`os.getcwd()`. The server's cwd sits inside a citc client and workers inherit
+it: `ux/server.py` deliberately passes no `cwd=` to `subprocess.Popen`, and the
+google3 embedded interpreter leaves `sys.executable` empty, so CPython falls
+back to `_PROJECT_BASE = _safe_realpath(os.getcwd())` while importing `ctypes`
+— before any `--working_dir` chdir can run. `/api/run/new` still answers 200;
+the worker dies afterwards with `exit=1`. Two errnos, one disease: `[Errno 107]
+Transport endpoint is not connected` when srcfsd died and stayed down, `[Errno
+2] No such file or directory` when srcfsd came back as a NEW mount and left the
+old dentry dangling (2026-09-01). One probe covers both: `readlink
+/proc/<ux-server-pid>/cwd` shows `(deleted)`, or a path missing its
+`/google/src` prefix. Running workers are unaffected — they chdir'd to `~/work`
+long ago — so the symptom is "no new sessions, every old one fine". Workers
+reparent to init and survive the UX server dying, so a run that looks lost
+usually needs the server back, not `amp start`.
+
+**Give the gateway a cwd in `~/work`, not in the citc workspace, and this
+cannot recur.** `blaze run` forces the workspace cwd on it; running the
+already-built binary directly (below) does not. Note who creates the hazard:
+`.monitor_watch/srcfsd_wedge_sentinel.sh` auto-restarts srcfs on its convoy and
+D-count triggers, and prints a warning that the gateway's cwd was just severed
+— but nothing consumes that warning, which is exactly how the 2026-09-01
+outage began.
+
+### When `amply-launch` Prints Nothing At All
+
+Two independent faults compose into one symptom: a terminal parked on a blank
+line, indefinitely.
+
+*You cannot see the output.* `~/.tpu_bin/serialize_heavy.sh` ended its lock
+setup with `exec 210>"$LOCK" 2>/dev/null`, and `exec` with no command applies
+every redirection to the shell permanently — so blaze's whole progress stream
+landed in `/dev/null` (fixed 2026-09-01; `engineering.md` §Serialize `blaze`).
+On any copy that still has it, `TPU_SERIAL_HEAVY=0` skips the shim, and
+`/usr/local/google/tmp/rabbit*.log.INFO.*` holds what stderr lost.
+
+*The build never starts.* With `~/.redirect_to_dbip_on` present, `/usr/bin/blaze`
+rewrites `blaze run` into `rabbit run` (go/dbip). A healthy dbip request logs
+`Using locally-generated Source URI` and a `build_request_id` inside a second
+and finishes in ~25s. When srcfs or piper-api is throttled (`blade:srcfs ...
+Service is overloaded`, `Regurgitator disconnected`, `piper-api
+DEADLINE_EXCEEDED`), rabbitd logs `Received request` and then nothing at all,
+for as long as you let it — 12 minutes, twice, on 2026-09-01.
+
+**Revive without blaze.** `blaze run` only builds the binary and execs it; when
+the binary is already built, skip both:
+
+    BIN=$(ls /usr/local/google/_blaze_qiaos/*_buildrabbit/execroot/google3/blaze-out/k8-fastbuild/bin/third_party/py/simply/amply/amply)
+    "$BIN" version                     # rc=0 proves objfs can still serve it
+    tmux send-keys -t amply_ux:0 -l -- "cd ~/work && $BIN ux"
+    tmux send-keys -t amply_ux:0 Enter
+
+45 seconds to `/api/runs` 200, no CitC snapshot, no blaze lock, and the cwd is
+right. The objfs-GC exposure is identical to `blaze run`'s, not worse: the
+blaze-out tree is reclaimed once blaze goes idle, which is why
+`~/.tpu_bin/money_check_keepwarm.sh` exists. Refresh it with one `blaze build
+//third_party/py/simply/amply:amply` after the backend recovers; the running
+gateway needs no restart for that, because `_AMPLY_BIN` resolves through
+`realpath('/proc/self/exe')` and holds its own inode open.
 
 Any agent can self-restart the gateway with `~/.amply/bin/restart-amply-ux.sh`
 (bashrc: `amp-restart-ux`), bypassing `amp`. It mirrors the internal `amp` tmux
 sequence (`claude-amply.py:_launch_ux_in_tmux`): settle,
 `tmux kill-session -t amply_ux`, fresh detached session at the workspace, wait
 for `~/.bashrc`, `send-keys` `cd <ws> && amply-launch`. The tmux indirection is
-mandatory. `amply-launch` is a bashrc alias existing only in an interactive
+mandatory. `amply-launch` is a bashrc function existing only in an interactive
 shell (`bash -lc` misses it, bashrc returning early when non-interactive), and
 the detached session outlives the agent that ran it. The agent's bash tool
 shares the operator's default tmux socket, so plain `tmux` reaches `amply_ux`.

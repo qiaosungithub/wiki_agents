@@ -77,6 +77,7 @@ and each has a `README.md` index.
 | `EqR` / `EqR-jax` | `projects/eqr_jax.md` |
 | RNN unroll optimizer / adding problem / gradient propagation science line | `projects/rnn_unroll_adding.md` |
 | VLM training, data, benchmark reporting | `projects/vlm_training.md`, `projects/vlm_data.md`, `projects/vlm_metrics.md` |
+| **The amply gateway is down**; `amp new` worker dies at `os.getcwd()`; `amply-launch` prints nothing | `projects/local_agent_cli.md` §Restarting The Amply UX Server |
 | Agent web app, or a local agent CLI | `projects/agent_web.md`, `projects/local_agent_cli.md` |
 
 ## Global Rules

@@ -127,6 +127,18 @@ staging), not to re-find what the local run already covers.
   block for minutes on CitC, turning the shim into the stall it exists to
   prevent. Verify by racing two builds and reading the `waited Ns` line — a
   serializer that never logs a wait has not been shown to serialize anything.
+  A fifth property was missing and cost 40 minutes on 2026-09-01, the amply
+  gateway down throughout: **the shim must not swallow stderr.**
+  `exec 210>"$LOCK" 2>/dev/null` reads as "quiet the fd-210 open", but `exec`
+  with no command applies EVERY redirection to the shell permanently — and to
+  whatever it execs. Blaze puts its entire progress stream, its "another command
+  is running" notice, and the dbip `build_request_id` link on stderr, so a build
+  stalled on a CitC snapshot was indistinguishable from a frozen terminal.
+  Brace-group it: `{ exec 210>"$LOCK"; } 2>/dev/null`. Test with a verb that is
+  guaranteed to fail on stderr (`hg status` outside a repo, which is the one
+  heavy `hg` verb and so takes the real lock path); a shim that prints nothing
+  there is swallowing. `ls -l /proc/<pid>/fd/2` tells you the same thing about a
+  build already running.
 - **Count blaze SERVERS by process identity, never by grepping for "blaze" in
   argv.** Every binary blaze ever built runs from a path containing
   `_blaze_qiaos/.../blaze-out/`, so `ps | grep blaze | wc -l` counts agent
