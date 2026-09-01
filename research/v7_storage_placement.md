@@ -16,11 +16,11 @@ weighting *breadth of cells*: a one-cell metro is one stockout from useless.
 
 | metro | v-family | v7 cells live | storage cell | smoke | role |
 |---|---|---|---|---|---|
-| `cbf` | v7 | `yucbfiv`, `yucbful`, `yucbfwv`, `je`, `yucbfrl` | `is-d` 68.1 PiB sp50 | completed 12/12 | primary; the only metro with cell redundancy, and the generation source |
-| `tul` | v7 | `yutulpz`, `nl`, `nk` | `oi-d` 29.6 PiB (nm-d's quota is FULL, see below) | scheduled, 8 tasks | second NA metro; existing `jax_llava` work sits here |
-| `lpp` | v7 | `yulpptr` | `li-d` 85.3 PiB sp50 | ran to step 6 | European leg; largest storage of the three originals |
-| `dfw` | v4 | `yudfwra` | `rs-d` 48.5 PiB sp50 | loader-resolve + read PASS | 4th FULL mirror (all 16 datasets). v4 is ~8x cheaper/chip than v7; ckpt bucket `_CELL_BUCKETS['yudfwra']` → rs-d |
-| `las` | v4 | `dl` | `dl-d` 31.6 PiB sp10 | loader-resolve + read PASS | PARTIAL: only the maze v4 working set (64x64-offline + companions + settingA/B), NOT settingB_v3 / 128x128. Non-oversold fallback when `dfw` v4 fragments. ckpt bucket `dl` → dl-d |
+| `cbf` | v7 | `yucbfiv`, `yucbful`, `yucbfwv`, `je`, `yucbfrl` | `is-d` 67.3 PiB sp50 | completed 12/12 | primary; the only metro with cell redundancy, and the generation source |
+| `tul` | v7 | `yutulpz`, `nl`, `nk` | `oi-d` 31.4 PiB (nm-d's quota is FULL, see below) | scheduled, 8 tasks | second NA metro; existing `jax_llava` work sits here |
+| `lpp` | v7 | `yulpptr` | `li-d` 85.6 PiB sp50 | ran to step 6 | European leg; largest storage of the three originals |
+| `dfw` | v4 | `yudfwra` | `rs-d` 45.0 PiB sp50 | loader-resolve + read PASS | 4th FULL mirror (all 16 datasets). v4 is ~8x cheaper/chip than v7; ckpt bucket `_CELL_BUCKETS['yudfwra']` → rs-d |
+| `las` | v4 | `dl` | `dl-d` 32.0 PiB sp10 | loader-resolve + read PASS | PARTIAL: only the maze v4 working set (64x64-offline + companions + settingA/B), NOT settingB_v3 / 128x128. Non-oversold fallback when `dfw` v4 fragments. ckpt bucket `dl` → dl-d |
 | `sin` | B200 + v7 | `sk`, `sn`, `so` (v7); `sj` (B200) | `si-d` 9.25 PiB sp50 | completed 12/12; crc32c mirror verified | PARTIAL: the only metro with B200 compute next to data. Holds ARC-1, ARC-2, parcae (`strict-4d1138c` + `nobos` + eval-assets), codi/`coconut_data`; NOT the maze or VLM sets |
 
 **`las`/`dl-d` and `sin`/`si-d` are partial mirrors, so do not assume a dataset
@@ -63,7 +63,7 @@ Rejected, with the reason, so this is not re-litigated:
 | Rejected | Why |
 |---|---|
 | `ske`, `kul`, `phx` | Most chips of all, zero team storage. Compute without co-located storage is the pruner-kill case. |
-| `grq` / `el` | The best storage anywhere (95.7 PiB, same cell as the chips), but obtainability swung 0 -> 937 in a day. A single cell that thin cannot be a primary. |
+| `grq` / `el` | The best storage anywhere (`el-d`, same cell as the chips; see the survey table), but obtainability swung 0 -> 937 in a day. A single cell that thin cannot be a primary. |
 | ~~`sin`~~ | No longer rejected; now a PARTIAL data metro (`si-d`), stood up as the only metro with B200 compute. Its storage is the thinnest of any candidate (9.25 PiB), so it carries the GPU-line corpora, not a full mirror. See the standing-decision table above. |
 | `ckv` | Good storage; obtainability has since recovered from zero (2398 on a later sample), so re-check rather than treat the rejection as settled. |
 | ~~`dfw`~~ | No longer rejected; now the 4th FULL data metro (`rs-d`), stood up for cheap v4. See the standing-decision table above. |
@@ -134,23 +134,23 @@ storage column is the slow one. Smokes are not repeated per row:
 |---|---|---|---:|---:|---|
 | `ske` | *(none)* | `yuskedq`(17646) | 17646 | 164 | none |
 | `kul` | *(none)* | `yukulwh`(14158) | 14158 | 341 | none |
-| `cbf` | us-central1 | `yucbful`(4024) `yucbfiv`(4003) `yucbfwv`(2314) `je`(2028) `yucbfrl`(84) | 12453 | 43 | `is-d` 68.1 PiB sp50, `jq-d` 18.9 PiB sp10 |
+| `cbf` | us-central1 | `yucbful`(4024) `yucbfiv`(4003) `yucbfwv`(2314) `je`(2028) `yucbfrl`(84) | 12453 | 43 | `is-d` 67.3 PiB sp50, `jq-d` 23.8 PiB sp10 |
 | `phx` | us-west8 | `yuphxrp`(7344) | 7344 | 6 | none team-wide (only `yuphxrp-d` 500 TiB sp20) |
 | `sin` | asia-southeast1 | `sk`(4048) `so`(2530) `sn`(662) | 7240 | 121 | `si-d` 9.25 PiB sp50, `sm-d` 1.57 PiB sp50 (9 registered cells in all — enumerate, do not guess) |
-| `dfw` | us-south1 | `yudfwra`(2885) | 2885 | 11 | `rs-d` 49.3 PiB sp50, `rw-d` 4.94 PiB sp20 |
-| `lpp` | europe-north1 | `yulpptr`(2612) | 2612 | 34 | `li-d` 85.3 PiB sp50, `lu-d` 85.1 PiB sp50 |
-| `ckv` | *(none)* | `mb`(2398) | 2398 | 21 | `mg-d` 77.5 PiB sp10, `me-d` 26.9 PiB sp20 |
-| `tul` | us-central2 | `yutulpz`(2004) | 2004 | **1** | `nm-d` 44.2 PiB sp50, `oi-d` 28.4 PiB sp50 |
-| `mrn` | *(none)* | `yumrnel`(1168) | 1168 | 67 | `qo-d` 8.77 PiB sp50, `qr-d` 0.14 PiB sp0 |
-| `uos` | us-east7 | `gc`(960) | 960 | 14 | `gd-d` 21.5 PiB sp10, `ge-d` 17.8 PiB sp1 |
-| `grq` | europe-west4 | `el`(915) | 915 | 13 | `el-d` 95.7 PiB sp50, `ej-d` 13.3 PiB sp50 |
+| `dfw` | us-south1 | `yudfwra`(2885) | 2885 | 11 | `rs-d` 45.0 PiB sp50, `rw-d` 5.12 PiB sp20 |
+| `lpp` | europe-north1 | `yulpptr`(2612) | 2612 | 34 | `li-d` 85.6 PiB sp50, `lu-d` 91.8 PiB sp50 |
+| `ckv` | *(none)* | `mb`(2398) | 2398 | 21 | `mg-d` 71.0 PiB sp10, `me-d` 29.6 PiB sp20 |
+| `tul` | us-central2 | `yutulpz`(2004) | 2004 | **1** | `nm-d` 57.2 PiB sp50, `oi-d` 31.4 PiB sp50 |
+| `mrn` | *(none)* | `yumrnel`(1168) | 1168 | 67 | `qo-d` 9.71 PiB sp50, `qr-d` 0.14 PiB sp0 |
+| `uos` | us-east7 | `gc`(960) | 960 | 14 | `gd-d` 22.7 PiB sp10, `ge-d` 17.3 PiB sp1 |
+| `grq` | europe-west4 | `el`(915) | 915 | 13 | `el-d` 94.2 PiB sp50, `ej-d` 11.8 PiB sp50 |
 | `lhr` | europe-west2 | `yulhrp`(154) | 154 | 3 | none team-wide (only `yulhrp-d` 500 TiB sp20) |
-| `atl` | us-east2 | `yo`(112) | 112 | 0 | `yo-d` 65.8 PiB sp500, `ym-d` 6.81 PiB sp50 |
+| `atl` | us-east2 | `yo`(112) | 112 | 0 | `yo-d` 64.7 PiB sp500, `ym-d` 6.56 PiB sp50 |
 
-Capacities in this survey table and in the standing-decision table above were
-read at different times and have drifted (`rs-d` 49.3 vs 48.5 PiB, `oi-d` 28.4
-vs 29.6 PiB). Neither is authoritative; re-run the regeneration procedure below
-rather than copying either number into a new document.
+Storage ceilings above were read together on 2026-08-31 with `flex.par ls
+--group=deepmind-resources-colossus --service=colossus`, so they are one
+snapshot rather than a stitched history. They move by a few PiB a month; re-read
+them rather than quoting these.
 
 A chip count cannot see fragmentation, so read the slice column beside it. `tul`
 carries thousands of obtainable chips and, on this sample, exactly ONE placeable
