@@ -179,6 +179,42 @@ D-count triggers, and prints a warning that the gateway's cwd was just severed
 — but nothing consumes that warning, which is exactly how the 2026-09-01
 outage began.
 
+**`amply-launch` now does this itself** (`~/.bashrc` `_amply_blaze`, rewritten
+2026-09-01), so the one-line revive in the tmux pane is enough and the `cd` in
+front of it is redundant. It `blaze build`s in `$AMPLY_WORKSPACE` (blaze needs
+that cwd), resolves `blaze-bin/.../amply` through `readlink -f` to its objfs
+inode, then `( cd ${AMPLY_RUN_CWD:-$HOME/work} && exec "$bin" "$@" )`. Every
+revive path inherits the fix: `~/.amply/bin/restart-amply-ux.sh` and `amp`'s
+own `_launch_ux_in_tmux` both drive `amply-launch`. If the build fails or times
+out but a built binary exists, it warns and runs that binary rather than
+leaving the gateway down — the 2026-09-01 case, where a stalled dbip build sat
+12 minutes beside a perfectly good binary.
+
+Two traps that rewrite hit, both worth keeping:
+
+*`blaze run` leaks the host build lock for the gateway's whole lifetime.* The
+`blaze` on PATH is `~/.tpu_bin/shims/blaze`, which holds
+`/tmp/host_heavy.<uid>.lock` on fd 210 and then runs blaze WITHOUT `exec`, so
+the fd is inherited all the way down into the binary `blaze run` execs. Measured
+2026-09-01: `readlink /proc/<gateway>/fd/210` pointed at the lock, and every
+`blaze` and `hg status` on the box queued behind the gateway (up to `-w 1800`,
+then degrading to parallel). Building and exec'ing separately drops the fd with
+the build subshell, so the gateway holds nothing.
+
+This is not an amply bug — it is every `blaze run` through the shim. The lock is
+meant to cover a BUILD; `blaze run` makes it cover the whole RUN. Caught live
+the same evening on an unrelated line: `blaze run
+//experimental/qiaos/elt_dit_pkg:persite_prodarch_test` held the lock for the
+test's entire execution while two other builds queued on `flock -w 1800 210`.
+So for anything long-lived — a server, a soak test, a watcher — `blaze build`
+the target and run the binary yourself; reserve `blaze run` for things that
+exit in seconds. `readlink /proc/<pid>/fd/210` names the culprit in one command.
+
+*Bounding that build needs `timeout -k`, not `timeout`.* The shim blocks in
+`flock -w 1800`, and bash defers SIGTERM while a foreground child runs, so a
+plain `timeout` cannot interrupt it — two test runs sat the full 120 s with a
+1-second bound. SIGKILL cannot be deferred: `timeout --foreground -k 15 <secs>`.
+
 ### When `amply-launch` Prints Nothing At All
 
 Two independent faults compose into one symptom: a terminal parked on a blank
