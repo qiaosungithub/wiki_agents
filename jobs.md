@@ -410,6 +410,33 @@ by `tpu queue-status` and `tpu check`. A no-XID build (a `found[]` zombie) is
 requeued, not dangling; a crashed worker's stale BUILDING claim expires after
 `--build_stale_s`.
 
+**A worker killed mid-build costs 30 minutes, not one build, so anything that
+kills workers on a timer must reclaim what it killed.** `--build_stale_s`
+defaults to 1800 s: the row stays BUILDING under a dead worker, and the
+dispatch worker's backpressure gate (`N BUILD_REQUESTED/BUILDING still
+draining; no new dispatch this round`) then refuses to start ANY other job
+until it expires, so one killed build parks the whole queue. Measured
+2026-09-01 on lyy's two-arm race: 70 minutes, both arms killed and parked in
+turn, zero XIDs. The killer was the operator's own
+`lyy-work/vlm/g3/watch/lock_yield.sh`, which pauses the npu dispatch worker
+whenever a non-npu process has waited `THRESH=600 s` on
+`/tmp/tpu_build.host.lock` — `tmux kill-session` plus SIGTERM to every
+`route_check` matching the queue file, then `PAUSE=420 s`, then restart. Its
+cycle (~8-9 min under contention) is SHORTER than a real build, so every firing
+converted an in-flight build into a 30-minute park; the only trace afterwards is
+`reclaimed: BUILDING claim went stale (>1800s)` in `last_reason`.
+
+Three properties any such pauser needs. It must reset the BUILDING rows owned by
+the worker it just killed back to QUEUED — safe precisely because no worker
+exists during the pause, so this is the one moment a second writer cannot race
+the drainer. It must not judge by a waiter's AGE alone: a waiter wedged in
+FUSE-D never finishes, its `etimes` grows without bound, and the pause becomes
+permanent (observed climbing 681 → 1209 → 1731 s across three firings). And it
+must check WHO holds the lock before yielding: killing the dispatch worker does
+nothing when the holder is a different process of the same operator (a
+synchronous `tpu queue` launch), which is how one lyy launch made lyy pause
+lyy's own queue for an hour while the lock never moved.
+
 A `found[]` / no-XID verdict is a symptom, and the two cheapest causes are not
 in your code. Read `last_reason`, then elapsed time: far LESS than a real build
 means blaze was never reached (134 s against a 236 s honest build), so staging
