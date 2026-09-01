@@ -437,6 +437,16 @@ nothing when the holder is a different process of the same operator (a
 synchronous `tpu queue` launch), which is how one lyy launch made lyy pause
 lyy's own queue for an hour while the lock never moved.
 
+Fixed 2026-09-01 in `lock_yield.sh`: `THRESH` 600 -> 2100 (above the CLI's own
+1800 s degrade window, so the pause is reserved for a wait the CLI cannot clear
+itself), plus a `_reclaim_killed_claims` step between the kill and the pause
+that rewrites BUILDING rows whose `worker_id` names a dead pid back to QUEUED.
+It runs in the one window where a second writer cannot exist, leaves `attempts`
+alone (a courtesy pause is not a failed attempt, so the 3-strikes HELD count
+stays honest), never touches a row whose worker is still alive or whose
+`worker_id` is absent, and writes temp-then-rename so an interrupted pass cannot
+leave half a queue file.
+
 A `found[]` / no-XID verdict is a symptom, and the two cheapest causes are not
 in your code. Read `last_reason`, then elapsed time: far LESS than a real build
 means blaze was never reached (134 s against a 236 s honest build), so staging
