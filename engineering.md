@@ -517,6 +517,25 @@ global D-count gate ("restart when procs_blocked ≥ N") MISSES a low-D-count
 convoy where one orphan holds a lock with waiters queued behind it. Detect that
 by the held lock plus its waiters, not by the aggregate count.
 
+**Before a watchdog reaches for a fleet-wide remedy, check what the tool it is
+watching already does about the same failure.** Both locks the convoy detector
+scans DEGRADE rather than block forever — `tpu_wrapper.sh` takes
+`/tmp/tpu_build.host.lock` with `flock -w ${TPU_SERIAL_BUILD_WAIT:-1800}` and
+`/tmp/tpu_stage.<uid>.lock` with `-w 900`, and on timeout proceeds in PARALLEL
+with a warning, exactly so "a wedged holder can never block the whole fleet's
+launches forever". A wedged holder therefore costs each waiter at most 30
+minutes, not the fleet. The sentinel's `CONVOY_HOLD_SECS` was 90 s — one
+twentieth of that window — so it preempted the CLI's own mitigation almost
+immediately, and its remedy is not local: an srcfs restart severs every FUSE
+call in flight and leaves orphaned connections that pin unrelated processes in
+D-state forever (2026-09-01: three restarts in one day; the 16:02 one held
+monitor-v64's `du /tmp` for 32 minutes, immune to `kill -9`). Raised to 2100 s
+(1800 + margin) so the restart is reserved for a convoy the CLI's own degrade
+path has already failed to clear. The restart itself stays armed and is still
+the only thing that frees a permanently wedged holder — a D-state process never
+releases the lock on its own, and the waiters merely route around it. What
+changed is the timing, not the capability.
+
 ## A Tool Call Only Fires As A Structured Call, Never As Prose
 
 **An action you "wrote out" but did not issue as a real, structured tool call
