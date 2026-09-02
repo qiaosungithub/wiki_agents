@@ -111,6 +111,17 @@ verdict cell.** A verdict cell reading `FINAL 1/5` is indistinguishable from a
 finished cell six weeks later; `FINAL 1/5 -- STILL RUNNING at 50800/60000` cannot
 be quoted by accident.
 
+**Never put an agent/session version, a run-batch tag or any other internal
+bookkeeping token in a results row.** A tab records WHAT WAS RUN, not who ran
+it or in which shift. `v14_ihts_10` names a session; `truestate k=10 (W_ih
+complete)` names an experiment, and only the second lets a reader six months
+later know what the number means or what it compares against. The launcher's
+arm string is internal too — translate it into the tab's own vocabulary, which
+you get by reading the neighbouring block headers, not by inventing one.
+A row named after the batch also hides its comparison: once the arm above is
+called `truestate k=10`, the right place for its W_ih-complete twin is directly
+beneath it, which the internal name actively obscures.
+
 ## Row Numbers Are Invalidated By Your Own Write
 
 **`insert-rows` shifts every row below it, so any row index resolved before the
