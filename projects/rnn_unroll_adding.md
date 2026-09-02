@@ -20,7 +20,7 @@ two marked values. Naive BPTT gradients vanish for early timesteps. Probes:
 | Lab notebook (READ FIRST, bottom-up) | `~/work/rnn_unroll/research/AUTORESEARCH_LOG.md` |
 | Launch/watch scripts | `~/work/rnn_unroll/scripts/` |
 | **Compute (REMOTE)** | FOUR 4-card GCE boxes in project viscam-cloud, usable IN PARALLEL = **16 GPUs**: `qiaos-4a100` (us-central1-f, 40GB), `qiaos-4a100-2` (us-east1-b, 40GB), `qiaos-4a100-3` (us-central1-a, **80GB**), `deepflow-4a100-40gb-junhwahur-1` (us-central1-b, 40GB, lent). Local `logs_*` are empty — real logs live on the boxes. SSH + full box table in `../gcp_gpu_ssh.md`. |
-| W&B | project `rnn-unroll-adding` (entity zhh24-massachusetts-institute-of-technology); group = experiment name |
+| W&B | project `rnn-unroll-adding` (entity zhh24-massachusetts-institute-of-technology). **Two group conventions coexist and BOTH are real**: per-cell `T500.<arm>@<lr>` (the T=500 campaign's own scheme, one group per (arm, lr), 5 runs each) and per-batch `<setting>_<topic>_<date>` (e.g. `T500_v8_20260830`, `normpower_probe`). Match whichever the neighbouring rows of that block use — do not convert one into the other. Set `--wandb_group` at launch; back-fill a finished run with `api.run(...).group = ...; .update()`. |
 | Results spreadsheet | EqR workbook `17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0`, tab `RNN-unroll-adding (qiaos)` (sheet-id 960697842). Log conclusions here (`../research/result_logging.md`). |
 
 Compute is plain processes on reserved boxes, NOT Borg/XManager: no BATCH tier,
@@ -171,6 +171,18 @@ CPU/thread limit that `preflight.sh` enforces, so measure before raising it ther
   path before writing "none of the arms work". Full rule + post-mortem:
   `~/work/rnn_unroll/research/CONTAMINATION_AUDIT.md`.
 
+- **`norm_power=1.0` annihilates the site-magnitude ordering exactly, which is
+  why every merge-side intervention works on np0.5 and fails on np1.0.**
+  Measured at production shape (h128, T=500, k=30): raw site norms span 2.0e104;
+  under `p=0.5` the ten sites nearest the loss carry **92.94%** of the merged
+  weight, under `p=1.0` they carry **2.00%** — exactly their share by count,
+  because every one of 499 live sites enters with weight 1.000. Masking or
+  reweighting a uniform sum is a rescale, not a reweighting, so there is nothing
+  for `--site_mask_k` or `--unroll_ih` to exploit. This was carried as an
+  untested hypothesis for two generations; it is now measured (at
+  initialisation — the profile shifts as rho climbs, and a mid-training
+  re-measurement has not been done).
+
 ## Ideas Backlog / Operator Ideas (status)
 eps-shrink ✅std · dynamic_precision ✅default-on (impl FIXED 2026-08-28) ·
 depth-weight 1/n & 1/n² (use poly*_late!) ⏳ · partial norm_power ✅champ ·
@@ -180,6 +192,140 @@ magnitude-floor/hybrid, RMS vs L2) = survey.
 **⏳ means UNTESTED, not "tried and failed"** — the dyn-prec-ON evidence that
 appeared to close some of these was void (see Confirmed Findings). Being
 re-measured under the fixed hook.
+
+## Errors This Line Repeats (each cost a real result)
+
+**`gsheets mutate insert-rows --start=N` BLANKS the row that was at N+1.**
+Observed three times: the inserted row appears, and the row immediately below it
+comes back empty on read-back. Re-read the whole block after every insert and
+re-write any row that lost its cells; keep the row's values in the shell script
+so the restore is one command. `mutate format` has the sibling defect — it edits
+by STYLE INDEX, so formatting one row silently recolours every other row sharing
+that style (greying rows 177-208 also greyed 174 and later 161).
+
+**An lr string is a REGEX LANDMINE: `5.761e-4` contains `.` and `-`.** Querying
+wandb with `{"display_name": {"$regex": f"^{cell}_s[0-9]+$"}}` returns 0 for a
+cell that exists, and 0 reads as "the data is gone". Two separate false alarms
+this shift, one of which nearly became a "we lost a 60k TOUCHED 5/5 cell"
+report. Always `re.escape()` the cell name, or look the run up by id.
+
+**A `run_t500.sh` scheduler started days ago RE-RUNS ITS WHOLE JOBFILE FOREVER**,
+truncating the finished logs each time: `_sched.log` showed `DONE` immediately
+followed by `START` for the same seed, and one cell had burned four full 60k
+rounds. Before concluding a cell's log was corrupted, check `ps` for an old
+scheduler owning it; before killing one, confirm the completed data is already
+on wandb. Kill the parent first (it respawns lanes), then the per-lane shells,
+then the `train.py` children.
+
+**Create a W&B group for every batch you launch, and resolve a group's existence
+by QUERYING it, never by scanning a run list.** Runs launched without an explicit
+`--wandb_group` inherit whatever the predecessor's launcher hardcoded, so a
+batch silently lands in someone else's group; 96 runs across three v13 batches
+did. Put the group routing in the launcher so it cannot be forgotten.
+★ `api.runs(project)` returns only a recent window, so a scan for
+mis-grouped runs reports 0 while 79 sit outside it, and a group that the window
+missed reads as "never existed". **This produced a false retraction**: the
+per-cell `T500.<arm>@<lr>` groups were declared fabricated and 54 spreadsheet
+links called dead, when all 39 T=500 cells in fact resolve to 5 runs each.
+Always filter by `{"group": <name>}` or `{"display_name": {"$regex": ...}}`
+before concluding anything is absent.
+
+**A cell in the results tab is one clause, and shared context belongs in the
+block header written once.** Notes reached 407 characters per row restating the
+same protocol; `../research/result_logging.md` §Short Cells owns the rule. Per
+row, write only what changes interpretation — usually just how the comparison
+twin scored.
+
+**`--unroll_ih 0` versus `1` is not "a variant versus the default": the rows
+without it are PARTIAL unrolls.** W_ih and b are used at every timestep exactly
+like W_hh, so an unroll that merges only W_hh leaves per-timestep gradients
+unextracted. Present a W_ih row as the complete form and mark the W_hh-only rows
+as incomplete, not the reverse.
+
+**A flag that only reaches one branch is accepted, changes nothing, and names
+the arm after a treatment it never received.** `--unroll_ih 1` was parsed and
+recorded on every arm, but the W_ih merge sat inside the non-`true_state` branch
+of the substitution block, so on truestate arms it was a no-op: `ihts_*` runs
+were bit-identical to their `ts_*` twins for weeks of GPU time. Nothing errored
+and the run name said `ih`. When you add a knob that must apply to several code
+paths, assert it at the point of USE in each path, and gate it with a test that
+the treated and untreated runs DIFFER (measured, production shape: W_ih norm
+0.8389 vs 0.8704 after 12 steps). A gate that only checks "flag off reproduces
+the old numbers" passes happily while flag-on does nothing.
+
+**Verify a launch by counting processes per seed, never by the launcher's own
+success message.** A missing arm or a missing script makes the remote guard
+misfire while the wrapper still prints its LAUNCHED line, and the card idles for
+a full watcher cycle. `ps -eo cmd | grep -c "[t]rain[.]py.*<cell>_s<N>$"` for
+each of the 5 seeds is the check.
+
+**The four boxes' launcher scripts DRIFT; grep the arm on the box you are about
+to use.** `run_t500_v12.sh` on box2 has `tu_np1_30_mask10` but not the np0.5
+version, so an edit anchored on a line that exists elsewhere fails there. Copy
+the launcher to a new name before adding arms; never edit in place while ~30
+launchers are reading it incrementally.
+
+**Stagger seed launches by >= 40 s.** `run_t500_v12.sh` forks every lane at once
+and concurrent `wandb.init` handshakes time out, killing seeds silently: the
+card still reads busy and the watcher still prints a healthy lane count. 28 s
+was measured to be insufficient.
+
+**A metric derived from a marker the producer writes AT EXIT cannot describe a
+running cell.** The watcher counted TOUCHED via `solved_at=`, so live cells read
+0/5 however far below the threshold they had gone. Derive TOUCHED from the eval
+stream, like FINAL and best.
+
+**Cap a paired comparison at min(step reached by BOTH arms).** A cap taken from
+one arm silently truncates the other and inverts the result: one such reading
+gave 16/20 pairs and p=0.0118 where the matched cap gives 14/20 and p=0.115.
+
+**At n=5 the two-sided sign test floors at p=0.0625**, so no single (arm, lr)
+cell can ever be significant on paired seeds. Pool across lrs — but only within
+one arm: `--unroll_ih` and `--site_mask_k` both help np0.5 and fail on np1.0, so
+pooling the two arms averages opposite responses.
+
+**A null on this line is a statement about how many pairs you pooled, not about
+the effect; the same data reverses when the ladder grows.** Four rungs of
+W_ih-complete vs W_hh-only on np0.5 k=10 gave TOUCHED 14/20 (Fisher p=0.33) and
+paired 13/20 (sign p=0.26), reported as "the ceiling moves, the median does
+not". Fourteen rungs of the same arm, same harvest, same cap rule, give paired
+54/70 (sign p=5.9e-6, Wilcoxon 1.8e-7) and TOUCHED 36/70 vs 18/70 (p=0.0030).
+No earlier number was wrong and nothing was recomputed differently — the small
+pool simply could not separate "no effect" from "too few pairs". Quote a null
+only with its pair count, and verify a p you are about to publish against a
+second implementation plus a label-shuffled control that must come back
+non-significant.
+
+**Fleet capacity is 16 concurrent cells, and a 5-rung ladder per arm is 5 of
+them.** Four boxes x 4 GPUs, one 5-seed cell per GPU (measured: 20 lanes/box).
+So any plan with more than three arms at a full sqrt3 ladder is over capacity
+and needs either a narrowed ladder or a second wave. Compute this BEFORE
+pre-registering rungs; discovering it at launch time forces the ladder to be
+re-picked, which is the one thing pre-registration exists to prevent.
+
+**The tab's cell label is not the wandb run name, and the mismatch returns
+`NO RUNS` rather than an error.** The tab and the group use
+`T500.<arm>@<lr>`; the run's display name is `T500_<arm>_lr<lr>_s<seed>`
+(`.`->`_`, `@`->`_lr`). Feeding the harvest tool the tab's label reports a
+finished cell as missing, which reads as lost data. Verify a harvest path by
+reproducing a row already in the tab before trusting it on a new one.
+
+**`poly*_late` ranks sites from the SEQUENCE end, `poly*_early` from the live
+window start; under TBPTT only the second is window-aligned.** `rlate = C - i`,
+so with k live sites the late weights span 1..1/k (or 1..1/k^2), which is a real
+profile. The early weights would be 1/471..1/500 — all but identical — if they
+were not explicitly re-ranked to the live window, and the code does re-rank
+them. Before using a new depth weight, print the weights it actually applies to
+the live sites; a weight that varies by 6% across the window is a no-op wearing
+a name.
+
+**Grey the rows a predicate SELECTS, never the rows a DATE contains.** A bulk
+pass greying "everything predating the W_ih fix" over-greyed 90 rows: the fix
+was branch-specific (`true_state` only), so runs that were always correct share
+the date. Measured afterwards: the rule for the actual bug (`unroll_ih=1` AND
+`true_state=1`) matches ZERO logged rows, because the affected runs were killed
+before they were ever logged. Derive a colouring predicate from each run's own
+recorded config, and check it selects a non-empty set before applying it.
 
 ## Working Rhythm
 Queue serially (GPUs shared 12 lanes per box); launch from an isolated dir (e.g.

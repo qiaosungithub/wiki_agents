@@ -145,7 +145,35 @@ match the block you write into.
 | Clear inherited formatting, then apply intentionally | Inserting a row copies the neighbor's, backgrounds included, encoding a condition your run does not meet. |
 | The CLI splits cell text on `,` and `|` | A comma starts a new COLUMN, a pipe a new ROW, so an unescaped prose note scatters across the metric columns and the row below, overwriting real data that reads back as plausible. Escape commas (`\,`), keep pipes out of the text, and read the whole written range back. |
 | Keep the metric columns visible | Long text in an early column defeats the side-by-side comparison the layout exists for. |
-| Read colors back, not just values | Render the tab (export PNG) after a structural change. |
+| Read colors back, not just values | Export xlsx and parse it with a real parser (§A Colour Check That Cannot Fail); render a PNG too after a structural change. |
+
+## A Colour Check That Cannot Fail
+
+**Before trusting any colour reading, export the sheet TWICE with no edit in
+between and diff the two: a reader that reports changes there is measuring
+itself, not the sheet.** `inspect-cell` does not return colour at all, so it
+cannot be the check. A hand-rolled xlsx XML/regex reader is worse, because it
+returns plausible numbers: mine reported 13 changed rows between two identical
+exports, and told me a successful one-row edit had recoloured 42 rows purple.
+Both readings were false, and both would have sent me to "repair" a sheet that
+was already correct. Parse the exported xlsx with a real parser (`openpyxl`),
+resolve each cell to its actual RGB, and run the zero-change control first;
+only then compare a before/after pair. Style INDICES are not comparable across
+two exports of the same workbook — the same fonts come back in a different
+order.
+
+**Recolour by explicit row range, not with a command that edits by style
+index.** `mutate format` applies to a style, so recolouring one row silently
+recolours every other row sharing it; two such passes hit unrelated rows twice
+on one tab. A `raw-batch` `repeatCell` request over explicit
+`startRowIndex`/`endRowIndex` touches only those rows (measured collateral: 0
+over 125 rows). Keep the pre-change xlsx as the rollback, and state the
+measured collateral count when you report the change.
+
+**When a colour is given a second meaning, rewrite the legend in the same
+edit.** Grey on one tab meant "W_hh-only"; it was reused for "predates the fix"
+and for one shift both meanings were live with no note saying so. The row that
+defines the colour is the row readers quote.
 
 ## Every Row Carries Its Train Metrics
 
