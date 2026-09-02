@@ -771,6 +771,26 @@ after a big reclaim load stays high for minutes with paging already at zero.
 idle standing heaps (`engineering.md` §Diagnose From Evidence, Not From The Most Available Story), not the interactive
 process that dies.
 
+**`systemd-oomd` kills do NOT increment `/proc/vmstat`'s `oom_kill`, so a
+counter-based wake criterion stays silent through a whole outage.** Measured
+across an event that killed 34 processes in one sweep: the counter held at 37
+with zero delta from before to after. The kernel OOM killer and systemd-oomd are
+different mechanisms — oomd acts on cgroup PSI memory pressure and kills the
+whole scope, well before the kernel would act, so nothing it does appears in the
+kernel counter. Detect it in the journal instead:
+
+```bash
+journalctl --since '-1h' | grep -E 'systemd-oomd.*(Marked .* for killing|killed [0-9]+ process)'
+```
+
+The line to match is `Marked <unit> for killing due to memory pressure for
+<slice> being NN% > 50.00% for > 20s with reclaim activity`, followed by
+`systemd-oomd killed N process(es) in this unit`. A whole `tmux-spawn-*.scope`
+goes at once, so every watcher, sentinel and background job started from that
+tmux dies together, silently and with no error output in their own logs. Their
+simultaneous death is the tell: a script that crashed on its own leaves a stack
+trace and dies alone.
+
 `/tmp` is tmpfs and counts against RAM: each heartbeat run `df -h /tmp`, and
 over ~90% run `du -sh /tmp/* | sort -rh | head` and report. Never run
 `rm -rf /tmp/*` — the monitor's own tools historically lived there.

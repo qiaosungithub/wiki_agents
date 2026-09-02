@@ -327,6 +327,17 @@ the date. Measured afterwards: the rule for the actual bug (`unroll_ih=1` AND
 before they were ever logged. Derive a colouring predicate from each run's own
 recorded config, and check it selects a non-empty set before applying it.
 
+**A watcher started from a tmux pane dies with that pane's scope, and
+`systemd-oomd` takes the whole scope at once.** One sweep killed this line's
+20-minute watcher and its capacity sentinel simultaneously; neither logged an
+error, and the line ran unwatched for 9.5 hours while two GPUs sat idle after a
+cell finished. Two consequences: check liveness by process, not by "the log
+looks healthy" (a dead watcher's log is indistinguishable from a quiet one), and
+prefer `setsid` plus a cron or systemd unit over a tmux-parented loop for
+anything that must outlive an interactive session. The kill is invisible in
+`/proc/vmstat` `oom_kill`; read the journal (`../monitoring.md` §Memory And Disk
+Wake Criteria).
+
 ## Working Rhythm
 Queue serially (GPUs shared 12 lanes per box); launch from an isolated dir (e.g.
 `rnn_unroll_v3`) so edits never contaminate a running scheduler that reads
