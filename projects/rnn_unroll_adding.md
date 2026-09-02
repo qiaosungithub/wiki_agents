@@ -338,6 +338,17 @@ anything that must outlive an interactive session. The kill is invisible in
 `/proc/vmstat` `oom_kill`; read the journal (`../monitoring.md` §Memory And Disk
 Wake Criteria).
 
+**Compare two arms at each arm's own best lr, never by pooling the rungs of a
+ladder.** An lr ladder is one search, not a sample of independent conditions:
+how wide it is was your choice, so adding badly-tuned rungs to both sides
+inflates the denominator and buys a smaller p-value that reports your ladder
+length rather than the effect. A pooled 14/15 vs 0/25 gave p=6e-10 where the
+honest best-vs-best comparison of the same data gives 5/5 vs 0/5, p=0.0040.
+State which rung won and its best eval, so a reader can see whether the arms
+even peak at the same place. At n=5 seeds a single-rung Fisher test floors at
+p=1/252=0.004 one-sided, so that is the ceiling on evidence from one rung —
+buy more power with more seeds at the winning rung, not with more rungs.
+
 ## Working Rhythm
 Queue serially (GPUs shared 12 lanes per box); launch from an isolated dir (e.g.
 `rnn_unroll_v3`) so edits never contaminate a running scheduler that reads
