@@ -49,6 +49,7 @@ and each has a `README.md` index.
 | TPU codename, HBM, legal shape, equivalence | `tpu_reference.md` |
 | GPU arch token, NVLink domain, legal shape, card code | `tpu_reference.md` §NVIDIA GPUs |
 | **Run a GPU job on Borg** (`tpu enqueue --tpu_type=h100-8`); CUDA build, NCCL, device_count==0, GPU preemption | `gpu_on_borg.md` |
+| **A GPU job trains far slower than the bench**; `samples_per_second` 10-30x under; a corpus streamed from CNS | `gpu_on_borg.md` §A GPU Container Reads CNS At About 13 MB/s Per Task |
 | SSH to a GCP GPU VM; `Permission denied`; OS Login vs metadata keys | `gcp_gpu_ssh.md` |
 | **Choose an accelerator family**; a preemptible slice will not hold | `research/accelerator_choice.md` |
 | Place data or checkpoints; copy or upload | `storage.md`, then the project guide |

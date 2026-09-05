@@ -681,6 +681,31 @@ may have any. "In stock" and "out of budget" are true at the same time, routinel
 | rank 0 dies with SIGSEGV in its first collective; NCCL logs `Init COMPLETE` and no WARN | torch's `LOG(INFO)` hitting a broken debug-log sink, not NCCL; raise absl `minloglevel` in each child before the first collective (B200 notes) |
 | a `faulthandler` dump file is created but stays 0 bytes | absl owns SIGSEGV from import time; capture fd 2 with `dup2` instead (B200 notes) |
 
+## A GPU Container Reads CNS At About 13 MB/s Per Task
+
+**Budget a GPU training job's input at ~13 MB/s for the whole task, not at
+the TPU host's >100 MB/s, and compare bytes-per-step against compute-per-step
+BEFORE launching anything long.** Two independent measurements agree: an h100
+container in ckv read `is-d` at 4 MB/s on one stream and 13 MB/s on eight
+(codi-torch), and an h100-8 in sin streaming its co-located `si-d` corpus
+trained at 0.19 steps/s, which is exactly 676 MB per shard-set delivered at
+13 MB/s (maze-128 torch, XID 286929828). The JAX reference read the same
+shards through the same `epath` backend at >100 MB/s per TPU host, so the
+figure belongs to the GPU container's storage path, not to a metro or a
+backend. It hides in plain sight: the smoke had run at the same rate, and its
+`samples_per_second` was never compared with the bench.
+
+The arithmetic to run first: bytes the ranks pull per step, divided by 13 MB/s,
+against the bench's ms/step. For maze-128 that was 8 x 84.5 MB per 9.77 steps
+= 51 s against 2 s of TF32 compute, a 25x deficit. Levers, in the order they
+paid off there (`EqR-torch-maze128/SEMANTICS.md` §18): shrink the bytes (a
+lossless packed format was 18x, gzip 8x), move the read off the training
+thread (prefetch ahead by permutation position, so the cursor and order stay
+bit-exact), and make the parse cheap (a header walk instead of `tarfile`).
+Staging a corpus to the task's RAM disk only moves the same bytes through the
+same 13 MB/s path at startup. Whatever you change, harvest the FIRST smoke's
+`train/samples_per_second` and put it beside the bench in the launch note.
+
 ## GB200 / GB300 Are Not Obtainable — Do Not Plan Around Them
 
 **Both cards need an IMEX NVLink authorization we do not have, so a job reaches
