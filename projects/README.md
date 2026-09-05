@@ -35,6 +35,7 @@ job.** The two follow different storage rules; `../storage.md` has the detail.
 | `agent-island/` | n/a | Terminal session managers for `clod`, `amp`, `gpt`, `gemini` | `local_agent_cli.md`, then native docs |
 | `work/reports/` | n/a | Paper deep-reading reports | `../reports/paper_reading.md` |
 | `rnn_unroll/` | 2 | RNN unroll-optimizer science line: gradient propagation / adding problem (vanilla RNN). Two remote 4×A100 boxes, not Borg. | `rnn_unroll_adding.md` |
+| `charlm/` | 2 | Character-level LM on tiny-shakespeare, reproducing `jcjohnson/torch-rnn`. Dense-supervision counterpart to the adding-problem line. Same 4×A100 boxes. | `charlm_torchrnn.md` |
 
 ## Boundaries That Are Easy To Miss
 

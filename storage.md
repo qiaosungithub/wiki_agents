@@ -65,6 +65,25 @@ Resolve buckets by metro, not by cell. A per-cell table is wrong the moment a ne
 appears, and 88% of schedulable cells were missing from at least one table. Storage belongs
 to a metro, so keying on the metro covers every cell in it, unlisted ones included.
 
+**Before adding a metro to any `--metros` list, check it against
+`_METRO_STORAGE_CELL` in that table; a metro with no storage entry does not
+queue slowly, it kills the car silently.** The launcher's `_local_bucket()`
+raises `SystemExit`, so the experiment is created but the work unit is never
+added: an empty shell in XM and zero bytes on CNS, which reads as "the job
+never started" rather than "that metro cannot hold data". One line lost seven
+cars to this. As of this writing the storage metros are `cbf ckv cmh dfw grq
+las lpp mrn sin tul`; query the table rather than trusting that list.
+
+**A metro's HISTORICAL LANDINGS are not the set of metros you may use, because
+the history contains the failures too.** The dead cars above landed in
+`uos`/`tpe`/`nrt` and stayed in the record, so a survey of "where have GPU jobs
+run" returns metros that are guaranteed to fail. The scheduler being able to
+PLACE a job there says nothing about the job being able to WRITE there. Same
+trap in the other direction: `market.json` quotes h100 in only two metros while
+real h100 jobs run in a third, so a missing quote is not an unusable metro.
+Neither the landing history nor the price table is the authority; the storage
+table is.
+
 An unknown cell must fail closed, and `UNKNOWN` must be a value nobody can mistake for an
 answer: not `''`, not the cell name, not a plausible default. Check what the consumer does
 with it — a sentinel object reaching code that calls `.lower()` turns a clean refusal into a

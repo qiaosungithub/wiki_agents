@@ -67,6 +67,9 @@ and each has a `README.md` index.
 | A data-movement job: workstation or cluster? | `jobs.md` §Where The Storage CLI Exists |
 | A job says `RUN` but produces nothing | `jobs.md` §`state: RUN` Is Not Evidence |
 | Write a checker, or a verification keeps saying OK | `engineering.md` §A Test That Cannot Fail |
+| **An edit reported success but the change is missing**; deleting a file breaks an unrelated build | `engineering.md` §A Write Tool's Success Return Is A Claim About Its Intent |
+| Fault-inject safely; a killed script left a broken shared file | `engineering.md` §Fault-Inject In A Sandbox Copy, And Restore In A Trap |
+| **Two measurements disagree**; a cached green build; a retracted number | `engineering.md` §Two Instruments Disagreeing Is A Finding |
 | **Log a result to the spreadsheet**; find a chart | `research/result_logging.md` |
 | **Read a job's curves / harvest `train/*` from the workstation**; the urge to write "the workstation cannot read the datatable" | `research/result_logging.md` §Reading The Curves From The Workstation |
 | Write or render a paper report | `reports/README.md` |
@@ -78,8 +81,10 @@ and each has a `README.md` index.
 | **Where to put / find a handoff doc** (`~/work/.monitor_watch/handoff_bodies/`) | `handoffs/README.md` |
 | `EqR` / `EqR-jax` | `projects/eqr_jax.md` |
 | RNN unroll optimizer / adding problem / gradient propagation science line | `projects/rnn_unroll_adding.md` |
+| **char-LM / torch-rnn reproduction**; which "char-RNN" repo; the 4-seed cell -> wandb group -> spreadsheet row pipeline | `projects/charlm_torchrnn.md` |
 | VLM training, data, benchmark reporting | `projects/vlm_training.md`, `projects/vlm_data.md`, `projects/vlm_metrics.md` |
 | **The amply gateway is down**; `amp new` worker dies at `os.getcwd()`; `amply-launch` prints nothing | `projects/local_agent_cli.md` §Restarting The Amply UX Server |
+| **Amply's database, snapshots, the local Spanner universe**; `/span/tmp` is dead; restart localdb / gateway order; migrate old runs | `projects/local_agent_cli.md` §The Amply Database Is A Local Spanner Test Universe |
 | Agent web app, or a local agent CLI | `projects/agent_web.md`, `projects/local_agent_cli.md` |
 
 ## Global Rules

@@ -30,6 +30,86 @@ infrastructure.
   relevant checks, read their COMPLETE output, and compare the result against
   the request rather than against your patch. State whatever remains unverified.
 
+## A Write Tool's Success Return Is A Claim About Its Intent, Not An Observation Of The Disk
+
+**After any edit, read the file back and assert the thing you wanted is there.**
+An `edit_file` call passed its `expected_file_hash` guard, returned success
+reporting `+114 -0 lines`, printed a before/after fingerprint transition — and
+the 114 lines were not on disk. An entire method had vanished. Every value in
+that tool result was internally consistent; none of them was a measurement of
+the file. The hash guard protects the PREMISE (nobody else changed the file
+since you read it) and says nothing about the OUTCOME.
+
+**Read the artifact back with an instrument that answers the question you
+actually have.** `grep -c "def my_method"` returning 1 proves the text exists
+somewhere in the file; it does not prove the method is attached to its class. A
+`def` at the wrong indentation greps identically, passes `ast.parse`, and is a
+module-level function the call site can never reach. Walk the class body:
+
+```python
+import ast
+t = ast.parse(open(path).read())
+for n in ast.walk(t):
+  if isinstance(n, ast.ClassDef) and n.name == 'TheClass':
+    print(sorted(m.name for m in n.body if isinstance(m, ast.FunctionDef)))
+```
+
+**A change spanning a definition and its callers belongs in ONE atomic edit.**
+Splitting "add the parameter" and "pass the parameter" across two calls leaves a
+window in which the tree does not build, and a sibling's build sampled exactly
+that window.
+
+**Deleting a file is not deleting its existence; it is deleting every reference
+to it.** An untracked script was removed on request, its BUILD rule was not, and
+the dangling `srcs` aborted the whole package at ANALYSIS — 61 unrelated targets
+reported `NO STATUS` and three agents each read the wall of red as their own
+breakage. Grep for the name before you `rm`, and pass `--keep_going` on any
+wildcard build so one unanalyzable rule degrades to a per-target verdict instead
+of a single misleading boolean.
+
+## Fault-Inject In A Sandbox Copy, And Restore In A Trap
+
+**Never inject a deliberate fault by mutating a file others depend on.** A
+script that broke a shared module, ran a build, then restored it was killed by a
+shell timeout in the window between inject and restore, stranding a knowingly
+broken file in a package three agents were building against. Copy the package to
+`/tmp` and break the copy. This is not a safety tax paid for its own sake: the
+same matrix ran 24x faster against the copy (30 seconds versus twelve minutes of
+build cycles), because it skipped the build system entirely.
+
+When a sandbox is genuinely impossible, two details decide whether a kill leaves
+wreckage. **Write the pristine backup exactly once, before the first injection**
+— the script above re-derived its backup each iteration, so after the first
+failure it "restored" a different fault. And **put the restore in a trap, not at
+the end of the loop body**: `trap 'cp "$PRISTINE" "$SRC"' EXIT` runs on the kill
+path too, which the happy path does not.
+
+**A fault that is "detected" only as a nameless timeout is too weak to count.**
+The obvious response to a 93-second hang is to raise the timeout, which hides
+the fault again. Add a tripwire that fails fast and names the constant it is
+about — and derive it from `BaseException` where ordinary `Exception` would be
+swallowed by the production code under test.
+
+## Two Instruments Disagreeing Is A Finding, Not An Annoyance
+
+**When a second measurement contradicts the first, chase the contradiction
+before you explain it away — especially when the first one flatters you.** A
+cache experiment reported an 80.8% hit rate, reproducible and internally
+consistent. A second probe driving the real production class reported 0%. The
+80.8% was contaminated: four arms shared identical text in one process and the
+last arm read what the earlier ones had written. Isolated, the real figure was
+36.1%. Nothing in a code review would have found this; only the disagreement
+did.
+
+The same shape appears in build verdicts. A cached green describes the tree as
+it was when the result was cached, not the tree you have now; use
+`--nocache_test_results` whenever the verdict is load-bearing. A local sandbox
+run disagreeing with a cached green is what exposed a contaminated shared file.
+
+**A contaminated number welded into a comment outlives the run that produced
+it.** When a measurement is retracted, correct it everywhere it was recorded,
+including the source comment that quotes it.
+
 ## Debug Locally On CPU Before You Spend A Remote Round Trip
 
 **After any large code change, run the whole path on CPU with a `local_debug`

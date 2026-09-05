@@ -40,11 +40,9 @@ static sub-cubes as `ghostfish.gcl`, differing only in the locus name. Registere
 sizes are **4/8/16/32** (`v7-16` → `2x2x4`); 64+ exists only via dynamic slice
 creation through the OCS manager, so it is not claimed.
 
-v7 is usually the cheapest generation on this pool: every sample taken cleared
-at 0.00 (free pool), while v6p clears in the single credits/hr. That is a price
-difference, not a capacity one; v6p is obtainable in tens of thousands of chips
-at the same moment. Check the market before assuming which generation you can
-get, with `tpu money` or `prices.<pool>|101|PROD` in
+Relative generation prices move, so read them, never recall them. Price and
+capacity are also independent: a generation can be expensive and abundant at the
+same moment. Read with `tpu money` or `prices.<pool>|<card>|PROD` in
 `~/.tpu_quota_cache_dir/market.json` (v7 is card code 101, v6p 92).
 
 A chip is not a device: v7 and v6p expose two cores per chip. A v7-32 is 8
@@ -225,27 +223,37 @@ Always cross the rounded count with a live `tpu preflight`. The legal ceiling
 (H100 board = 8) may force multiple boards plus network RDMA between them, which
 is not one fully-connected slice (see NVLink Domain above).
 
-Price inverts the TPU intuition, but not uniformly, and the exception is
-expensive. Most GPU PROD is cheap (H100 ~1.0–1.2 cr/chip-hr; A100 ~0.16; H200
-free pool) and most GPUs have a free or near-free BATCH pool, but BATCH is
-preemptible (`gpu_on_borg.md` Rule 6). `gb200`/`gb300` also price as free pool,
-but we cannot run them at all (`gpu_on_borg.md` §GB200 / GB300 Are Not
-Obtainable), so read that price as "not obtainable".
+**Every accelerator price is dynamic, so no price belongs in this file or any
+other. Read `tpu money` at the moment you launch, and read it again for the next
+launch.** GQM clears these pools continuously; a price can cross its own limit
+order in either direction between two launches, and that boundary is what decides
+whether a job starts at all (`ok` vs `BLOCKS ALL` in `tpu money`'s limit-order
+column). GPU pricing also does not follow TPU intuition, and BATCH is not
+reliably cheaper than PROD for a given family — so compare the two tiers in the
+live reading rather than assuming an ordering. BATCH is preemptible and
+eval-only regardless (`gpu_on_borg.md` Rule 6, `jobs.md`).
 
-B200 PROD is the exception: ~100–120 cr/chip-hr, ~100x H100, above its own limit
-order (20.00) and therefore `BLOCKS ALL`. A `b200-8` PROD job does not merely
-cost a lot, it never launches: it sits unbuilt or lands `HELD` after the budget
-check. B200 BATCH is ~2.15 cr/chip-hr, cheaper than H100 PROD, so an eval job
-(BATCH is eval-only, `jobs.md`) is the one shape of B200 work that is both
-affordable and legal. Verify the current spread before planning either way; the
-gap between the two tiers here is ~50x, far wider than any other family's.
+A written-down price has been wrong in both directions here: once low while the
+market was high (an unlaunchable job looked cheap), once high while the market
+was at the free pool (an available family looked unusable, so nobody tried it).
+Both numbers were correct when measured. **Record the method, never the number.**
 
-Do not size a B200 job from a remembered price. This line previously read
-"B200 ~0.4", ~250x below the measured PROD price, which would make an
-unlaunchable job look cheap. Measured 2026-08-30 from
-`~/.tpu_quota_cache_dir/money.txt` (`GPU B200 PROD 100.17–116.01`, limit order
-`20.00 BLOCKS ALL`) and corroborated by a real budget-check rejection recorded
-on queue row `b200-8-6232b8` (`b200 @ 120.07 cr/chip-hr`).
+Price is not obtainability. `gb200`/`gb300` cannot be run at all whatever they
+cost (`gpu_on_borg.md` §GB200 / GB300 Are Not Obtainable), and a cheap family can
+be unobtainable while an expensive one is abundant.
+
+How to read it (three independent routes; they should agree, and if they do not,
+trust none of them and enqueue):
+
+```bash
+tpu money                                    # rendered table, PROD + BATCH + limit order
+grep -i b200 ~/.tpu_quota_cache_dir/money.txt  # the cache the table renders from
+tpu price                                    # market clearing prices, separate path
+```
+
+The limit order is the gate, not the price: what matters is whether the current
+price sits above or below it, so read both columns together. And a price below
+the cap still is not a launch — only an enqueue proves obtainability (below).
 
 `tpu route --power=b200-8` cannot answer "can I get a B200". `--power`
 power-matches: it returns equal-compute TPU slices (v5e-16 / v4-16) and never

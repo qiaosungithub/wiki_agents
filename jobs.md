@@ -27,7 +27,8 @@ failure. Check the `packaged from:` line (§The Local Queue: `tpu enqueue` + Ser
 |---|---|---|
 | One job (default) | `cd <code dir>`, `tpu enqueue …`, `tpu build-worker` up; auto cell | §The Local Queue: `tpu enqueue` + Serial Build-Worker |
 | A batch / sweep | `tpu enqueue` per arm; the same worker drains them | §The Local Queue: `tpu enqueue` + Serial Build-Worker |
-| Data locality | `--metro=<m>` (e.g. `cbf`); full metros refuse, never roam to no-data cells | §Choosing Where To Run |
+| Widening the router's choices (do this on EVERY job) | `--archs=a,b,c` and `--metros=x,y,z` — several of each | §Give The Router More Than One Way To Say Yes |
+| Data locality | `--metros=<m>[,…]` (e.g. `cbf,tul`); full metros refuse, never roam to no-data cells | §Give The Router More Than One Way To Say Yes |
 | Telling runs apart | `exp_name=` names the TASK, not just the model | §Name The Experiment After Its Job, Not After Its Model |
 | Fallback, no worker | `tpu queue …`, synchronous, returns an XID; ONLY when nothing else builds | §Submission Contract |
 | PENDING past 10 min | OFF by default: arm the reroute sweep to cancel and re-route | §The Local Queue: `tpu enqueue` + Serial Build-Worker |
@@ -35,6 +36,61 @@ failure. Check the `packaged from:` line (§The Local Queue: `tpu enqueue` + Ser
 Both share one submission contract (same flags, registry) and smart pick:
 least-oversold placeable cell. `--cell` is rarely needed, always wins.
 `TPU_NO_SMART_CELL=1` opts out (§Choosing Where To Run).
+
+## Give The Router More Than One Way To Say Yes
+
+**Name SEVERAL architectures and SEVERAL metros on every job, because the
+router can only re-place a preempted run among the candidates you listed, so a
+single `--archs=v7 --metros=mrn` leaves exactly one cell in the fleet and the
+job re-submits to the same contested cell forever instead of moving.** Measured:
+a v7-32 pinned that way burned four re-routes and three XIDs without moving,
+while v7 was quoted at the same price in fifteen metros. Passing one value is
+accepted by the CLI and reads as a normal launch; nothing warns you.
+
+```sh
+# The shape to copy. Several archs, several metros.
+tpu enqueue --power=v7-32 --archs=v7,v6p,v5p --metros=cbf,tul,lpp \
+            --tier=PROD --launch=config=my_cfg,exp_name=my_run
+```
+
+* **`--power` is the compute target and `--archs` are the generations allowed
+  to satisfy it**; they are required together, and `--power` already scales
+  across generations (`--power_tolerance`, default 0.5), so adding an older
+  family widens placement without shrinking the run. `v6p-32` and `v7-32` are
+  chip-for-chip equal (`tpu_reference.md`), and equal topology, so a
+  `topology_locked` resume survives the swap — check `same_topology()` before
+  assuming that for other pairs.
+* **The flag is `--metros` (plural) — `--metro` does not exist on `enqueue` and
+  dies with `FATAL … Did you mean: metros ?`.** The error teaches the spelling
+  and not the arity, so the usual repair is `--metros=<one>`, which is the
+  failure this section exists to prevent. (`tpu queue`, the deprecated
+  synchronous path, does take the singular. Do not copy its examples.)
+* **Only list a metro that has a STORAGE CELL in
+  `cell_locality.py::_METRO_STORAGE_CELL`; naming any other one does not slow
+  the job down, it kills it silently.** A job placed in a metro with no
+  registered bucket makes the launcher's `_local_bucket()` fail closed and
+  `SystemExit` — after the XM experiment exists but before the work unit is
+  added, so you get an empty shell in XManager and zero bytes in CNS, with
+  nothing anywhere saying why. One line lost seven cars to this. Read the table
+  before adding a metro:
+  `python3 -c "import cell_locality as c; print(sorted(c._METRO_STORAGE_CELL))"`.
+* **Every metro holding a copy of your data belongs in the list**, and the
+  metro your job WRITES to must be among them: a training loop writing across a
+  metro runs ~94x slower and the pruner deletes it (`storage.md`). Resolve
+  metros from that same measured table, never by eye — `/cns/si-d`=sin,
+  `is-d`=cbf, `oi-d`=tul, `qo-d`=mrn, `li-d`=lpp are examples, not the list
+  (`storage.md` §Never Hand-Maintain A Cell -> Metro -> Bucket Table).
+* **Do not widen a metro list from where jobs have LANDED — that history
+  contains the metros that killed them.** A quote-less metro may well be
+  reachable (`market.json` prices an arch in fewer metros than actually run
+  it), so the price table understates the options; but "the scheduler can place
+  me here" and "I can write my checkpoints here" are different claims, and only
+  `_METRO_STORAGE_CELL` answers the second. Landing history answers neither: it
+  records where cars went, including the ones that died on arrival.
+* **GPUs: widen the metros even when the arch cannot widen.** `h100` and `b200`
+  are both routable and rank biggest-card-first, so `--archs=h100,b200` is
+  usually right; where a CUDA build genuinely targets one card, that is the one
+  legitimate single-arch job — the metro list still has no excuse to be short.
 
 ## The Launch Workflow
 
@@ -369,6 +425,16 @@ not live. Restart and re-check the same way (`engineering.md`
 - drains a batch or sweep as capacity frees, no babysitting N submits;
 - re-routes anything PENDING after placement (the 10-minute sweep, below);
 - handles a mixed batch across checkouts, each keeping its dir.
+
+**`tpu enqueue --dry_run` still enqueues, and still pre-debits the budget.** The
+flag belongs to `route-tick` (plan vs submit) and is merely visible in
+`enqueue`'s shared flag namespace, where it does nothing — and it defaults to
+`true`, so `--helpshort` reads as though enqueueing were the opt-in. The command
+prints `enqueued <job_id>` and the row lands in `~/.tpu_local_queue.json` as
+`BUILD_REQUESTED` with credits already pre-debited. Nothing errors, so this is
+worse than a rejected flag: it executes what you thought you were rehearsing.
+There is no rehearsal mode; to check what an enqueue did, read the queue file
+(or `tpu queue-status`), never the command's own output.
 
 Two queues. The router drains a durable, unlimited local list of desired runs
 into the XM queue, one placement at a time. It places onto free chips now, not

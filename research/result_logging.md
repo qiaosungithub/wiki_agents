@@ -39,6 +39,7 @@ the URL by hand (§Chart Links).
 |---|---|---|
 | VLM (PaliGemma / JAX LLaVA) | `1FlcygQbGBTqHLJeiKdwxS0nP41SPMJrtX-kCJq8d7SQ` | the cleaned PaliGemma/JAX LLaVA tab |
 | `EqR` / `EqR-jax` | `17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0` | `EqR-refactored`. `EqR-reproduction` is pre-refactor, read-only history |
+| char-LM / torch-rnn | `17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0` | `charlm-torchrnn (qiaos)`. Every metric cell is `mean +- sd` over 4 seeds; one cell = one wandb group. Headline columns are the HELD-OUT split; the selection split has its own trailing column. Row format and the `gsheets --` trap: `../projects/charlm_torchrnn.md` |
 
 **Resolve a tab by title, never by gid.** Both workbooks hold a tab with the same
 gid for different projects, plus dated backup tabs of each other. A gid writes
@@ -83,6 +84,7 @@ comparison.
 | A published number | A reference and a run of ours are different rows. Give each dataset an `official baseline` row; restating its numbers in a run's cells guarantees the copies drift apart. |
 | A train run and its eval | Two paired rows, eval directly under, titled `  ↳ eval of the row above`. Different job ids, configs and failure modes, so collapsing them loses which half went wrong. A train row without an eval row has no conclusion: mark it, and never quote its in-training numbers as results. |
 | A run past the block's budget | Two rows, same job id: metric columns compare only if every row stopped at the same step. Put the block-budget value in the run's own row, and pair the longer result beneath as `  ↳ @<steps>, same run`, `Details` naming each segment. Still rising at the budget: that point is also its peak; otherwise record the pre-budget peak. Never widen the tab with a second set of metric columns: empty on every normal-budget row, they read as a missing measurement, not an inapplicable one. |
+| A run that was resumed under new job ids | ONE row. The XID column lists EVERY id that wrote training steps into the run's checkpoint dir, oldest first, each with its step range (`285906137 (0-113700) → 286366489 (115000-128300) → 286551193 (128000-…, LIVE)`), and the chart column carries one link per id: a flatboard page shows only its own id's segment, so the full curve is the union of those pages. Never overwrite the old id with the live one (operator, 2026-09-05: "一个 run 多段的 xid 都放着, 我要看完整 curve"). Read the segment set off the tfevents file names in the checkpoint dir (`qiaos_group_<xid>`), not off the job board: cancelled ids that ran for an hour are still segments, and a 78-byte tfevents is an attempt that never ran a step. |
 
 ## A Row That Is Already Filled Can Still Be Wrong
 
@@ -131,6 +133,7 @@ rows as "content + row N", never a bare `row N`, and re-read the neighbourhood
 after any structural write. `mutate clear` is worse: it DELETES the row and
 shifts everything up, so it is never the way to blank a cell — write an empty
 value to the specific range instead.
+**Use the range form, `mutate insert-rows "$SID" --range "'Tab'!35:37"` (inserts three blank rows BEFORE row 35, nothing else changes). Verified on a throwaway tab on 2026-09-05: values above stay put, values below shift down intact. The `--start=N` form is the one recorded as blanking the row below (`projects/rnn_unroll_adding.md`); do not use it. Read the label column back across the whole shifted region before writing into the new rows.**
 
 **A full-sheet read collapses blank rows, so line numbers computed from it are
 not the sheet's row numbers.** Always read a bounded range (`A176:J198`) when you
@@ -138,6 +141,46 @@ need true indices.
 
 **`Wrote 1 rows.` absent, with rc=0, means the write did not happen.** Read the
 cell back every time; rc is not evidence.
+
+**Pass cell values after a `--` separator.** A value containing `/` or a leading
+dash is otherwise parsed as a flag: `gsheets mutate write` prints its help text,
+returns rc=0 and writes nothing. A header row reading
+`config / run,seed n,...` failed exactly this way and the tab kept its previous
+contents while the command looked fine. `mutate write "$SID" "$TAB!A2:I2" --
+"$VALUES"` is the safe form, and the read-back above is what catches it.
+**A cell value that starts with `+` or `=` is parsed as a formula and lands as
+`#ERROR!`** (`+0.150 (live)` did; `0.150 (live)` is fine), so write signed
+numbers without the leading plus, or lead with a word, and read the cell back.
+**Someone else may reorder the tab between your write and your read-back, so
+re-derive the row map from a bounded read immediately before every write, not
+once per session.** A verified-correct read-back is a claim about the layout at
+that instant: one shift later, rows that were 19-23 are 21-23 with a new blank
+at 18, and the next write lands on the wrong experiment while every command
+returns `Wrote 1 rows.` Cheap defence: read `A<lo>:B<hi>` and match on the
+Settings text, never on a row number you resolved earlier.
+
+**A column whose every cell reads `n/a` or empty is a column the pipeline cannot
+produce; delete it rather than leaving it as an apparent gap.** `eval/loss`,
+`eval/cot_em` and `peak eval/acc` sat in a tab for weeks reading as missing
+measurements, when the evaluator only ever emits accuracy/correct/total. Confirm
+by scanning every row (not a sample) before deleting, back the range up first,
+and re-read the header afterwards because deleting shifts every column right of
+it. `gsheets mutate delete-cols <SID> --range '<tab>!H:I'` — passing the columns
+as bare positional args fails with `accepts 1 arg(s)` and deletes nothing.
+
+**One fact, one column.** An id that already has a home in `xm link` / `logdir`
+does not belong in `Notes` too; the copies drift and the wide cell pushes the
+metric columns off screen. Notes carries only what changes interpretation.
+
+**Keep one unit per metric column, and state the unit in the header.** A column
+mixing `0.4344` with `43.06%` cannot be sorted or eyeballed, and the mix is
+invisible until someone compares two rows. The same rule caught a `final
+train/loss` column holding a last-step point value on some rows and a 5k-step
+mean on others: at n=1319 the two differ by ~0.09, which is ten times the 5k
+window's standard error, so the mixed column reversed the ranking of two arms.
+Put the protocol in the header (`final train/loss (final-5k avg)`) so the next
+writer cannot guess wrong.
+
 
 ## Short Cells; Formatting Is Part Of The Result
 
@@ -216,6 +259,30 @@ train columns blank discards half of every lr×wd comparison.
 - Unrecoverable is rare, and it is stated, not left blank. Exhaust the lookup,
   then write why in one clause (`train log lost to N preemptions`), so a blank
   never reads as an unlogged oversight.
+
+## A Split That Selects Is Not A Held-Out Split
+
+**If a split chose the checkpoint, the hyperparameter or the arm, it has been
+fitted to, and a number measured on it carries an optimistic bias.** Selecting
+on it can still be the right protocol -- most published LM recipes do exactly
+that -- but then the tab must show the bias rather than hide it: report the
+selected model AND the selection-free one (the final model at the step budget)
+side by side, plus their difference. A single column cannot distinguish "this
+arm generalises better" from "this arm got a luckier checkpoint out of 18".
+Never compare one arm's selected number against another arm's unselected one.
+
+The trap is that the upstream repository's own naming is often wrong for this:
+`torch-rnn` calls its selection split "val" and never touches its "test" split
+at all, so copying its vocabulary imports the confusion. When you re-role a
+split, version the prepared-data directory and make the loader REFUSE the old
+layout: the same file name now means different bytes, and a silent load puts
+every headline number on the wrong slice.
+
+**Loss and accuracy do not peak at the same step, so "the best checkpoint" is
+only best on the metric that chose it.** On the char-LM line one seed selected
+at step 2000 on val loss and its accuracy there was 1.9 points BELOW the final
+model's -- invisible in the loss column. If the tab carries both metrics, carry
+both models too.
 
 ## Stop If It Is Not Comparable
 

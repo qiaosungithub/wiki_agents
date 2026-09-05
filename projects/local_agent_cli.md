@@ -327,6 +327,50 @@ objfs keeps alive, falling back to `sys.argv[0]`. See
 the old cached path must still be restarted once: the value was captured at
 import time, and the patch only helps future boots.
 
+## The Amply Database Is A Local Spanner Test Universe
+
+**Since 2026-09-05 amply's database is `/span/test-universe/qiaos:amply`,
+served by a Spanner test universe (`spanner::test::Env`) running on this
+workstation, not by `/span/tmp`.** `/span/tmp/qiaos:amply` lost its write
+path on 2026-09-04 (every commit hung, `span getsafetime` deadline-missed,
+new workers sat forever at `[amply-startup 1/6]`) and `/span/tmp` stopped
+allocating new databases, so the recovery does not depend on Spanner at all.
+Old history is still in the old path and is copied over opportunistically
+(below).
+
+| Piece | Where | What it does |
+|---|---|---|
+| Universe host | `~/.amply/localdb/run_localdb.sh` → `bin/localdb` (unit `amply-localdb.service`, or tmux `amply-localdb`) | Starts the universe with CHUBBY_LOCAL, creates the database from `bin/amply_local.sdl.bundle`, restores `snapshots/`, then writes `ready` and `client_flags.txt` |
+| Client flags | `~/.amply/localdb/client_flags.txt` | `--spanner_master_lockservice=localhost:<port> --default_ls_watcher=lockservice --lockservice_use_proxy=never`. Every amply process, and `span`, needs them to see the universe. **The port changes on every localdb start, so restart the gateway after localdb.** |
+| Gateway | `~/.amply/bin/launch-ux-localdb.sh` (unit `amply-ux.service`, or tmux `amply-ux-local`) | Runs `bin/amply ux --spanner_db=... <flags>` from `~/work`; exports `AMPLY_WORKER_EXTRA_ARGS=<flags>` |
+| Worker flags | local patch in `ux/server.py` (`_worker_extra_args`) | Appends `$AMPLY_WORKER_EXTRA_ARGS` to every spawned/resumed worker argv. Without it workers cannot reach the universe |
+| Persistence | `~/.amply/localdb/snapshots/` (JSONL per run + `manifest.json`) | The universe is in-memory. localdb writes a delta every 5 min, a full re-dump every 6 h, and a final delta on SIGTERM; on start it restores everything. A crash loses at most 5 minutes |
+| History migration | `~/.amply/localdb/dump_loop.sh` (tmux `amply-dump-loop`) | Every 10 min: `dbtool dump` from the old database with `--schema_bundle` (its metadata path is dead, so the schema comes from the bundle), then `dbtool restore --skip_existing` into the universe. Progress: `dump_loop.log`, `snapshots/runs/*.jsonl` |
+| Source | `//experimental/users/qiaos/amply_localdb` (`localdb.py`, `dbtool.py`, `amply_local.sdl`) | Rebuild with `blaze build`, then `~/.amply/localdb/refresh_bin.sh` copies binaries onto local disk (objfs GCs blaze outputs) |
+
+Health in one line: `cat ~/.amply/localdb/ready ~/.amply/localdb/client_flags.txt`
+and `amp-ux-ok`. A query by hand:
+`span $(cat ~/.amply/localdb/client_flags.txt) sql /span/test-universe/qiaos:amply`
+(it spends a minute failing to reach corp chubby first; the query still runs).
+
+Traps met while building it:
+
+- **Startup can fail on a port collision** (`bind() failed ... Address already
+  in use`, then `lamprey(SpannerTestEnv) startup failed`): the universe picks
+  ports with `PickUnusedPort` on a host with hundreds of listeners.
+  `run_localdb.sh` retries up to 6 times with a fresh `TEST_TMPDIR`; reusing a
+  scratch dir also fails.
+- **The universe runs SQL in strict name resolution mode**: `SELECT run_id
+  FROM Run` is rejected, `SELECT r.run_id FROM Run AS r` is fine. amply's own
+  queries all alias their tables; hand-written ones must too.
+- **`pgrep -f 'amply worker'` / `pkill -f` match the shell that runs them**,
+  because the pattern is in that shell's own command line. Anchor on the
+  binary path (`pgrep -f '^/.../bin/amply worker'`) or the wrapper kills
+  itself.
+- `POST /api/run/new` returning 200 proves nothing about the database; follow
+  `/api/run/new/stream?op=` until `[amply-startup 2/6]`. A worker stuck at 1/6
+  ignores SIGTERM (blocked in a C++ RPC) and needs `kill -9`.
+
 ## Host Quick-Stats Utils (`memavail` / `cpuload` / `hstat`)
 
 **One-line host health from `~/.bashrc`, read straight from `/proc` (no deps,

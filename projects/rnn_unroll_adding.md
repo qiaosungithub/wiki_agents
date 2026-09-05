@@ -195,7 +195,7 @@ re-measured under the fixed hook.
 
 ## Errors This Line Repeats (each cost a real result)
 
-**`gsheets mutate insert-rows --start=N` BLANKS the row that was at N+1.**
+**`gsheets mutate insert-rows --start=N` BLANKS the row that was at N+1.** (The `--range "'Tab'!35:37"` form does NOT: verified on a scratch tab 2026-09-05, see `research/result_logging.md`.)
 Observed three times: the inserted row appears, and the row immediately below it
 comes back empty on read-back. Re-read the whole block after every insert and
 re-write any row that lost its cells; keep the row's values in the shell script

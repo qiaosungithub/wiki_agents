@@ -464,22 +464,22 @@ warns, does not block.
 
 ## Rule 6 — Tiers: BATCH Preempts Freely, PROD Preempts Rarely
 
-GPU inverts the usual TPU cost intuition. Most GPU PROD is cheap (H100 PROD
-~1.0–1.2 cr/chip-hr; A100 ~0.16; H200 free pool). Most GPU BATCH is free (0.00)
-but preemptible: a PROD floor-holder wanting the chips triggers a `guarantee
-reclaim`. An `h100-8` BATCH smoke hit RUNNING in `mf`, then died mid-run
-(`Preempted. Due to guarantee reclaim -- we were ABOVE`).
+**Prices are dynamic and none is recorded here: read `tpu money` at launch time,
+every time.** Whether a given arch and tier can launch at all is a live reading,
+not a property of the family — a price crossing its own limit order flips the
+job between launchable (`ok`) and never-starting (`BLOCKS ALL`). GPU pricing does
+not follow TPU intuition, and for some families BATCH is dearer than PROD, so
+compare both tiers in the live reading instead of assuming an ordering.
+`tpu_reference.md` §NVIDIA GPUs owns the reading method.
 
-**B200 inverts the inversion. B200 PROD is ~100–120 cr/chip-hr, above its own
-limit order (20.00), so it reads `BLOCKS ALL` and never launches. Yet B200 BATCH
-is ~2.15, cheaper than H100 PROD.** On B200, PROD is unusable and only a BATCH
-eval affordable. Numbers and their measurement live in `tpu_reference.md`
-§NVIDIA GPUs; a copy here goes stale, as an unmeasured figure in this paragraph
-already did once.
+Tier choice is about DURABILITY, not price. BATCH is preemptible whatever it
+costs: a PROD floor-holder wanting the chips triggers a `guarantee reclaim`. An
+`h100-8` BATCH smoke hit RUNNING in `mf`, then died mid-run (`Preempted. Due to
+guarantee reclaim -- we were ABOVE`).
 
-- Short smoke you can restart: BATCH is fine and free.
+- Short smoke you can restart: BATCH is fine.
 - A clean finish (a real result, or a definitive smoke exit 0): use
-  `--tier=PROD`, far more durable than BATCH and still cheap for GPU. Not
+  `--tier=PROD`, far more durable than BATCH. Not
   immune: it has an eviction SLO (bounded frequency, advance notice). A
   fleet-wide sweep found over a hundred PROD jobs taking a `guarantee reclaim`,
   most returning. Checkpoint/resume every long run.
