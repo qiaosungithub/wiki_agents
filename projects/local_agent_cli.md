@@ -367,6 +367,12 @@ Traps met while building it:
   because the pattern is in that shell's own command line. Anchor on the
   binary path (`pgrep -f '^/.../bin/amply worker'`) or the wrapper kills
   itself.
+- **systemd expands `$VAR` in `ExecStart` itself**: `bash -lic '$HOME/x.sh'`
+  became `bash -lic ''` ("Invalid environment variable name evaluates to an
+  empty string"), five fast failures, `start-limit-hit`. Use `%h`, and
+  `systemctl --user reset-failed` before the next start.
+- `tmux kill-session` does not kill a gateway that was `exec`'d in the pane;
+  it ignores SIGHUP and keeps its port and `dashboard_url`. `kill -9` it.
 - `POST /api/run/new` returning 200 proves nothing about the database; follow
   `/api/run/new/stream?op=` until `[amply-startup 2/6]`. A worker stuck at 1/6
   ignores SIGTERM (blocked in a C++ RPC) and needs `kill -9`.

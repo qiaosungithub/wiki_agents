@@ -205,9 +205,29 @@ Affected: blog rows 9-12 and grid rows 16-27 (+ their readings, rows 13 and
 (default 1 = the upstream behaviour); `test_dropout_is_applied_once_per_layer_output_in_both_models`
 counts the `F.dropout` calls. Reruns launched 2026-09-05 21:40Z by
 `lg_fix.sh` (64 runs, groups `grid_*_fixdrop_20260905`, `blog_*_fixdrop_20260905`);
-the old cells stay on the tab until the reruns replace them, marked CORRECTED.
+the reruns REPLACED rows 9-12 and 16-27 on 2026-09-05 23:4xZ (each row's note quotes
+its pre-fix value; readings 13/28 and the unroll verdict in the reading row carry
+`CORRECTED` / `RE-READ` paragraphs). What changed: the fix matters at high dropout
+(blog p=0.5: 2.5882 -> 2.5348, so the blog recipe now BEATS torch-rnn's default by
+0.043 instead of tying it; grid d0.4: 2.51-2.53 -> 2.49-2.51) and is inside noise at
+p=0.1 (2.5003/2.4801/2.4730 -> 2.5126/2.4807/2.4712). New best baseline cell:
+dropout 0.2 / lr 4e-4 = 2.4601+-0.0170 (row 21). The best unroll cell (row 31,
+2.4637+-0.0263) still ties it.
 
 The help text used to claim torch-rnn does not drop the last layer; it does.
+
+## Tab Layout Of The Unroll Block (after 2026-09-05)
+
+Rows 31-34 uniform weight (d0.1/d0.3 x lr 2e-4/4e-4), 35-37 uniform at dropout 0
+(lr 2e-4/3e-4/4e-4), 38-39 the MEAN divisor control (`--unroll_mode mean`, divide
+by sum w = n: lr 2e-4 still running toward the 200-epoch cap, lr 2e-3 = 2.5154
+reproduces the sqrt cell at lr 2e-4), 40-41 per-site clip 0.02 on the row 31/32
+recipe (`--site_clip`: neutral at lr 2e-4, +0.015 inside sd; never fires at lr
+4e-4 where it is a pure seed replicate of row 32), 42-45 the 1/i weight, 46 the
+reading. Rows were inserted with `insert-rows --range`, which shifts everything
+below intact. The DEPTH-site sweep (`--site_index depth --depth_max {4,16,100}`,
+lr 2e-4/4e-4, dropout 0.1, groups `unroll_depth<d>_d0.1_lr<lr>_20260905`) was
+launched 2026-09-05 23:3xZ by `lu_depth.sh` and is not on the tab yet.
 
 ## Per-Site Alignment: Why The Divisor Is sqrt(n) Late And ~n Early
 
