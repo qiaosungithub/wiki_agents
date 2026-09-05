@@ -107,8 +107,9 @@ Images written via `Writer.write_images` do not survive on Borg in either
   `fileutil ls $CHECKPOINT_BUCKET/` shows `viz/` beside `checkpoints/` and
   `logs/`.
 - `http://flatboard/xid/<XID>` renders scalars only; images are at
-  `http://datatable/xid/<XID>/viz`. LOAS refuses the datatable CLI from a
-  workstation, so read the PNGs: `fileutil cp` from `$CHECKPOINT_BUCKET/viz/`,
-  or `gbrowser screenshot --corp <url>` for a page. Images sent to a datatable
+  `http://datatable/xid/<XID>/viz`. Read scalars back from the workstation per
+  `../research/result_logging.md` §Reading The Curves From The Workstation
+  (the bucket first, then `gbrowser --corp screenshot`); read images with
+  `fileutil cp` from `$CHECKPOINT_BUCKET/viz/`. Images sent to a datatable
   need their own table; large arrays interleaved into the scalar table make
   flatboard unusably slow even when nobody opens it.

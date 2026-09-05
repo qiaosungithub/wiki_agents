@@ -271,7 +271,11 @@ no real external tracker unless current code proves one was created.
   calls through `utils/wandb_util.py`, whose `safe_log()` swallows failures;
   telemetry must not kill a run.
 - Metrics reach a UI through Datatables via `clu.metric_writers`; URLs and the
-  explicit-opt-in trap are `../research/result_logging.md` §Chart Links. Here,
+  explicit-opt-in trap are `../research/result_logging.md` §Chart Links, and
+  reading them back from the workstation is the same file, §Reading The Curves
+  From The Workstation. The torch port (`EqR-torch-maze128`) also mirrors every
+  logged train row into its CNS beacon (`<bucket>/sanity/<XID>_<WID>_att<N>_rank0.jsonl`,
+  event `train_metrics`), so its acceptance metric needs no service. Here,
   only `process_index()==0` may build a writer (all tasks of a work unit share
   one key), and it must flush periodically, since CLU's destructor cancels the
   writer thread rather than draining it.

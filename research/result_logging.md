@@ -1,7 +1,8 @@
 # Spreadsheet Result Logging
 
-Owns writing a result into a project's shared experiment spreadsheet, and finding
-a job's chart. Per-tab column semantics: `../projects/vlm_metrics.md`,
+Owns writing a result into a project's shared experiment spreadsheet, finding
+a job's chart, and reading a job's curves back from the workstation (§Reading
+The Curves From The Workstation). Per-tab column semantics: `../projects/vlm_metrics.md`,
 `../projects/eqr_jax.md`. "A number is meaningless without its protocol":
 `../engineering.md` §Communicating A Result. **Read this every time you log**: a
 wrong row or column looks like a right one and nothing errors. Write via the
@@ -263,15 +264,38 @@ reach the flush threshold, so its durable evidence is the metrics files under th
 checkpoint bucket. Log that path too. Wiring: `../projects/eqr_jax.md`
 §Experiment Tracking.
 
+### Reading The Curves From The Workstation
+
+**The workstation CAN read a job's curves. What it cannot do is call the
+datatable service through its Stubby client, so a report must never say "the
+workstation cannot read the datatable"; it says which of the three routes below
+was tried and what came back.** Every route here was performed, not inferred;
+re-perform route 3 against any finished XID before relying on it, because its
+failure is a service state, not a rule.
+
+| Route | Do | Gives | State |
+|---|---|---|---|
+| 1. The job's own bucket, first | torch lines: `fileutil cat <bucket>/sanity/<XID>_<WID>_att<N>_rank0.jsonl`. `EqR-torch-maze128` writes a `train_metrics` record per log interval (every `train/*` column, `samples_per_second` included), `eval_done` / `final_eval_done` carry the eval keys with values, `model_built` carries `tf32` and the matmul precision in force. Other torch lines built on the same `infra/beacon.py` have the lifecycle and eval records but not the train rows: port the one `beacon.emit(..., "train_metrics", ...)` call from `borg_trainer.py`. JAX lines: `fileutil cat <bucket>/logs/rank_<n>_attempt<k>.log` (which rank and which attempt hold the final curve: `../projects/eqr_jax.md` §Harvesting Final Train Metrics); `~/work/xid2wandb/` parses those logs (`xid2wandb <XID> --dry-run` prints every row it recovered). | exact numbers at every logged step | works, no service in the loop |
+| 2. The rendered page | `/google/bin/releases/gemini-agents-gbrowser/gbrowser --corp screenshot "http://flatboard/xid/<XID>" out.png`, then view the PNG. `--corp` is the persistent Chrome profile carrying corp auth; a login page in the PNG means `gbrowser login` once from a real terminal. The page auto-creates a dashboard whose plot 0 is `train/lm_loss`; `?activePlot=N` selects another. | the curve as a picture, data-freshness stamp included | works |
+| 3. The numeric reader | `/google/bin/releases/gemini-agents-flatboard/flatboard_tool read_data --query=/datatable/xid/<XID>/data --limit=500 [--json --columns=step,train/lm_loss]`; `get_url --xid=<XID>` lists its dashboards; `read_data --url=<dashboard url>` reads a plot. | the table as rows | the credential mints, then `Flatfish RPC failed ... /DataService.ReadTableData ... DEADLINE_EXCEEDED` on every table, inside and outside the sandbox. Ten seconds to try; fall through to 1 or 2 on that error and quote it. |
+
+`gbrowser --corp text` and `html` return only the app shell: flatboard and the
+datatable viewer are JS applications that fetch their data after load, so
+route 2 is a screenshot, never a scrape. `xmanager` sees status, not scalars.
+
+### Why Only A Work Unit Can Write One
+
 Writing a datatable requires a Borg credential; a workstation cannot. The table
 lives at `owner=…deepmind-jobs realm=… type=PROD`, and a workstation LOAS is a
-*restricted* credential: `DatatableService.CreateTable` / `Read` both return
-`PERMISSION_DENIED` (`go/loas-restricted-credentials`), as do `analog` and
-`xmanager tail_logs`. So a metric reaches a table only from inside a work unit,
-which mints a real prod credential. `blaze run` on the workstation fails at table
-creation and cannot verify the write either. Read the job's own CNS log instead
-(the writer prints `writing to http://flatboard/xid/<XID>`). Or have the job drop
-a small CNS completion marker a watcher can poll.
+*restricted* credential: `DatatableService.CreateTable` / `Read` through the
+LOAS client both return `PERMISSION_DENIED` (`go/loas-restricted-credentials`),
+as do `analog` and `xmanager tail_logs`. That is a statement about that client,
+not about the curves (§Reading The Curves From The Workstation). A metric
+reaches a table only from inside a work unit, which mints a real prod
+credential; `blaze run` on the workstation fails at table creation and cannot
+verify the write either. So a job drops its own evidence where `fileutil`
+reaches (route 1), and its log line `writing to http://flatboard/xid/<XID>` is
+the proof that the table exists.
 
 A finished run's empty chart can be backfilled from its text log. Such a run
 predates the datatable writer but still has every logged scalar in its

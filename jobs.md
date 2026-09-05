@@ -979,7 +979,10 @@ There is no external experiment tracker here. The internal equivalent stores
 scalars in a table service and plots them in a dashboard service, both keyed by
 experiment id. `research/result_logging.md` owns the URL forms, how to verify a
 run actually wrote metrics, and the settings that are easy to get wrong
-(explicit opt-in, rank-0 only, periodic flush).
+(explicit opt-in, rank-0 only, periodic flush). **Reading the curves back from
+the workstation is possible and has three routes, bucket first:**
+`research/result_logging.md` §Reading The Curves From The Workstation. A
+report that says "the workstation cannot read the datatable" has skipped them.
 
 Current wrapper code, allocator configuration, work-unit state, and logs outrank
 this guide whenever implementation details change.

@@ -67,6 +67,7 @@ and each has a `README.md` index.
 | A job says `RUN` but produces nothing | `jobs.md` §`state: RUN` Is Not Evidence |
 | Write a checker, or a verification keeps saying OK | `engineering.md` §A Test That Cannot Fail |
 | **Log a result to the spreadsheet**; find a chart | `research/result_logging.md` |
+| **Read a job's curves / harvest `train/*` from the workstation**; the urge to write "the workstation cannot read the datatable" | `research/result_logging.md` §Reading The Curves From The Workstation |
 | Write or render a paper report | `reports/README.md` |
 | **The workstation is swapping / VSCode-SSH keeps disconnecting**; reclaim idle blaze servers | `engineering.md` §Diagnose From Evidence, Not From The Most Available Story, `monitoring.md` §Memory And Disk Wake Criteria |
 | **Monitor a fleet of autonomous runs**; watcher, handoffs, DEAD/idle alerts | `monitoring.md` |
