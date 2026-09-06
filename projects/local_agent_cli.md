@@ -366,6 +366,20 @@ exits with 75 when `client_flags.txt` changes under it, so a gateway can never
 outlive the universe it was pointed at. `amply_notify` keeps working on the
 local database (it reaches the worker's control port, not Spanner).
 
+**`amp new` takes 75 s on this database, 135 s when the corp-chubby timeout
+hits; only the timeout is ours.** Measured 2026-09-06 (load 50-80): ~45 s
+importing the worker's Python dependency graph out of the compressed par (55 s
+CPU; an uncompressed par saved CPU but not wall time, so it was not adopted),
+2 s to create the run, 13 s skill index, 17 s until the first heartbeat makes
+the run "live". The extra 60 s comes from the env's
+`--lockservice_use_proxy=never`: every client then tries the CORP chubby cell
+directly (ACL lookups under `/ls/corp/...`), which is unreachable from a
+workstation, and waits out `--lockservice_mount_timeout_secs`. Publishing
+`--lockservice_direct_connection_regex=localhost.*` instead (local cell direct,
+corp via the proxy) removes it with zero timeouts; localdb now writes that
+form, and `~/.amply/localdb/apply_client_flags.sh` switches a running gateway
+(which restarts it, killing live runs, so pick the moment).
+
 Traps met while building it:
 
 - **Startup can fail on a port collision** (`bind() failed ... Address already
