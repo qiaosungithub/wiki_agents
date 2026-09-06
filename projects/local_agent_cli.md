@@ -344,7 +344,7 @@ Old history is still in the old path and is copied over opportunistically
 | Client flags | `~/.amply/localdb/client_flags.txt` | `--spanner_master_lockservice=localhost:<port> --default_ls_watcher=lockservice --lockservice_use_proxy=never`. Every amply process, and `span`, needs them to see the universe. **The port changes on every localdb start, so restart the gateway after localdb.** |
 | Gateway | `~/.amply/bin/launch-ux-localdb.sh` (unit `amply-ux.service`, or tmux `amply-ux-local`) | Runs `bin/amply ux --spanner_db=... <flags>` from `~/work`; exports `AMPLY_WORKER_EXTRA_ARGS=<flags>` |
 | Worker flags | local patch in `ux/server.py` (`_worker_extra_args`) | Appends `$AMPLY_WORKER_EXTRA_ARGS` to every spawned/resumed worker argv. Without it workers cannot reach the universe |
-| Persistence | `~/.amply/localdb/snapshots/` (JSONL per run + `manifest.json`) | The universe is in-memory. localdb writes a delta every 5 min, a full re-dump every 6 h, and a final delta on SIGTERM; on start it restores everything. A crash loses at most 5 minutes |
+| Persistence | `~/.amply/localdb/snapshots/` (JSONL per run + `manifest.json`) | The universe is in-memory. localdb writes a delta every 5 min, a full re-dump every 6 h, and a final delta on SIGTERM. On start it publishes `ready` FIRST (gateway back in ~1 min) and restores history in the background, newest runs first, 4 threads (~300 rows/s; 120 runs ≈ 5 min). A crash loses at most 5 minutes; snapshots pause while a restore runs |
 | History migration | `~/.amply/localdb/dump_loop.sh` (tmux `amply-dump-loop`) | Every 10 min: `dbtool dump` from the old database with `--schema_bundle` (its metadata path is dead, so the schema comes from the bundle), then `dbtool restore --skip_existing` into the universe. Progress: `dump_loop.log`, `snapshots/runs/*.jsonl` |
 | Source | `//experimental/users/qiaos/amply_localdb` (`localdb.py`, `dbtool.py`, `amply_local.sdl`) | Rebuild with `blaze build`, then `~/.amply/localdb/refresh_bin.sh` copies binaries onto local disk (objfs GCs blaze outputs) |
 
@@ -352,6 +352,19 @@ Health in one line: `cat ~/.amply/localdb/ready ~/.amply/localdb/client_flags.tx
 and `amp-ux-ok`. A query by hand:
 `span $(cat ~/.amply/localdb/client_flags.txt) sql /span/test-universe/qiaos:amply`
 (it spends a minute failing to reach corp chubby first; the query still runs).
+
+**Do not restore with the search indexes of the real schema.** `amply_local.sdl`
+drops the `search_text_substr` n-gram tokenlist (3..12-grams over multi-MB event
+JSON): with it, the single-process universe wrote ~15 rows/s and a 120-run
+restore took hours with the gateway waiting. Full-text `SEARCH()` still works;
+only `include_substring=True` searches fail on the local database.
+
+**Restart order is automatic**: `amply-ux.service` is `PartOf=` +
+`After=amply-localdb.service` (a crash-triggered auto-restart of localdb was
+observed to restart the gateway too), and `launch-ux-localdb.sh` additionally
+exits with 75 when `client_flags.txt` changes under it, so a gateway can never
+outlive the universe it was pointed at. `amply_notify` keeps working on the
+local database (it reaches the worker's control port, not Spanner).
 
 Traps met while building it:
 

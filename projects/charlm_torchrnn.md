@@ -28,7 +28,7 @@ numbers share the unit (nats/char) and are not comparable.
 | Upstream Lua mirror (read-only reference) | `~/work/torch-rnn-upstream/` |
 | Native docs | `~/work/charlm/README.md` — measured config table, deliberate divergences |
 | Launcher | `~/work/charlm/run_official.sh` (every flag spelled out, not inherited) |
-| Compute | the four 4xA100 boxes; SSH in `../gcp_gpu_ssh.md` |
+| Compute | the 4xA100 boxes; SSH in `../gcp_gpu_ssh.md`. Since 2026-09-06 `~/work/charlm` + `.venv` (system-site-packages, wandb 0.29.0, matplotlib, pytest) + prepared data exist on ALL THREE of `qiaos-4a100-3` (80GB, the main one), `qiaos-4a100` and `qiaos-4a100-2` (40GB, 2 unroll runs per card); code is copied by tarball from the cloudtop copy, so the cloudtop copy is the source of truth and md5s must match before a launch |
 | W&B | project `charlm-torchrnn-baseline`, entity zhh24-massachusetts-institute-of-technology |
 | Results tab | EqR workbook `17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0`, tab **`charlm-torchrnn (qiaos)`** (resolve BY TITLE) |
 
@@ -228,6 +228,23 @@ reading. Rows were inserted with `insert-rows --range`, which shifts everything
 below intact. The DEPTH-site sweep (`--site_index depth --depth_max {4,16,100}`,
 lr 2e-4/4e-4, dropout 0.1, groups `unroll_depth<d>_d0.1_lr<lr>_20260905`) was
 launched 2026-09-05 23:3xZ by `lu_depth.sh` and is not on the tab yet.
+
+## Depth Sites: What Happened On The First Night (2026-09-05/06)
+
+`--site_index depth --depth_max D` (`depth_sites.py`, exact VJP recurrence,
+dropout masks replayed via `UnrollCharLM.forward(masks=...)`): depths 1..D are
+sites, plus one remainder site. Measured on the 80GB box, 5 runs per card:
+d_max=4 is FASTER than time sites (5 Adam sites instead of 100), 16 is ~1.5x,
+100 is ~3.6x slower per step. **Uniform weight over depth bands fails at
+D=100**: after 4 epochs val sat at 4.85 bpc, the unigram floor, in all 8 seeds
+(stopped). Deep bands carry no signal but per-band Adam normalizes them to
+O(1), so the merge is ~95 noise directions against ~5 signal ones. D=16
+learned ~5x slower per epoch than time sites; D=4 at lr 4e-4 tracked time
+sites at lr 2e-4 (a ~2x effective-lr shift from divisor sqrt(5) vs sqrt(100)).
+The operator's answer is `--depth_weight inv_depth` (band b gets 1/b, orthow
+divisor sqrt(sum 1/b^2)): groups `unroll_depthinv{100,16,4}_d0.1_lr{2e-4,4e-4}_20260906`,
+running on the two 40GB boxes from 00:43Z. Uniform-weight D=4/16 keep running
+on the 80GB box for the comparison.
 
 ## Per-Site Alignment: Why The Divisor Is sqrt(n) Late And ~n Early
 

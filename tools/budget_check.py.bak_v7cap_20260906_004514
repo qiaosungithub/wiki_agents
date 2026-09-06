@@ -83,21 +83,6 @@ def get_default_cap(tpu_type):
         'v5e': 30,
         'v6e': 80,
         'v6p': 180,
-        # v7 (added 2026-09-06). It was MISSING and fell through to the 100
-        # cr/chip-hr catch-all, which the market-price comment above already
-        # names ("v7 is not even in the table") without the table ever being
-        # fixed. The consequence was structural, not marginal: v7 is currently
-        # a FREE POOL, and market_prices() deliberately refuses to price a free
-        # pool at 0.00 (see its closing comment), so every v7 job fell back to
-        # the catch-all -- and 32 x 100 = 3200 cr/hr exceeds the entire bar
-        # (income/10 = 2415), making a v7-32 UNDISPATCHABLE no matter how idle
-        # the fleet was. Measured 2026-09-06: three elt v7-32 lines sat
-        # BUDGET_DEFERRED for 4 h with headroom 2691 free and current at 160.
-        # 20 is this family's own policy cap from the money board's cap column
-        # ("TPU v7 PROD: 20.00 blocks dear cells (policy)"), the same basis the
-        # GPU rows below use, so the gate and the submit path agree. v7-32 now
-        # prices at 640, which the bar can hold.
-        'v7': 20,
         # NVIDIA GPU families (added 2026-08-28, infra-v11). Before this, every
         # GPU family missed the table and fell through to the 100 cr/chip-hr
         # catch-all, projecting gb200-8 and h100-8 at 800 cr/hr each -- a 5-10x
