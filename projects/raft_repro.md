@@ -81,6 +81,14 @@ tpu enqueue --power=h100-8 --archs=h100 --tier=PROD --metros=cmh --job_id=<id> \
   --launch=group=9,config=chairs_repro,exp_name=<what-this-launch-is-for>,tmp_ram_fs_gib=64,ram_gib=160
 ```
 
+Measured on an h100-8 task running 8 independent ranks (XID 287466325): the
+baseline does 4.9-5.0 steps/s and the reldist arm 2.35 steps/s, the same per-step
+speed as one A100-40GB on the GCE box, so a Borg job buys 8 concurrent runs, not
+a faster run. **DataLoader workers inside a PAR need the stdlib `fork` context**
+(`train_repro --mp_context fork`): the patched `torch.multiprocessing` context
+launches a resource tracker that needs `sys.executable`, which is None in a PAR
+(`TypeError: expected bytes, NoneType found` on every rank, XID 287458555).
+
 `tmp_ram_fs_gib` / `ram_gib` ride inside `--launch=` (only `load_from`,
 `wandb_resume_id`, `cell` are refused there). Local gates before any enqueue:
 `RAFT_ALLOW_CPU=1 python borg/main.py --config=local_cpu_smoke --data_root=<dir with
