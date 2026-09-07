@@ -63,6 +63,42 @@ Run names are `raftsmall_<arm>_{C,CT}_s<seed>` from `scripts/run_arm.sh`
 A launcher must never be edited in place while it runs; the tarball sync is safe
 because tar replaces the inode.
 
+## The Borg / XManager Path (GPU via `tpu enqueue`)
+
+`~/work/raft/borg/` is the launch dir (the tpu wrapper packages the CWD): `main.py`
+(the EqR-torch launcher contract: boot lamp, `known_only` flags, no I/O at
+import, `device_count` guard), `borg_run.py` (streams the dataset tars from CNS
+into the task's RAM disk, then re-execs one process per GPU; every rank is an
+independent single-GPU `train_repro` run named by `configs/<mode>.yml`),
+`reexec.py` / `beacon.py` copied from EqR-torch-maze128 with `RAFT_*` env names.
+Checkpoints go to `/tmp/raft_runs/<name>` and are mirrored after every save to
+`$CHECKPOINT_BUCKET/runs/<name>/` (`train_repro --mirror_dir`); a restarted task
+restores `last.pt` from the mirror. Beacon JSONL: `$CHECKPOINT_BUCKET/sanity/`.
+
+```bash
+cd ~/work/raft/borg && source ~/work/tpu_cmd/tpu_wrapper.sh
+tpu enqueue --power=h100-8 --archs=h100 --tier=PROD --metros=cmh --job_id=<id> \
+  --launch=group=9,config=chairs_repro,exp_name=<what-this-launch-is-for>,tmp_ram_fs_gib=64,ram_gib=160
+```
+
+`tmp_ram_fs_gib` / `ram_gib` ride inside `--launch=` (only `load_from`,
+`wandb_resume_id`, `cell` are refused there). Local gates before any enqueue:
+`RAFT_ALLOW_CPU=1 python borg/main.py --config=local_cpu_smoke --data_root=<dir with
+a fake tar> ...` (real re-exec, staging, mirror, resume), then a `blaze build` of a
+`rsync -aL` copy under `$STAGE_WS_ROOT/experimental/qiaos/` plus `--import_check`
+(torch 2.14.0a0+google3 imports take ~60 s).
+
+**Data on CNS: `/cns/go-d/home/qiaos/raft_data/` (metro cmh, group quota).**
+`tars/{FlyingChairs_release,Sintel_training,KITTI_training,FlyingThings3D_frames}.tar`
+for RAM-disk staging; `raw/FlyingThings3D/optical_flow/TRAIN/*/*/{into_future,into_past}/left/*.pfm`
+(259 GiB) read per file by the indexed loader (`datasets_cns.py` +
+`things_index.json`, enumeration identical to the authors' class;
+`frame_utils._open` routes `/cns/` paths through epath). The metro list must stay
+`cmh` until the data is mirrored elsewhere. Route used: box -> GCS
+(`gs://qiaos-viscam-data-multi/raft_data`, ~1 GiB/s) -> cloudtop (337 MiB/s) ->
+`fileutil cp` (`scripts/cloudtop_stage_to_cns.sh`, sizes verified both hops); the
+SSH relay measured 29 MB/s and is the wrong tool for 330 GiB.
+
 ## Traps Already Paid For
 
 - **NumPy 2.5 on the box breaks the authors' `readFlow`** (`int()` of a 1-element
