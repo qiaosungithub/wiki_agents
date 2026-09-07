@@ -53,8 +53,15 @@ sqrt(sum_n 1/n^2); a parameter with a single bucket (flow head: the next round
 detaches the flow) is divided by 1. The same global clip coefficient (clip 1.0
 over the ordinary gradient) scales every bucket; decoupled wd once; fnet/cnet
 stay on torch AdamW. `--site_merge sum` is the identity control (one AdamW on
-the summed buckets = baseline). Cost: 12 per-loss backward passes over the
-recurrent prefix, ~3-4x a baseline step (measure; do not quote until measured).
+the summed buckets = baseline). Cost, measured at the Chairs shape on A100-40GB:
+0.49 s/step and 6.5 GiB against the baseline's 0.195 s/step and 6.3 GiB, i.e.
+2.5x per step (12 per-loss backward passes over the recurrent prefix, 78
+call-backwards instead of 12), so C ~14 h and C+T ~30 h per seed.
+
+Run names are `raftsmall_<arm>_{C,CT}_s<seed>` from `scripts/run_arm.sh`
+(the first baseline batch predates it and is named `raftsmall_{C,CT}_s<seed>`).
+A launcher must never be edited in place while it runs; the tarball sync is safe
+because tar replaces the inode.
 
 ## Traps Already Paid For
 
