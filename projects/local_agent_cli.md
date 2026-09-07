@@ -25,6 +25,36 @@ session's policy.
 | The jail hides `/google/data`, `/google/bin`, `/google/src/head`, `/cns`, and other users' homes. `$HOME` and `/google/src/cloud/qiaos` are read-write, `/tmp` is a private tmpfs, the network is shared with the host | A task needing those runs outside the jail with `CLOD_NO_SANDBOX=1`; it is not a missing-file bug. `--unshare-pid` also hides host processes, tmux included, so the agent cannot signal them |
 | `effortLevel` in `settings.json` stops at `xhigh`; only the CLI flag `--effort max` reaches the model, so `clod` passes it | `"max"` in settings is ignored and the session falls back to `high`. Claude Code accepts unknown settings values silently, so never read "it started fine" as evidence a setting took effect. The `effort` field of a `PreToolUse` hook's stdin payload reports the effective level |
 
+## Named Startup: Registration, Readiness, And Native Names
+
+The 2026-09-07 repairs are deployed in `agent-island/claude-amply.py` and
+`codex-session-name.mjs`; `.bashrc` and `~/.local/bin/gpt` use them on each new
+invocation. No gateway or database restart is needed for these CLI changes.
+
+`amp new NAME` now applies `/annotate/title` as soon as the exact run ID is
+registered. Registration is not readiness: an independent read-only status
+observer can detect a ready worker after a quiet or lost startup stream and
+attach that same run. Never repeat run creation to repair the display. Explicit
+worker failure still wins over a live observation. The configurable default
+600-second observation budget is not a hard deadline for every HTTP operation.
+See `~/work/.amply_new_sync_fix_20260907/README.md` and its installed CLI tests.
+
+`gpt new NAME` now creates one empty native thread, sets and reads back its
+native name, then enters the TUI with that exact thread ID. Updating only the
+SQLite title or a sidecar while a new TUI is already running can lose to native
+automatic naming on the first prompt. Native 0.153.4 tests verified the name
+survives actual first input. Unsupported named-start options, including
+`--profile`, fail before creating a thread; use unnamed `gpt new` followed by
+the TUI's `/rename` for those options. Original unnamed new/resume behavior is
+preserved. See `~/work/.gpt_new_name_fix_20260907/README.md`, including private
+app-server cleanup and compatibility limits. Do not restore the rejected
+global newest-thread or background title-watcher approaches.
+
+The slow skill scan and missing in-memory skill index are separate server-side
+issues. `~/work/.amply_skill_cache_fix_20260907/README.md` owns the current
+atomic v2 snapshot candidate and build/publication status; the older two-file
+flock candidate in `.amply_startup_investigation_20260907` is superseded.
+
 ## `amp` / Amply: Diagnosing A Dead Session
 
 **Start at `/api/chat?run_id=<id>`**: `chatbot_status` separates a session that
@@ -148,6 +178,15 @@ Call) describe model behaviour and still hold; this guard only shortens the
 recovery.
 
 ## Restarting The Amply UX Server
+
+**Source recovery, 2026-09-06:** `run_amply_workspace` has a Fig snapshot-write
+failure that repeatedly rolls back Hg metadata. A verified Amply source copy
+is available at
+`/google/src/cloud/qiaos/hg_recovery_20260906/google3/third_party/py/simply/amply`.
+Native Hg status works in that new workspace. The running Amply service and its
+launch configuration were not switched or restarted. This copy preserves
+readable source content, not the old workspace's local commit history; see
+`~/work/.hg_status_recovery_20260906/README.md` before using it for development.
 
 **`amply` and `amply-launch` are `blaze run`, so they work only inside a google3
 workspace.** They are shell functions, not aliases: typed from `~/work`, they
@@ -346,7 +385,7 @@ Old history is still in the old path and is copied over opportunistically
 | Worker flags | local patch in `ux/server.py` (`_worker_extra_args`) | Appends `$AMPLY_WORKER_EXTRA_ARGS` to every spawned/resumed worker argv. Without it workers cannot reach the universe |
 | Persistence | `~/.amply/localdb/snapshots/` (JSONL per run + `manifest.json`) | The universe is in-memory. localdb writes a delta every 5 min, a full re-dump every 6 h, and a final delta on SIGTERM. On start it publishes `ready` FIRST (gateway back in ~1 min) and restores history in the background, newest runs first, 4 threads (~300 rows/s; 120 runs ≈ 5 min). A crash loses at most 5 minutes; snapshots pause while a restore runs |
 | History migration | `~/.amply/localdb/dump_loop.sh` (tmux `amply-dump-loop`) | Every 10 min: `dbtool dump` from the old database with `--schema_bundle` (its metadata path is dead, so the schema comes from the bundle), then `dbtool restore --skip_existing` into the universe. Progress: `dump_loop.log`, `snapshots/runs/*.jsonl` |
-| Source | `//experimental/users/qiaos/amply_localdb` (`localdb.py`, `dbtool.py`, `amply_local.sdl`) | Rebuild with `blaze build`, then `~/.amply/localdb/refresh_bin.sh` copies binaries onto local disk (objfs GCs blaze outputs) |
+| Source | `//experimental/users/qiaos/amply_localdb` (`localdb.py`, `dbtool.py`, `amply_local.sdl`) | Rebuild with `blaze build`, then `~/.amply/localdb/refresh_bin.sh` copies binaries onto local disk (objfs GCs blaze outputs) and repoints their runfiles MANIFEST at that copy |
 
 Health in one line: `cat ~/.amply/localdb/ready ~/.amply/localdb/client_flags.txt`
 and `amp-ux-ok`. A query by hand:
@@ -365,6 +404,43 @@ observed to restart the gateway too), and `launch-ux-localdb.sh` additionally
 exits with 75 when `client_flags.txt` changes under it, so a gateway can never
 outlive the universe it was pointed at. `amply_notify` keeps working on the
 local database (it reaches the worker's control port, not Spanner).
+
+**A reboot kills this database until something repoints its runfiles MANIFEST.**
+`bin/localdb` and `bin/dbtool` are `par_binary` launchers: they import their own
+Python through `<bin>.runfiles/MANIFEST`, which maps every runfiles key to an
+ABSOLUTE path -- into the blaze output tree
+(`/usr/local/google/_blaze_qiaos/<md5>_buildrabbit/execroot/google3/blaze-out/...`,
+itself a symlink into objfs) and into the CitC workspace. `refresh_bin.sh` copies
+the binaries AND their runfiles onto local disk, but the copied MANIFEST still
+names those originals, so the local copy is local in its bytes and remote in its
+imports. Both originals are missing exactly when this service needs them: objfs
+is not mounted for the first minutes after a reboot, and any later build repoints
+`blaze-out` at a different namespace, which retires the old one. On 2026-09-07
+the 17:09 reboot for the sqa-large migration left the database down for 2h11m on
+`FileNotFoundError: .../devtools/python/context/__pycache__/g3_context.cpython-313.pyc`
+-- a file sitting in `bin/localdb.runfiles/` the whole time. Six failed starts in
+seven minutes then hit `StartLimitBurst`, and past that systemd stops retrying on
+its own: only `systemctl --user reset-failed` clears it, which is why the outage
+outlived the cause by two hours. `~/.amply/localdb/fix_manifest.py` repoints every
+external entry at the local copy; it is idempotent, and it refuses to write
+anything if some key has no local file, because a half-repointed MANIFEST is
+worse than an honestly broken one. `run_localdb.sh` runs it before every start
+and `refresh_bin.sh` after every copy, so a rebuild cannot bring the problem
+back. Audit by hand with `fix_manifest.py --check` (exit 1 means a repair is
+due). The 2026-09-07 repair receipts and the pre-fix MANIFESTs are in
+`~/.monitor_prompts/amply_repair_20260907T1924/`.
+
+**A gateway watchdog cannot fix a dead database, so it now checks both.**
+`~/work/.monitor_watch/watchdog_selfheal.sh` (cron, every 2 min) probed only the
+gateway. Through those 2h11m it therefore restarted the GATEWAY eleven times,
+each new one pointed at a database that did not exist, and reported nothing about
+the thing that was actually broken. It now also reads `amply-localdb.service`'s
+`ActiveState` and, on `failed` or `inactive` only, issues `reset-failed` +
+`start`. It deliberately does nothing when the unit is `activating` (a restore
+runs for ~40 min after every start, and a restart throws that work away), when
+the user bus is unreachable (cron has no `XDG_RUNTIME_DIR`, and an unreadable
+state must not read as death), or when the host is starved -- the same guard the
+gateway check uses.
 
 **`amp new` takes 75 s on this database, 135 s when the corp-chubby timeout
 hits; only the timeout is ours.** Measured 2026-09-06 (load 50-80): ~45 s
