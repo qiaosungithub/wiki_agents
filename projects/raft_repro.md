@@ -130,8 +130,12 @@ for RAM-disk staging; `raw/FlyingThings3D/optical_flow/TRAIN/*/*/{into_future,in
 task in `ga` reading go-d (`configs/io_probe.yml`, XID 287524092): one thread
 82 MB/s, 14 files/s, p50 64 ms per 5.9 MB pfm; eight threads 881 MB/s,
 149 files/s, p50 56 ms. Four Things-stage ranks need ~120 files/s (~700 MB/s),
-so per-file reads with 6 workers per rank are the design; `stage_raw` (RAM-disk
-copy, `RAFT_THINGS_FLOW_MODE=ramdisk`, ~330 GiB) is the fallback. The metro list must stay
+but **forked DataLoader workers cannot read CNS** (the parent already holds the
+RPC state; every worker died at once, XID 287659289), so the Things stage stages
+the raw flow into the RAM disk too: `stage_raw` (`RAFT_THINGS_FLOW_MODE=ramdisk`,
+`tmp_ram_fs_gib=330`, `ram_gib=420`) copies the 40,302 flow files the index
+names (233.5 GiB) in 233 s at 1 GiB/s with 16 threads; the frames tar takes
+190 s. Per-file CNS reads are fine from the main process only. The metro list must stay
 `cmh` until the data is mirrored elsewhere. Route used: box -> GCS
 (`gs://qiaos-viscam-data-multi/raft_data`, ~1 GiB/s) -> cloudtop (337 MiB/s) ->
 `fileutil cp` (`scripts/cloudtop_stage_to_cns.sh`, sizes verified both hops); the
