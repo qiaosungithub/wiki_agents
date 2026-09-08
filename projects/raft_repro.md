@@ -16,6 +16,7 @@ is `../archive/audits/20260907-raft-applicability-elt-dev.md`.
 | Pretrained | `~/work/raft/models/raft-small.pth` etc. (the authors' models.zip) |
 | Logs / checkpoints | `~/work/raft/logs/<run>.log`, `~/work/raft/checkpoints/<run>/{last.pt,step_N.pth,<run>.pth,train_log.jsonl}` |
 | W&B | project `raft-repro`, entity `zhh24-massachusetts-institute-of-technology`; groups `raftsmall_C_baseline`, `raftsmall_CT_baseline` |
+| Results tab | EqR workbook `17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0`, tab **`raft-small (qiaos)`** (resolve by title). Row 1 banner = the protocol; header row 2: config / seed n / train loss C / train loss T / Chairs val EPE / Sintel clean / Sintel final / KITTI EPE / KITTI F1-all / chart / logdir / notes. Multi-seed cells `mean +- sd`; official-report and eval-reproduction rows sit above the train-reproduction row (`../research/result_logging.md`). |
 
 ## The Recipe (declared reference schedule)
 
