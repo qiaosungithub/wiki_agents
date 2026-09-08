@@ -137,6 +137,20 @@ copy, `RAFT_THINGS_FLOW_MODE=ramdisk`, ~330 GiB) is the fallback. The metro list
 `fileutil cp` (`scripts/cloudtop_stage_to_cns.sh`, sizes verified both hops); the
 SSH relay measured 29 MB/s and is the wrong tool for 330 GiB.
 
+### The bucket directions are correlated; `--site_align ema` measures and removes it
+
+The sqrt divisor assumes pairwise-orthogonal bucket updates. Measured on the Borg
+Chairs job (same lr in both arms), the update block's update norm under reldist
+is 1.85x the baseline's early and 1.56x from 30k steps on, with equal bucket
+norms, i.e. a mean pairwise cosine of ~0.45 falling to ~0.28. `--site_align ema`
+keeps, per parameter tensor (`--site_align_scope block` for one scalar), a
+bias-corrected EMA of r = ||sum_n w_n U_n|| / sqrt(sum_n w_n^2 ||U_n||^2) and
+divides the merged update by it, so it keeps one Adam step's norm whatever the
+correlation (r == 1 for a single bucket). Measured at steps 100-200: baseline
+5.2-5.4e-3, reldist 9.5e-3, align 5.3-5.4e-3. Arm name `align`
+(`run_arm.sh <gpu> <seed> align --site_mode reldist --site_align ema`,
+Borg `configs/chairs_align.yml`).
+
 ## Traps Already Paid For
 
 - **NumPy 2.5 on the box breaks the authors' `readFlow`** (`int()` of a 1-element
