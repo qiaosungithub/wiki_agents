@@ -119,3 +119,21 @@ listener: never copy a port observed from someone else's session.
 
 When the checkout runs through ESM/`tsx`, keep child-process imports in ESM form
 (`import { execFileSync } from "node:child_process"`), not CommonJS `require`.
+
+## Jetski Hub Owns The Whole Stack; One Machine At A Time
+
+**`jetski-hub.service` starts `run.sh`.** Its `sar.server` process runs
+`~/work/agent-web-gemini/run.sh`, which starts node, esbuild, the `jetski-ls`
+tmux session and `cloudflared ... cloudflared-named.yml tunnel run`. Stopping
+the hub therefore stops the web app and the public tunnel, and starting the hub
+on a second machine (as the `sqa -> sqa-large` migration did on 2026-09-08)
+brings up a second connector for the same named tunnel: Cloudflare then splits
+`gemini.kaiming.me` / `lyy.kaiming.me` between two hosts while every session
+lives on one. Keep the hub inactive on any machine that is not serving the
+chat, and move the stack by stopping hub + run.sh + cloudflared on the old host
+before starting the hub on the new one (`workstation.md`).
+
+A tmux server first created by `run.sh` belongs to the hub's cgroup, so
+`systemctl --user stop jetski-hub` kills every tmux session on that server,
+not just `jetski-ls`. Start other long-lived tmux servers from a login or ssh
+session.

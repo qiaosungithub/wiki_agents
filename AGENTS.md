@@ -23,6 +23,7 @@ and each has a `README.md` index.
 | `tpu_reference.md` | Accelerator names, memory, legal shapes, ratios. |
 | `gpu_on_borg.md` | Run an NVIDIA GPU job on Borg via `tpu enqueue` (CUDA build, NCCL, tiers, traps). |
 | `gcp_gpu_ssh.md` | SSH to the GCP GPU VMs (viscam-cloud); OS Login vs metadata keys. |
+| `workstation.md` | The Cloudtop itself: `sqa-large` (migrated from `sqa` 2026-09-08), ssh, what runs where, re-sync, jetski-hub owns the web app. |
 | `monitoring.md` | The monitor role: watcher, DEAD/idle alerts, handoffs, escalation. |
 | `projects/` | Per-checkout semantics and boundaries. |
 | `research/` | Running experiments; logging results. |
@@ -51,6 +52,7 @@ and each has a `README.md` index.
 | **Run a GPU job on Borg** (`tpu enqueue --tpu_type=h100-8`); CUDA build, NCCL, device_count==0, GPU preemption | `gpu_on_borg.md` |
 | **A GPU job trains far slower than the bench**; `samples_per_second` 10-30x under; is it the data path or the GPU/NCCL? | `gpu_on_borg.md` §Measure The Container's Input Path Before Blaming It; Co-Located CNS Is Fast |
 | SSH to a GCP GPU VM; `Permission denied`; OS Login vs metadata keys | `gcp_gpu_ssh.md` |
+| **Which machine am I on / ssh to the workstation**; `sqa` vs `sqa-large`; where amply, the crontab and the tpu workers run; re-sync home; jetski-hub and the web app | `workstation.md` |
 | **Choose an accelerator family**; a preemptible slice will not hold | `research/accelerator_choice.md` |
 | Place data or checkpoints; copy or upload | `storage.md`, then the project guide |
 | Pick a cell/metro for a v7 run | `research/v7_storage_placement.md` |
@@ -133,11 +135,19 @@ zombie XID. Use `tpu queue` one-shot only when no other build is in flight.
 Never call `xm launch` / `xmanager launch` directly (`jobs.md` §Submission
 Contract).
 
-**BATCH tier is EVAL-ONLY.** Every TRAINING job passes `--tier=PROD` explicitly;
-`BATCH` is only ever for eval jobs. `BATCH` is a paying best-effort tier: it
-bills the group, it is not the free option, and any PROD demand preempts it the
-instant a slot is contested. A training run on BATCH is silently starved and
-still costs. Never train on BATCH (`jobs.md` §Requirements And Runtime).
+**Never train on BATCH.** Every TRAINING job passes `--tier=PROD` explicitly.
+`BATCH` is a paying best-effort tier: it bills the group, it is not the free
+option, and any PROD demand preempts it the instant a slot is contested. A
+training run on BATCH is silently starved and still costs.
+
+**The converse is NOT a rule: an eval may run on either tier.** `BATCH` is the
+polite default for evals because it leaves the PROD budget bar to training, but
+an eval that must actually finish belongs on PROD. This file and `jobs.md` used
+to carry "BATCH is EVAL-ONLY" / "Run evals only on BATCH"; the operator states
+plainly (2026-09-07) that they never asked for that — their rule is and always
+was **train on PROD only**. The invented half cost real time: the FID 50k evals
+(50,000 generated images each) were preempted repeatedly on BATCH before being
+moved (`jobs.md` §Requirements And Runtime).
 
 **A chip count is not a size.** Per chip, `v7 = v6p ≈ 2.17x v6e ≈ 4.34x v5p ≈
 7.23x v4 ≈ 10.09x v5e`, so matching a `v6p-16` needs a `v6e-32`. Asking for

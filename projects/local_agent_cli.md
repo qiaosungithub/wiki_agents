@@ -2,7 +2,10 @@
 
 Read this before changing how an agent CLI is launched or managed here. The
 `agent-island` checkout and the live `~/.bashrc` are authoritative for current
-wiring; the agent web app is `agent_web.md`.
+wiring; the agent web app is `agent_web.md`. Since 2026-09-08 all of this runs
+on `sqa-large.c.googlers.com`, not `sqa`; the amply gateway URL is in
+`~/.amply/dashboard_url` (the port changes per start), and the migration,
+the re-sync recipe and what still runs on `sqa` are in `workstation.md`.
 
 ## `clod`, And The Jail It Runs In
 
