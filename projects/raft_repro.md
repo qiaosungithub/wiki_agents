@@ -41,6 +41,19 @@ independent evaluation of the same ported weights (`C_T_V1`: 2.1231 / 3.279,
 7.6557 / 25.2801) to 0.003 EPE. So the eval pipeline is right, and the paper
 numbers describe a different seed than the released checkpoint.
 
+**Reproduced (2026-09-08, GCE box, authors' evaluate.py after C+T 100k+100k):**
+
+| seed | Sintel clean | Sintel final | KITTI epe | KITTI F1-all |
+|---|---|---|---|---|
+| 1234 | 2.088 | 3.240 | 7.149 | 24.19 |
+| 1 | 2.290 | 3.405 | 7.625 | 25.92 |
+| 2 | 2.208 | 3.333 | 7.512 | 25.46 |
+
+The median seed (2) lands on the paper's 2.21 / 3.35 / 7.51 within 0.02 EPE;
+seed spread is ~0.2 EPE on Sintel and ~0.5 on KITTI, so a one-seed comparison
+between arms is below the noise. Chairs-stage final val EPE was 1.73-1.77 on both
+boxes (8 Borg ranks: baseline 1.734-1.773, reldist at the same lr 1.770-1.804).
+
 ## Per-Site Treatment (the experiment)
 
 `--site_mode reldist`: the update block (motion encoder + ConvGRU + flow head)
