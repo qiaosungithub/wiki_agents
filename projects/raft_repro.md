@@ -112,7 +112,12 @@ a fake tar> ...` (real re-exec, staging, mirror, resume), then a `blaze build` o
 for RAM-disk staging; `raw/FlyingThings3D/optical_flow/TRAIN/*/*/{into_future,into_past}/left/*.pfm`
 (259 GiB) read per file by the indexed loader (`datasets_cns.py` +
 `things_index.json`, enumeration identical to the authors' class;
-`frame_utils._open` routes `/cns/` paths through epath). The metro list must stay
+`frame_utils._open` routes `/cns/` paths through epath). Measured from an h100-8
+task in `ga` reading go-d (`configs/io_probe.yml`, XID 287524092): one thread
+82 MB/s, 14 files/s, p50 64 ms per 5.9 MB pfm; eight threads 881 MB/s,
+149 files/s, p50 56 ms. Four Things-stage ranks need ~120 files/s (~700 MB/s),
+so per-file reads with 6 workers per rank are the design; `stage_raw` (RAM-disk
+copy, `RAFT_THINGS_FLOW_MODE=ramdisk`, ~330 GiB) is the fallback. The metro list must stay
 `cmh` until the data is mirrored elsewhere. Route used: box -> GCS
 (`gs://qiaos-viscam-data-multi/raft_data`, ~1 GiB/s) -> cloudtop (337 MiB/s) ->
 `fileutil cp` (`scripts/cloudtop_stage_to_cns.sh`, sizes verified both hops); the
