@@ -89,6 +89,17 @@ a faster run. **DataLoader workers inside a PAR need the stdlib `fork` context**
 launches a resource tracker that needs `sys.executable`, which is None in a PAR
 (`TypeError: expected bytes, NoneType found` on every rank, XID 287458555).
 
+**Inside a PAR, fork the DataLoader workers once (`--persistent_workers 1`,
+`--torch_threads 1`), never per epoch.** With the authors' per-epoch re-fork, every
+rank hung at step 6669, the first epoch boundary after the step-5000 validation
+(XIDs 287466325 and 287485326; the watchdog dump shows the main thread in
+`_data_queue.get` and the freshly forked workers never answering). The two
+boundaries before the validation were fine, so the parent's state after
+validation (CPU tensor ops start the intra-op thread pool) is what the fork
+cannot survive. Persistent workers are forked before any validation or CNS push.
+`train_repro --watchdog_secs` writes `stall_<step>.txt` with every thread's stack
+to the run dir and pushes it to the mirror; read it before guessing.
+
 `tmp_ram_fs_gib` / `ram_gib` ride inside `--launch=` (only `load_from`,
 `wandb_resume_id`, `cell` are refused there). Local gates before any enqueue:
 `RAFT_ALLOW_CPU=1 python borg/main.py --config=local_cpu_smoke --data_root=<dir with
