@@ -51,9 +51,11 @@ working under `/kmh-nfs-ssd-us-mount/code/qiao/work`.
 | Upload VLM datasets, audit adapters/coordinates, prepare eval mirrors | `vlm_data.md` |
 | Log WandB results into the experiment spreadsheet | `spreadsheet.md` |
 | Manage a long-running experiment loop | `research.md` |
+| Run or interpret a weight-sharing optimizer experiment (normalize-then-sum) | `research/normalize_then_sum.md` |
 | Write a paper deep-reading report | `paper_reading.md` |
 | Lay out or debug a report's HTML/PDF rendering | `paper_rendering.md` |
 | Reclaim shared NFS or local disk space | `storage.md` |
+| Read, draft, or send mail from the MIT account | `email.md` |
 
 ## Evidence Order
 
@@ -68,6 +70,8 @@ When facts disagree, prefer this order:
 ## Maintaining Memory
 
 - Keep core guides short and decision-oriented.
+- Write plain sentences, not a house dialect. No literary metaphor, no aphorism,
+  no bolding a whole paragraph, no em-dash chains, no 40-word sentences.
 - Record a rule only when a future agent cannot cheaply infer it from code or
   when violating it has a meaningful cost.
 - Replace stale facts instead of appending incident diaries. Never record live

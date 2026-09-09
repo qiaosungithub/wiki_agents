@@ -76,6 +76,12 @@ check but does not replace visual inspection.
   WeasyPrint's base URL, and avoid CSS Grid in the print copy. These constraints
   prevent font-cache hangs, missing relative assets, and pathological layout
   time.
+- `tutorials/_pdf_print_override.html` is shared by every report. Read it fresh at
+  render time and do not hand-patch it per report. Its `.grid > .box` flex-basis is
+  tuned against a measured WeasyPrint threshold (percentages are treated as the
+  content box, so too large a basis silently stacks every box full-width); the file's
+  comment records the measurement. If you must change it, re-measure on a real
+  report, not a toy page, and re-render every report that already shipped.
 - Keep the browser HTML as the canonical report; print-only transformations
   belong in a temporary copy.
 - Inspect both a contact sheet and the relevant pages at readable resolution.

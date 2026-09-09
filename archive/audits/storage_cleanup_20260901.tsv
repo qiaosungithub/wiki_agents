@@ -1,0 +1,15 @@
+filesystem	path	allocated_bytes_before	reason	recovery
+root	/home/jzc/anyprefix_all256_assets_20260831	23846703104	local download mirror	GCS us-east5 VQAv2 train/val plus checkpoint_90000; remote byte totals verified 2026-09-01
+root	/home/jzc/anyprefix_all256_ckpt_transfer_20260831	2963382272	local checkpoint transfer mirror	GCS us-east5 checkpoint_400; remote byte total verified 2026-09-01
+root	/home/sqa/.codex/sessions files not modified since 2026-08-18	2564445124	old Codex transcripts	user-authorized old-session cleanup
+root	/home/jzc/.codex/sessions files not modified since 2026-08-18	497698069	old Codex transcripts	user-authorized old-session cleanup
+root	/home/sqa/.codex.bak-20260609T190012Z and /home/sqa/.codex.bak	707903488	stale Codex backups	current .codex retained
+root	/home/sqa and /home/jzc cache/archived/tmp paths	pending	rebuildable cache and stale archived data	package/tool caches are reproducible
+ssd	/kmh-nfs-ssd-us-mount/code/zongyili/tmp/wildfire_wsts/official_dumps	34249699328	local evaluation dump mirror	64/64 NPZ basename and byte size matched GCS us-west4 on 2026-09-01
+ssd	/kmh-nfs-ssd-us-mount/code/zongyili/tmp/wildfire_wsts/calib_dumps	33673269248	local calibration dump mirrors	64/64 NPZ basename and byte size matched GCS us-west4 on 2026-09-01
+ssd	/kmh-nfs-ssd-us-mount/code/zongyili/tmp/abl	7993839616	local ERA5 ablation dump mirror	32/32 NPZ basename and byte size matched GCS us-central1 on 2026-09-01
+ssd	/kmh-nfs-ssd-us-mount/code/zongyili/tmp/vidnpz	2589118464	local rollout-video NPZ mirror	24/24 NPZ basename and byte size matched GCS us-central1 on 2026-09-01
+ssd	/kmh-nfs-ssd-us-mount/code/hanhong/shared/jax_cache contents	7705694208	JAX compilation cache	cache is rebuildable; no process cwd/open file reference found on 2026-09-01
+ssd	/kmh-nfs-ssd-us-mount/logs/jzc/jzc_pixel_dispersion/20260713_*/feats_shard*.npz	15866437632	orphaned temporary feature shards from failed runs	tools_tightness.py normally deletes these after merging; 52 files and no process reference found
+ssd	/kmh-nfs-ssd-us-mount/staging/jzc immediate children except two protected pending stagedirs	1559105536	stale unreferenced launch snapshots	infra active=0; protected 260821080435-a83e0c-nogit-code and 260821085924-b4873d-nogit-code
+ssd	/kmh-nfs-ssd-us-mount/staging/wxb contents	6390771712	stale unreferenced launch snapshots	infra active=0 and no pending job/cwd/open-file reference; latest file observed 2026-08-21

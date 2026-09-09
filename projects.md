@@ -14,7 +14,7 @@ and git state before editing it.
 | `one-benchmark-suite/` | Benchmark registry, not a training framework | Native docs; archives only for old context |
 | `nnflow_jax/` | JAX implementation of Generative Modeling Through Drifting | Native docs; archives only for old context |
 | `tpu_manager/` and xibo snapshots | Legacy scheduler/monitor code | `infra.md`; do not treat old JSON as current job state |
-| `readings/vision-related/tutorials/` | Paper deep-reading reports | `paper_reading.md` |
+| `readings/tutorials/` | Paper deep-reading reports | `paper_reading.md` |
 | `/kmh-nfs-ssd-us-mount/code/sqa/agent-web/` | Deployed Claude Code + Codex web chats at `chat.kaiming.me` and the session-isolated family site `family-chat.kaiming.me` (outside this workspace) | Native `README.md`; live tmux sessions `webchat` and `webchat_family` |
 
 ## Project Boundaries That Are Easy To Miss

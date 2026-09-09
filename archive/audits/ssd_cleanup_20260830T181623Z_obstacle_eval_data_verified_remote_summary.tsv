@@ -1,0 +1,2 @@
+timestamp_utc	logical_owner	path	allocated_bytes	files	recovery	verification
+20260830T181623Z	zongyili	/kmh-nfs-ssd-us-mount/code/zongyili/tmp/obstacle_eval/data	3846156288	12	gs://kmh-gcp-us-west4/videos/zongyili/obstacle	all mapped names, sizes, and MD5 hashes matched

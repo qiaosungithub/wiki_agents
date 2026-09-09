@@ -3,8 +3,7 @@
 How to read a paper for the user and produce a **deep-reading HTML report**. This
 is the canonical checklist; every paper-reading report must follow it.
 
-- **Reports live in:** `/kmh-nfs-ssd-us-mount/code/qiao/work/readings/vision-related/tutorials/`
-- **One card per report** registered in that folder's `index.html`.
+- **Reports live in:** `/kmh-nfs-ssd-us-mount/code/qiao/work/readings/tutorials/`
 - **Style template:** copy the `<style>` block + page skeleton from
   `tutorials/openvision3_deep_reading.html` verbatim (CSS vars, `.hero/.kicker/.pill/.nav`,
   two-column `main` + sticky `.toc`, `.card`, `.grid/.box`, `.note/.warn/.green`,
@@ -58,14 +57,29 @@ Environment has **no poppler** (`pdftoppm`/`pdfinfo` absent). Available:
    `tutorials/_pdf_print_override.html`; its essential rules:
    `@page{size:A4;margin:12mm} body{font-size:13px;background:#fff} main{display:block;max-width:none;padding:0}
    .toc{display:none} .hero{padding:20px} h1{font-size:28px} h2{font-size:20px} .lead/.subtitle~14px
-   .card{padding:15px} .grid{display:flex;flex-wrap:wrap;gap:12px} .grid>.box{flex:1 1 calc(50% - 6px)}
+   .card{padding:15px} .grid{display:flex;flex-wrap:wrap;gap:12px} .grid>.box{flex:1 1 45%;min-width:0}
    .metric{font-size:11px} img{max-width:100%}` — all with `!important` where overriding.
-   Result: ~31 print-pages → ~13, full-width and readable. (Grid boxes may stack full-width in print;
-   that's fine and reads well.)
+   Result: ~31 print-pages → ~13, full-width and readable. `.grid` genuinely two-column
+   (if boxes stack full-width instead, you hit gotcha 6 below).
 3. **Pass `--base-url <tutorials_dir>/`** when rendering a temp copy that lives elsewhere (e.g. /tmp),
    or relative `assets/...` images resolve to the wrong dir and embed nothing (tell-tale: tiny PDF).
 4. **Downscale images by PIXEL width (≤~1800), not just file size** — a 6904px-wide PNG can be small
    on disk yet make WeasyPrint crawl. Single images render fast in isolation; the killer is grid, not images.
+5. **`_pdf_print_override.html` 的开头注释里含字面 `<style>`/`</style>` 字样（decoy）** — 用
+   `find/index('<style>')` 或正则取第一个 style 块会截到注释残片、真 CSS（含 grid→flex）整体丢失，
+   打印仍是双栏 + CSS grid → 直接落进坑 2 的病态 track-sizing（实测 12–25 分钟不出）。
+   正确做法：`rfind('<style>')` 取最后一个块，并 assert 块内含 `@page` 与 `.toc{display:none`，
+   拼接在报告**唯一的** `</style>` 之后（2026-07-27 一晚连坑 4 个 agent）。
+6. **WeasyPrint 把百分比 flex-basis 当 content-box 算**（实测 68.1），无视 `box-sizing:border-box`
+   再把 `.box` 的 `padding:14px` 加在外面 → 行溢出 → 每个 box 独占一行全宽堆叠，不报 warning。
+   这就是老笔记里"Grid boxes may stack full-width in print, that's fine"那句话的真实来源——
+   它不是 WeasyPrint 的特性，是这条 CSS 的宽度算错了。**实测阈值（A4/12mm + 本模板）：
+   ≤44% 双栏，≥45% 堆叠**；`padding:0` 时 48% 也能双栏（这就是判定机理的对照实验）。
+   override 已定为 `flex:1 1 40%!important;min-width:0!important`（留余量）。
+   ⚠ 原来的 `calc(50% - 6px)` 失效**不是因为 calc() 不被支持**（它≈50%，本就在阈值之上）——
+   2026-08-13 我先按"calc 不支持"改成 45%，仍然堆叠，是 subagent 的 basis 扫描纠正的。
+   验证方法：拿**真实报告**（不是简化测试页，内容量会改变结论）渲 PDF，用 `fitz` 的
+   `page.search_for()` 读四个 box 标题的 x 坐标，两个不同 x 才是双栏。（2026-08-13）
 
 Working invocation:
 ```bash

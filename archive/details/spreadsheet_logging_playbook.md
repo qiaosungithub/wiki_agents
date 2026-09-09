@@ -259,6 +259,25 @@ RefCOCOg valid ans: n/a (not logged).
 
 Do not open result JSONs only to compute this count.
 
+## Note (B) Style — Keep It Short
+
+User feedback 2026-08-10: long B notes do not get read. Target ≤ ~300 chars
+(≤ ~600 only for rows with a special finding). Verdict-first English:
+
+1. Single-axis diff vs parent (config key + values) and job id / run name.
+2. Verdict with Z delta (e.g. `Z 34.08 → −0.96 net negative`).
+3. Top 2-3 sharpest metric deltas only — the rest live in the metric columns.
+4. Hard caveats that change interpretation: I/J-not-comparable, RefCOCOg
+   valid-answer ratio, protocol mismatches.
+5. Sheet-column-less metrics as a compact tail: `W&B-only: DocVQA x.xx, RWQA yy.y`.
+
+Do NOT restate the eval protocol per row (write it once on the family base
+row), do not narrate every metric, do not repeat numbers already in columns
+unless quoting a delta. Long-form analysis belongs in memory files / reports;
+if condensing existing rows, back up originals first (precedent:
+`work/sheet_backups/426_block_A-Z_backup_20260810.json`, rows 235-260
+condensed 28.7k → 10.5k chars).
+
 ## Choosing The Row
 
 Do not append by default. Put new results near the closest comparable run.

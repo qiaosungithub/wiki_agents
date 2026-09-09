@@ -1,0 +1,3 @@
+local_path	logical_owner	category	files	allocated_bytes	apparent_bytes	remote_source	remote_objects	remote_bytes	name_size_match	active_local_reference	preserved
+/kmh-nfs-ssd-us-mount/code/zongyili/tmp/ocean_ft/scratch/oceansam_t9z71v66	zongyili	downloaded_eval_npz_scratch	16	22750482432	22749158240	gs://kmh-gcp-us-west4/checkpoints/zongyili/ocean_samudra_dump/oceansam-cd2m-p20L4-s008000	16	22749158240	yes	no	metrics_json_and_final_video
+/kmh-nfs-ssd-us-mount/code/zongyili/tmp/ocean_ft/scratch16/oceansam_x5d9spw0	zongyili	downloaded_eval_npz_scratch	16	22750461952	22748859079	gs://kmh-gcp-us-west4/checkpoints/zongyili/ocean_samudra_dump/oceansam-cd2m-p20L4-s008000-m16	16	22748859079	yes	no	metrics_json_and_final_video

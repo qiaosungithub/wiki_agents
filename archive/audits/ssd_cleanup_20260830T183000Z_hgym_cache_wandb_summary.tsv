@@ -1,0 +1,4 @@
+path	logical_owner	category	allocated_bytes	active_local_reference	preserved	recovery
+/kmh-nfs-ssd-us-mount/code/zongyili/tmp/hgym/vidcache	zongyili	gcs_video_download_cache	578043904	no	kolm_re_sweep.png	re-download_from_gcs
+/kmh-nfs-ssd-us-mount/code/zongyili/tmp/hgym/smoke/wandb	zongyili	wandb_local_artifacts	4124672	no	smoke_checkpoint	recreated_by_wandb
+/kmh-nfs-ssd-us-mount/code/zongyili/foundation_pde/pde-tokenization/wandb	zongyili	wandb_local_artifacts	6471680	no	project_and_reports	recreated_by_wandb
