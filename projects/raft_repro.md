@@ -187,6 +187,31 @@ unaligned reldist; the measured EMA ratio r drifts 1.59 (28k) -> 1.53-1.55
 whether the per-site grouping buys anything beyond parity is what the align
 Things stage + eval (XID 287847547, chained) decides.
 
+### Two-band mode (`--site_mode d1`): G1 vs G_rest, the owner's simplification (2026-09-09)
+
+Instead of 12 relative-distance buckets, only two bands are separated, as in the
+charLM / nanoGPT call-diagonal lines: G1 = sum_j dL_j/dtheta_j (call and loss in
+the same round; the flow head is G1-only by structure) and G_rest = total - G1.
+Two Adam states, update (U_1 + w U_rest) / sqrt(1 + w^2) with `--site_w w`
+(w = 0: Adam on G1 alone; the flow head has divisor 1). `site_grads.two_band()`
+costs T single-call backwards + one full backward that also yields the fnet /
+cnet gradients: 3.8 vs 5.3 steps/s on the A100 (1.35x, against reldist's 2.5x).
+The structural band-2 membership is read off `bucket_by_distance` on the first
+batch (`CallCopies.rest_names`), never from numerically nonzero moments.
+`check_site_grads.py` checks 4-5 cover it (bands == {bucket 1, sum of buckets
+>= 2} to 1e-5, d1+sum == baseline, w in {0, .5, 1} round-trips); on a GPU the
+fnet bias-before-instance-norm gradients are ~1e-8 atomic-add noise, so the
+check compares fnet/cnet gradients relative to the largest one. Two-band
+alignment ratio r at init 1.0 / 1.22 / 1.29 for w = 0 / 0.5 / 1.
+
+Sweep launched 13:10Z 09-09, w in {0, 0.2, 0.5, 1.0} at the baseline lr: seeds
+1234 + 1 on Borg (`configs/chairs_d1.yml`, 8 ranks on one h100-8, job
+`raft-chairs-d1`; `scripts/chain_config_borg.sh d1 raft-chairs-d1` writes
+`things_d1.yml` / `eval_d1.yml` and enqueues `raft-things-d1` / `raft-eval-d1`
+on its own), seed 2 on the GCE box (`scripts/launch_d1_gce.sh`: GPUs 0 / 2 / 3
+now, GPU 1 = w 0.2 after the align arm). Tab rows 13-17 hold the block; expect
+Borg results ~08:00Z 09-10. Run names `raftsmall_d1w{0,02,05,1}_{C,CT}_s<seed>`.
+
 ## Traps Already Paid For
 
 - **NumPy 2.5 on the box breaks the authors' `readFlow`** (`int()` of a 1-element
