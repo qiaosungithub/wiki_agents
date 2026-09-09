@@ -103,8 +103,9 @@ section.
    (`~/work/<repo>/torch_impl`), never `~/work`; check `tpu enqueue`'s
    `packaged from:` line.
 1. Prepare the submission (§Submission Contract). Semantics in versioned config;
-   on a shared checkout edit a COPY and launch it. `--tier=PROD` trains, `BATCH`
-   evals only.
+   on a shared checkout edit a COPY and launch it. Training is always
+   `--tier=PROD`; an eval picks its tier by whether it must finish
+   (§Requirements And Runtime).
 2. Pick the group (§Choosing Where To Run): default g9 for TPU (it holds the
    floor), g8 CPU-only. `tpu quota` names WHICH GROUP holds an accelerator's
    floor, never cells.
@@ -208,17 +209,31 @@ means anything to anyone.
 
 ## Requirements And Runtime
 
-- **Every TRAINING job must pass `--tier=PROD` explicitly; `BATCH` is for
-  eval-only jobs.** BATCH is best-effort, preempted the instant PROD demand
-  contests a slot. PROD is already the launcher default for every group (g5
-  injects it, others inherit XManager's `_DEFAULT_SERVICE_TIER=PROD`), so
-  `--tier=PROD` is for the audit trail, not behavior. `tpu check`'s TIER column
-  echoes the REQUESTED string from the local registry, not Borg truth: `-` means
+- **Every TRAINING job must pass `--tier=PROD` explicitly. Never train on
+  BATCH.** BATCH is best-effort, preempted the instant PROD demand contests a
+  slot. PROD is already the launcher default for every group (g5 injects it,
+  others inherit XManager's `_DEFAULT_SERVICE_TIER=PROD`), so `--tier=PROD` is
+  for the audit trail, not behavior. `tpu check`'s TIER column echoes the
+  REQUESTED string from the local registry, not Borg truth: `-` means
   "untagged, ran the PROD default", not "non-PROD". Read the work
-  unit/allocator for ground truth. Run evals only on BATCH. GPU nuance: most
-  have a free (0.00) BATCH pool and cheap PROD, so a short smoke there is fine,
-  but BATCH still preempts (`guarantee reclaim`). Use `--tier=PROD` once a GPU
-  run must finish. `gpu_on_borg.md` §Rule 6 — Tiers owns this.
+  unit/allocator for ground truth.
+- **An eval may run on EITHER tier — pick by whether it must finish.** This
+  line used to read "Run evals only on BATCH"; the operator states plainly
+  (2026-09-07) that they never asked for it, and that their rule is and always
+  was *train on PROD only*. Nothing about BATCH makes it right for every eval.
+  Choose it this way:
+    - `BATCH` for a short eval, a smoke, or anything cheap to restart. It is
+      the polite default because it leaves the PROD budget bar to training.
+    - `PROD` once the eval MUST finish — long generation loops, a paper number,
+      anything whose restart cost exceeds the tier's saving. Measured
+      2026-09-07: `elt_fid_row{4,5}_*_50k` (50,000 generated images against
+      50,000 references) were preempted repeatedly on BATCH and moved to PROD;
+      two v7-32 at the then-market 5.92 cr/chip-hr cost 189 cr/hr each against
+      a 2252 bar, i.e. the tier was never the binding constraint.
+  GPU nuance, same shape: most families have a free (0.00) BATCH pool and cheap
+  PROD, so a short smoke there is fine, but BATCH still preempts (`guarantee
+  reclaim`). Use `--tier=PROD` once a GPU run must finish. `gpu_on_borg.md`
+  §Rule 6 — Tiers owns this.
 - Priority <= 25 charges the person, above it the group. Free tiers spare the
   team's GCU allocation. `BATCH` reads cheap but is the opposite: a paying
   best-effort tier billing the group.

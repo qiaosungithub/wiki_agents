@@ -554,9 +554,12 @@ guarantee reclaim -- we were ABOVE`).
   back on its own. Hand-bumping is unscalable toil that end-runs the cap. See
   `tpu_reference.md` on cap vs market.
 
-The blanket "BATCH is eval-only / never train on BATCH" rule (`jobs.md`,
-`AGENTS.md`) covers the *contended TPU* pools. For a GPU free-pool smoke the
-hazard is preemption, not cost: go PROD once the run must finish.
+The "never train on BATCH" rule (`jobs.md`, `AGENTS.md`) is about the *contended
+TPU* pools. Its old companion clause, "BATCH is eval-only", was never the
+operator's and has been removed (2026-09-07): an eval picks its tier by whether
+it must finish. That is the same test this rule already applied to GPUs — on a
+free-pool smoke the hazard is preemption, not cost, so go PROD once the run must
+finish. One test, both accelerator families, both kinds of job.
 
 ## Rule 7 — The Real Wall Is The Budget Gate, Not Capacity Or Preemption
 

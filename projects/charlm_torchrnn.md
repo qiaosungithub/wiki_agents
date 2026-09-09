@@ -149,21 +149,25 @@ that sentence is load-bearing.
    finished neighbour: a value above the val loss is not a training run that
    underfits, it is a unit error.
 6. **Write the row** (next section), then read it back.
-7. **Per-site read-outs are DEFAULT-ON in unroll/truestate mode** (operator,
-   2026-09-05, mirroring the adding-problem line): at every probe step
-   (`--probe_every`, now **100**, which also sets the `u_norm`/`rho` cadence)
-   `site_probe.py` logs, for each param in `--site_probe_params` (default
-   `w_hh_0,w_hh_1,w_hh_2,encoder,dec_w`), `site/<param>/gnorm_off<j>` (raw
-   per-site grad norm), `unorm_off<j>` (post-Adam per-site update norm),
-   `share_off<j>` (contribution share w_j<u_j,A>/<A,A>, sums to 1, can be
-   negative), `cos_off<j>` (merged-vs-raw cosine), with **offsets counted from
-   the END of the window (1 = last timestep)**, plus a 5x3 figure as the
-   `site_plots` image and a json snapshot under `site_plots/`. In a char-LM the
-   raw norm is SMALLEST at offset 1 (that site carries one position's loss)
-   and grows toward the front of the window -- the opposite of the adding
-   problem -- while `unorm` stays flat: that pair is the optimizer working.
-   `site_plots/ok = 0` plus `site_plots/error` in wandb means rendering failed
-   (a box without matplotlib); the snapshot is still written first.
+7. **Use compact logging by default; do not confuse depth pairs with time
+   sites or merged-update alignment.** `train.py --logging_detail compact`
+   keeps the loss/BPC/validation-accuracy and best/final/reload contract,
+   actual `u_norm`, speed, and depth raw/Adam norms and pairwise cosine.
+   `--logging_detail full` enables the legacy prediction/hidden/spectral/site
+   diagnostics. Probe cadence is the run's `--probe_every` (CLI default 500;
+   existing sweep manifests explicitly use 100), with an extra probe at step 1.
+   Depth mode defaults to `--depth_cosine_depths 1,2,5,10`; log only available
+   individual depths and label the actual remainder `rest_gtD`, never G_(D+1).
+   Compare raw gradients from that training forward and actual current-step
+   Adam directions before weights/divisor/LR; decoder has no deeper pair.
+   `all_nondecoder` concatenates coordinates rather than averaging parameter
+   cosines. Undefined zero-norm pairs are null, not zero. Read the resolved
+   layout in W&B config; `charlm/README.md` owns exact keys and clipping semantics.
+   Time-mode site norms/shares retain offsets from the END (1=last timestep).
+   PNG/snapshots are opt-in (`--site_plot_every`, default -1); scalar depth
+   metrics do not depend on plots. Diagnostic failures must be visible without
+   aborting training. Never mutate historical W&B records or frozen deployments
+   merely to make them resemble the current logging schema.
 
 ### The Row Format
 
@@ -243,8 +247,18 @@ learned ~5x slower per epoch than time sites; D=4 at lr 4e-4 tracked time
 sites at lr 2e-4 (a ~2x effective-lr shift from divisor sqrt(5) vs sqrt(100)).
 The operator's answer is `--depth_weight inv_depth` (band b gets 1/b, orthow
 divisor sqrt(sum 1/b^2)): groups `unroll_depthinv{100,16,4}_d0.1_lr{2e-4,4e-4}_20260906`,
-running on the two 40GB boxes from 00:43Z. Uniform-weight D=4/16 keep running
-on the 80GB box for the comparison.
+results (logged 2026-09-06 as the DEPTH SITES block, tab rows 49-62): **1/depth
+d_max=4 = 2.4242+-0.0139 bpc (lr 2e-4), the best cell on the tab**, 0.036 below
+the fixed baseline's best (2.4601) and 0.040 below the best time-site cell
+(2.4637), ~2 pooled sd; 1/depth d_max=16 = 2.4500/2.4504, d_max=100 =
+2.4285/2.4297 (band count is irrelevant once deep bands are down-weighted); uniform d_max=4 =
+2.4728/2.4478, uniform d_max=16 = 2.6020/2.5726 (noise-diluted), uniform
+d_max=100 stuck at the unigram floor (stopped). The weight on the deep bands
+matters more than the band count; 1/depth prefers lr 2e-4, uniform d_max=4
+prefers 4e-4 (divisor 1.21 vs 2.2). Cost: d_max=4 is faster per step than time
+sites and holds 5 Adam sites instead of 100. Dropout 0.2 / lr 4e-4 for the
+time-site arm (rows 42-43): sqrt 2.4925, mean 2.5208, both worse than dropout
+0.1 / lr 2e-4, so the time-site arm does not want the baseline's dropout.
 
 ## Per-Site Alignment: Why The Divisor Is sqrt(n) Late And ~n Early
 

@@ -524,17 +524,21 @@ wire, because by the time a duplicate checkpoint lands the corruption is on disk
 
 ## Before Blaming CitC For Dropping Writes, Find Out Who Is Writing
 
-**A flood of `CreateSnapshot failure ... dropping local changes` is far more
-often a local writer generating an impossible amount of work than a sick
-backend, and one command tells them apart: count
-`Service is overloaded` lines in `srcfsd.ERROR`. Zero of them, with tens of
-thousands of `code: 104`, means the writes are ours.** The expensive shape is a staging
-`rsync -aL ./ "$stagedir/"` whose SOURCE is the CWD while the DESTINATION sits
-*inside* that same tree: it walks the whole depot into a subdirectory of itself,
-never converges, is killed by its timeout, is `rm -rf`'d, and starts again. One
-such queue entry produced 76% of a day's CreateSnapshot failures — measured
-1.1 GB in 3 min, ~140 files/s — while every other job on the box stayed on its
-baseline.
+**`CreateSnapshot failure ... dropping local changes` means the write was
+rejected after local tools could already have reported success.** Count actual
+writers and recent drops, then obtain the server's full rejection reason.
+`Service is overloaded` messages support overload; their absence does NOT prove
+that a current local writer is responsible. **`code: 104` is CitC's application
+error `ACCESS_DENIED`, not Linux errno ECONNRESET.** The mapping is in
+`devtools/citc/proto/citc.proto`; srcfs converts a permanent rejection into this
+number and discards the pending resource.
+
+One common trigger is a staging `rsync -aL ./ "$stagedir/"` whose SOURCE is
+the CWD while the DESTINATION sits *inside* that same tree: it walks the whole
+depot into a subdirectory of itself, never converges, is killed by its timeout,
+is removed, and starts again. One such queue entry produced 76% of a day's
+CreateSnapshot failures — measured 1.1 GB in 3 min, ~140 files/s. Historical
+staging accumulation can also exhaust a workspace after the writer has stopped.
 
 Guard it in the code, not with a sentinel: refuse to rsync when `realpath(dest)`
 is under `realpath(src)`, and refuse when the source is too big to be a project
@@ -558,45 +562,74 @@ severity cascade writes every ERROR into `.WARNING` too, so a sentinel that
 `cat`s both files sees each event twice. Halve any such number before reasoning
 about it, and prefer counting distinct *builds* over counting *file paths*.
 
-## A Wedged CitC Workspace Is Server-Side, Not Yours To Restart
+## A Workspace Can Exhaust Its Revision History; Diagnose Before Replacing It
 
-This is the *other* shape: a genuinely sick workspace with no local writer to
-blame. Rule out the section above first — zero `Service is overloaded` lines plus
-a huge local writer means it is yours, not the server's.
+A fresh workspace that persists both creation and overwrite isolates the
+failure to the original workspace's state. It does **not** establish an
+unrepairable snapshot stream or a particular server bug. `forceupdate` and an
+srcfs restart cannot remove a server-enforced history limit; a restart also
+severs every CitC CWD on the workstation.
 
-**When one CitC workspace silently rolls back writes, the fault is server-side
-per-workspace state — it survives an srcfsd restart AND `citctools forceupdate`,
-and fleet-restarting srcfs will not fix it.** The signature is not an error: a
-write into the checkout reads back gone from a fresh process, while srcfsd logs a
-`CreateSnapshot failure ... dropping local changes` (RPC ECONNRESET, code 104)
-for that workspace id. It is scoped to the workspace, not the host — another
-client on the same host persists fine.
+**Measured 2026-09-06: `run_amply_workspace` (`qiaos/402`) stopped advancing at
+snapshot 18233.** A fresh client persisted writes, while the old client dropped
+even a tiny file. Sending a uniquely named probe through the ordinary
+`citctools create_snapshot` API exposed the complete rejection:
 
-Prove server-side-per-workspace before touching anything shared. A brand-new
-throwaway client that persists writes rules out the host, srcfsd, and the backend
-in one test, leaving stale per-workspace snapshot-stream state that no
-client-side action resets. `forceupdate` returning rc=0 with "synced to
-snapshot N" (the last good one) while the next probe still drops confirms it was
-a no-op. A fleet `srcfs.service` restart severs every CitC CWD on the box (the
-amply gateway included) and still will not clear it, so it is the wrong hammer.
+```text
+Workspace qiaos/402 has too many revisions since last keyframe
+(700001, max is 700000, keyframing should have happened at 10000)
+```
 
-A pending CitC CL is snapshot-backed in the client, NOT in Piper, so a wedged
-workspace's uncommitted work has two real recovery paths: a submitted+landed CL,
-or a copy on local ext4. `g4 print`/`files` at the CL and at HEAD both return "no
-such file(s)"; `describe` lists the files but carries no diff content. A deleted
-client's snapshot is GC-eligible (retained only by an
-explicit `citctools retain`), so "byte-identical to snapshot N" is not durable —
-it evaporates when the client is reclaimed. Preserve to ext4 first, then
-re-create the CL in a healthy client and submit.
+A keyframe is the service's checkpoint of resource history. The current server
+code counts both writes and resource removals toward the revision limit, so
+cleanup inside an already full workspace is also blocked. Automatic keyframing
+has a separate live-resource limit (100000 in the inspected defaults).
+This workspace had 785949 resources: 783587 below
+`experimental/qiaos/eqr_jax_final_stages/`, and only 2362 outside it.
+Its 312 MiB manifest explains why blindly cloning everything is not a lasting
+repair. The direct keyframe command exists, but the measured call
+`citctools create_keyframe qiaos/402 18233` was denied because it requires
+`citc-impersonators`; do not assume the workspace owner can run it.
 
-Sidestep a wedged workspace; do not resurrect it. Source files are identical
-across clients, so apply the edits in any healthy checkout and build/submit from
-there, verifying persistence first: the failure mode is an *existing-file
-overwrite*, so sync, wait, re-read the edit. That unblocks the
-work without a client recreate or a fleet restart. (A giant
-`.citc/manifest.rawproto` in the healthy client can fail `g4 reconcile` with
-`File too large`; use `g4 --disable_reconcile` for opened/revert/submit — edit
-and build are unaffected.)
+Recovery within ordinary user permissions:
+
+1. Retain the original (`citctools retain -w qiaos/402 -t 365`) and preserve
+   source files, Fig metadata, the manifest, and verification results on local
+   ext4. Retention is explicit; a snapshot URL alone is not a durable backup.
+2. Copy a reviewed selection of resources from a fixed snapshot into a NEW
+   workspace, including ViewConfig, Fig annotations, and all source edits.
+   Keep the oversized historical staging tree in the retained original.
+   The native CitC uploader supports copying selected resource IDs, including
+   annotations and tombstones; do not use a recursive depot-root rsync.
+3. Compare resource types, content checksums, and executable bits. Verify
+   creation AND overwrite from the new workspace's immutable snapshot after
+   flushing; `fsync` or an immediate reread alone did not detect this failure.
+4. Preserve an archive alias before moving the working alias. Fig has both
+   `alias` and `fig_ws` tags; update them consistently using the native tools.
+   Reopen CWDs that still resolve to the old numeric workspace. Keep staging
+   separate from the source workspace to avoid repeating the accumulation.
+
+Also inspect Fig's two narrow-spec files after a selective recovery. Here both
+still contained 65057 includes for the archived staging tree (9.1 MB each),
+which made even `hg log -r .` spend minutes constructing its matcher. With the
+original metadata backed up and no tracked files in that subtree, removing
+only those includes from both files reduced each to 11965 bytes. Do metadata
+recovery serially: an interrupted Fig query can leave an abandoned transaction;
+use `hg recover` and wait for it before probing or changing metadata again.
+The final native `hg log -r .` and scoped `hg status` passed in 5.38 s and
+2.11 s respectively, with the original parent unchanged.
+
+The incident's tools, reviewed resource manifest, local source backup, and
+repair evidence live in `~/work/.citc_recovery_20260906/`. Diagnose the next
+incident from its actual API error, not from this one's numeric code alone.
+
+A pending CitC CL is snapshot-backed in the client, NOT in Piper:
+`g4 print`/`files` can return "no such file(s)" while `describe` lists files
+without diff content. Preserve to ext4 before deleting or re-creating any
+client. A submitted and landed CL is another recovery source. A giant
+`.citc/manifest.rawproto` can fail `g4 reconcile` with `File too large`;
+`g4 --disable_reconcile` avoids reconciliation when inspecting opened files,
+but does not repair dropped writes.
 
 ## Copying From A Bucket Someone Else Pays For
 

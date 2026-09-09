@@ -166,9 +166,11 @@ threshold.**
   free: blaze's `--shutdown_on_low_sys_mem` evicts the idle server under memory
   pressure, so each "up-to-date check" cold-respawns a multi-GB JVM heap that
   deepens the dip that evicted it. Steady state is a cheap liveness exec (the
-  binary's own `--help`); pay for a real build only on a missing binary, plus a
-  rare low-frequency refresh. If the build mtime never moves across many
-  keep-warm cycles, every "rebuild" was wasted work.
+  binary's own `--help`); do not add an unconditional timed refresh. Keepwarm
+  checks the current output configuration and the wrapper's stable fastbuild
+  fallback before building. A timed-out or killed probe is UNKNOWN, never proof
+  that the binary is missing. If the build mtime never moves across many
+  keep-warm cycles, investigate whether those "rebuilds" were wasted work.
 - The rebuild is the plain, proven `blaze build`; exotic flags each broke it. A
   `startup`-class option (e.g. `--noenable_dbip_auto_opt_in`, declared `startup`
   in `tools/blaze.blazerc`) placed after the subcommand is rejected at parse

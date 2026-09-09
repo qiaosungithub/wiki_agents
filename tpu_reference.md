@@ -230,8 +230,9 @@ order in either direction between two launches, and that boundary is what decide
 whether a job starts at all (`ok` vs `BLOCKS ALL` in `tpu money`'s limit-order
 column). GPU pricing also does not follow TPU intuition, and BATCH is not
 reliably cheaper than PROD for a given family — so compare the two tiers in the
-live reading rather than assuming an ordering. BATCH is preemptible and
-eval-only regardless (`gpu_on_borg.md` Rule 6, `jobs.md`).
+live reading rather than assuming an ordering. BATCH is preemptible whatever it
+costs, so training never goes there; an eval may, and picks its tier by whether
+it must finish (`gpu_on_borg.md` Rule 6, `jobs.md` §Requirements And Runtime).
 
 A written-down price has been wrong in both directions here: once low while the
 market was high (an unlaunchable job looked cheap), once high while the market

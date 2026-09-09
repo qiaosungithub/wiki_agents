@@ -185,28 +185,52 @@ staging), not to re-find what the local run already covers.
   resident heaps (`ps` by RSS plus `VmSwap`; a swapped-out heap reads as small in
   RSS yet still owns the pages) before blaming concurrent builds. Bound it in
   `~/.blazerc` after the DeepMind `import` (last startup flag wins). That binds
-  only NEW servers, so pre-existing ones need one sweep;
-  `~/work/.monitor_watch/blaze_reaper.sh` is that sweep. A capped
-  `max_idle_secs` is not self-enforcing: `blaze shutdown` can return rc=0 with no
-  output and leave the server running (seen on a server whose lock holder had
-  died), so a reaper must escalate to signals and confirm the pid is gone.
-- **Serialize `blaze` and `hg status` with a shim on PATH, and give the shim its
-  OWN lock — never the launch path's lock, whose hold time is set by the slowest
-  unrelated caller.** `~/.tpu_bin/shims/{blaze,hg}` delegate to
-  `~/.tpu_bin/serialize_heavy.sh`, which takes `/tmp/host_heavy.<uid>.lock` around
-  the heavy command only. Reusing the tpu CLI's `/tmp/tpu_build.host.lock` was
-  tried and reverted: `tpu queue` holds it across an entire launch
-  (build + xmanager + envelope upload), so a one-second `hg id` sat behind a car
-  being dispatched for 300s — a lock held across an unrelated slow phase is a
-  queue, not a mutex. Four properties keep the gate from becoming the outage:
-  it DEGRADES TO PARALLEL after `-w` rather than refusing (a wedged holder must
-  never block every build on the host), cheap verbs (`blaze info/help`, every
-  `hg` verb but `status`) pass straight through, `TPU_SERIAL_HEAVY=0` opts out,
-  and the lock is per-fd so a killed build cannot leak it. Resolve the real
-  binary from a CACHED absolute path: `type -ap` on the hot path can itself
-  block for minutes on CitC, turning the shim into the stall it exists to
-  prevent. Verify by racing two builds and reading the `waited Ns` line — a
-  serializer that never logs a wait has not been shown to serialize anything.
+  only NEW servers. The independent `swap-oom-agent.service` monitor now owns
+  any reclaim of pre-existing servers; the legacy `blaze_reaper.sh` cron entry
+  only logs delegation. A capped `max_idle_secs` is not self-enforcing:
+  `blaze shutdown` can return rc=0 and leave a server alive. Reclaim requires
+  fresh PID/start and pidfd identity, completed-command evidence, verified idle
+  time, and no active children, clients, actual output locks or queued use under
+  `/tmp/blaze-reaper.lock`; then confirm the exact process exited.
+- **Keep Blaze serialization separate from Hg status.** The PATH shims delegate
+  to `~/.tpu_bin/serialize_heavy.sh`. Only Blaze takes
+  `/tmp/host_heavy.<uid>.lock`; Hg goes through `hg_status_guard.py` and its own
+  `/tmp/hg_status.<uid>.lock`. Sharing the lock let one `hg status` block builds
+  for 23 minutes on 2026-09-06. A timeout alone still made builds wait behind
+  every slow query. Neither gate may reuse `/tmp/tpu_build.host.lock`, which
+  covers an entire launch, including upload.
+  Status/st (including global `-R`/`--cwd` options) preserves native arguments,
+  stdout, stderr and ordinary exit codes. It rejects concurrent status queries
+  with exit 75, times out at 120 seconds with exit 124, and imposes a per-workspace
+  five-minute cooldown after timeout. A query still exiting is identified by PID
+  and start time and is not duplicated. Status has no parallel fallback; Blaze
+  retains its existing fallback and cheap-verb behavior. Children do not inherit
+  either lock. `TPU_SERIAL_HEAVY=0` explicitly opts out of these protections.
+  Logs/state are in `~/.tpu_bin/hg_status_guard/`. Do not interpret any nonzero
+  status result as a clean tree. Resolve the real executable from a cached
+  absolute path, since a PATH walk may itself stall on CitC.
+  **Fig status is not necessarily read-only.** Its native auto-widen step scans
+  the entire CitC manifest before applying the requested file filter and may
+  write tracking metadata. The failing workspace repeatedly tried to add 1,813
+  directories, 1,711 from historical build staging; rollback of the metadata
+  caused that work to repeat. Merely adding `.` or ignoring untracked files does
+  not bypass this step. Keep generated staging in a separate non-Fig workspace
+  (the launcher now defaults to `clip_probe`). Use the actual project's Git
+  repository for Git-owned code. Do not delete Fig metadata, discard user files,
+  or restart shared srcfs to make status fast. Evidence and isolated process
+  tests: `~/work/.hg_status_recovery_20260906/`.
+  **Recovery workspace, 2026-09-06:**
+  `/google/src/cloud/qiaos/hg_recovery_20260906/google3` was created at the old
+  workspace's exact p4base. It contains verified copies of the 189 readable
+  Hg-tracked files, the full Amply source tree, and the repaired `tpu_utils`
+  source (316 distinct files). Native status succeeded twice with identical
+  results, and `route_check_test` passed all 113 tests there. This is a source
+  recovery workspace, not a clone of local Hg/Git history or every untracked
+  project. The old `run_amply_workspace` remains in place for live service
+  references and its history; its Fig metadata was not repaired in place.
+  Use the recovery path for Hg work on these recovered sources. Do not silently
+  repoint running services, replace the old alias, or stage builds in the new
+  Fig workspace. The recovery README records manifests and limitations.
   A fifth property was missing and cost 40 minutes on 2026-09-01, the amply
   gateway down throughout: **the shim must not swallow stderr.**
   `exec 210>"$LOCK" 2>/dev/null` reads as "quiet the fd-210 open", but `exec`
@@ -214,9 +238,8 @@ staging), not to re-find what the local run already covers.
   whatever it execs. Blaze puts its entire progress stream, its "another command
   is running" notice, and the dbip `build_request_id` link on stderr, so a build
   stalled on a CitC snapshot was indistinguishable from a frozen terminal.
-  Brace-group it: `{ exec 210>"$LOCK"; } 2>/dev/null`. Test with a verb that is
-  guaranteed to fail on stderr (`hg status` outside a repo, which is the one
-  heavy `hg` verb and so takes the real lock path); a shim that prints nothing
+  Brace-group it: `{ exec 210>"$LOCK"; } 2>/dev/null`. Test both gates with a
+  command guaranteed to fail on stderr (for Hg, status outside a repo); a shim that prints nothing
   there is swallowing. `ls -l /proc/<pid>/fd/2` tells you the same thing about a
   build already running.
 - **Count blaze SERVERS by process identity, never by grepping for "blaze" in

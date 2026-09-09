@@ -36,6 +36,7 @@ job.** The two follow different storage rules; `../storage.md` has the detail.
 | `work/reports/` | n/a | Paper deep-reading reports | `../reports/paper_reading.md` |
 | `rnn_unroll/` | 2 | RNN unroll-optimizer science line: gradient propagation / adding problem (vanilla RNN). Two remote 4×A100 boxes, not Borg. | `rnn_unroll_adding.md` |
 | `charlm/` | 2 | Character-level LM on tiny-shakespeare, reproducing `jcjohnson/torch-rnn`. Dense-supervision counterpart to the adding-problem line. Same 4×A100 boxes. | `charlm_torchrnn.md` |
+| `nanogpt_depth/` | 2 | FineWeb-Edu nanoGPT pretraining; exact same-position call/loss gradient and two-band Adam, copied from lyy. | `nanogpt_depth.md` |
 | `raft/` | 2 | RAFT-small optical flow (C+T) reproduction and the per-relative-distance optimizer on its 12 tied update calls. Data + runs on `qiaos-4a100` only. | `raft_repro.md` |
 
 ## Boundaries That Are Easy To Miss
