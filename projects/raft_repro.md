@@ -64,6 +64,7 @@ results tab `raft-small (qiaos)` rows 7-12 in the EqR workbook:**
 | baseline | 1.753 +- 0.019 | 2.135 +- 0.118 | 3.438 +- 0.127 | 7.293 +- 0.330 | 24.98 +- 0.75 | 287498529 / 287670760 / 287760103 |
 | reldist | 1.791 +- 0.015 | 2.312 +- 0.060 | 3.386 +- 0.082 | 7.933 +- 0.510 | 26.19 +- 0.68 | 287498529 (ranks 4-7) / 287672556 / 287848141 |
 | reldist + `--site_align ema` | 1.756 +- 0.012 | T stage running 09-09 | | | | 287679583 / 287847547 / pending |
+| reldist, GCE A100, 3 seeds (1234/1/2; baseline on the same box 2.195 / 3.326 / 7.429 / 25.19) | 1.777 +- 0.007 | 2.196 +- 0.139 | 3.385 +- 0.067 | 7.910 +- 0.411 | 26.20 +- 0.20 | wandb groups raftsmall_reldist_{C,CT} |
 
 Reading (2026-09-09): at the same lr, reldist is a mildly worse run, not a broken
 one. Its train loss sits ~1.5% above the baseline's on Chairs from 5k steps on
@@ -74,7 +75,11 @@ the lr decays. That is the signature of a 1.6-1.85x larger effective step on
 the update block (next subsection), and the align arm, which removes exactly
 that, tracks the baseline's Chairs-val curve at every 10k checkpoint. GCE single
 seed (1234) agrees: reldist 2.298 / 3.319 / 8.287 / 26.16 (tab row 10; seeds
-1 / 2 land 09-09 ~11:00Z), align seed 1234 Chairs val 1.791 (row 12).
+1 / 2 land 09-09 ~11:00Z), align seed 1234 Chairs val 1.791 (row 12). With the GCE seeds 1 / 2 in
+(09-09 12:05Z; per seed clean / final / KITTI / F1: 1: 2.252 / 3.453 / 7.471 /
+26.01; 2: 2.038 / 3.384 / 7.972 / 26.41) the pooled 7-vs-7 seed comparison of
+both boxes reads: Sintel clean +0.10, final 0.00, KITTI epe +0.57, F1 +1.1 pt
+for reldist at the same lr.
 
 ## Per-Site Treatment (the experiment)
 
