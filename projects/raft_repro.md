@@ -55,6 +55,27 @@ seed spread is ~0.2 EPE on Sintel and ~0.5 on KITTI, so a one-seed comparison
 between arms is below the noise. Chairs-stage final val EPE was 1.73-1.77 on both
 boxes (8 Borg ranks: baseline 1.734-1.773, reldist at the same lr 1.770-1.804).
 
+**Borg, 4 seeds per arm, same recipe (H100, `tpu enqueue`; eval jobs run the
+authors' `evaluate.py` one rank per checkpoint). Mean +- sd over seeds 1234/1/2/3;
+results tab `raft-small (qiaos)` rows 7-12 in the EqR workbook:**
+
+| arm (same lr 4e-4 / 1.25e-4) | Chairs val (end of C) | Sintel clean | Sintel final | KITTI epe | KITTI F1 | XIDs (C / T / eval) |
+|---|---|---|---|---|---|---|
+| baseline | 1.753 +- 0.019 | 2.135 +- 0.118 | 3.438 +- 0.127 | 7.293 +- 0.330 | 24.98 +- 0.75 | 287498529 / 287670760 / 287760103 |
+| reldist | 1.791 +- 0.015 | 2.312 +- 0.060 | 3.386 +- 0.082 | 7.933 +- 0.510 | 26.19 +- 0.68 | 287498529 (ranks 4-7) / 287672556 / 287848141 |
+| reldist + `--site_align ema` | 1.756 +- 0.012 | T stage running 09-09 | | | | 287679583 / 287847547 / pending |
+
+Reading (2026-09-09): at the same lr, reldist is a mildly worse run, not a broken
+one. Its train loss sits ~1.5% above the baseline's on Chairs from 5k steps on
+(below it for the first 1k), Chairs val is +0.04 in every seed, Sintel clean
++0.18 and KITTI epe +0.64 / F1 +1.2 pt (Welch t 2-3), Sintel final on the
+baseline; the Things-stage loss gap closes from 1.3% at 25k to 0.5% at 90k as
+the lr decays. That is the signature of a 1.6-1.85x larger effective step on
+the update block (next subsection), and the align arm, which removes exactly
+that, tracks the baseline's Chairs-val curve at every 10k checkpoint. GCE single
+seed (1234) agrees: reldist 2.298 / 3.319 / 8.287 / 26.16 (tab row 10; seeds
+1 / 2 land 09-09 ~11:00Z), align seed 1234 Chairs val 1.791 (row 12).
+
 ## Per-Site Treatment (the experiment)
 
 `--site_mode reldist`: the update block (motion encoder + ConvGRU + flow head)
@@ -154,6 +175,12 @@ correlation (r == 1 for a single bucket). Measured at steps 100-200: baseline
 5.2-5.4e-3, reldist 9.5e-3, align 5.3-5.4e-3. Arm name `align`
 (`run_arm.sh <gpu> <seed> align --site_mode reldist --site_align ema`,
 Borg `configs/chairs_align.yml`).
+Outcome on Chairs (4 Borg seeds, 09-09): align's end-of-C val 1.746-1.774 (mean
+1.756) equals the baseline's 1.753 +- 0.019, against 1.791 +- 0.015 for
+unaligned reldist; the measured EMA ratio r drifts 1.59 (28k) -> 1.53-1.55
+(90k). So the norm inflation explains the whole reldist deficit on Chairs;
+whether the per-site grouping buys anything beyond parity is what the align
+Things stage + eval (XID 287847547, chained) decides.
 
 ## Traps Already Paid For
 
