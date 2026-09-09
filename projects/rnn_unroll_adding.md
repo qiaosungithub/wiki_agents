@@ -335,8 +335,7 @@ cell finished. Two consequences: check liveness by process, not by "the log
 looks healthy" (a dead watcher's log is indistinguishable from a quiet one), and
 prefer `setsid` plus a cron or systemd unit over a tmux-parented loop for
 anything that must outlive an interactive session. The kill is invisible in
-`/proc/vmstat` `oom_kill`; read the journal (`../monitoring.md` §Memory And Disk
-Wake Criteria).
+`/proc/vmstat` `oom_kill`; read the journal (`../engineering.md` §When The Host Swaps: Thrashing Disconnects Sessions, oomd Kills Silently).
 
 **Compare two arms at each arm's own best lr, never by pooling the rungs of a
 ladder.** An lr ladder is one search, not a sample of independent conditions:

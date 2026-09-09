@@ -24,13 +24,11 @@ and each has a `README.md` index.
 | `gpu_on_borg.md` | Run an NVIDIA GPU job on Borg via `tpu enqueue` (CUDA build, NCCL, tiers, traps). |
 | `gcp_gpu_ssh.md` | SSH to the GCP GPU VMs (viscam-cloud); OS Login vs metadata keys. |
 | `workstation.md` | The Cloudtop itself: `sqa-large` (migrated from `sqa` 2026-09-08), ssh, what runs where, re-sync, jetski-hub owns the web app. |
-| `monitoring.md` | The monitor role: watcher, DEAD/idle alerts, handoffs, escalation. |
 | `projects/` | Per-checkout semantics and boundaries. |
 | `research/` | Running experiments; logging results. |
 | `reports/` | Writing and rendering paper reports. |
 | `infra/` | Allocator, market, and CLI internals, when `jobs.md` falls short. |
 | `tools/` | Executable helpers (price caps); prose elsewhere. |
-| `handoffs/` | Pointer only — handoff docs live in `~/work/.monitor_watch/handoff_bodies/`. |
 | `archive/` | History. Never routed to by default. |
 
 ## Topic Router
@@ -75,12 +73,7 @@ and each has a `README.md` index.
 | **Log a result to the spreadsheet**; find a chart | `research/result_logging.md` |
 | **Read a job's curves / harvest `train/*` from the workstation**; the urge to write "the workstation cannot read the datatable" | `research/result_logging.md` §Reading The Curves From The Workstation |
 | Write or render a paper report | `reports/README.md` |
-| **The workstation is swapping / VSCode-SSH keeps disconnecting**; reclaim idle blaze servers | `engineering.md` §Diagnose From Evidence, Not From The Most Available Story, `monitoring.md` §Memory And Disk Wake Criteria |
-| **Monitor a fleet of autonomous runs**; watcher, handoffs, DEAD/idle alerts | `monitoring.md` |
-| A watched run shows DEAD/500; hand a heavy line to a fresh session | `monitoring.md` |
-| Monitor got a request mid-task; track it so it isn't dropped | `monitoring.md` §Track Every Request In The Todo List |
-| Write a handoff doc; retire an old session (kill its worker) | `monitoring.md` §Handoffs: Let The Line Summarize Itself |
-| **Where to put / find a handoff doc** (`~/work/.monitor_watch/handoff_bodies/`) | `handoffs/README.md` |
+| **The workstation is swapping / VSCode-SSH keeps disconnecting**; reclaim idle blaze servers | `engineering.md` §Diagnose From Evidence, Not From The Most Available Story, §When The Host Swaps: Thrashing Disconnects Sessions, oomd Kills Silently |
 | `EqR` / `EqR-jax` | `projects/eqr_jax.md` |
 | RNN unroll optimizer / adding problem / gradient propagation science line | `projects/rnn_unroll_adding.md` |
 | **char-LM / torch-rnn reproduction**; which "char-RNN" repo; the 4-seed cell -> wandb group -> spreadsheet row pipeline | `projects/charlm_torchrnn.md` |
@@ -103,16 +96,6 @@ your logs. Name the thing that happened rather than the internal token for it:
 identifier the first time it appears, keep literal names (`PROD`, an XID, a cell)
 because they are what the user greps for, and cut the rest. §Maintaining Memory
 carries the same rule for what you write into these files.
-
-**Delegating work: default to a NEW amply session, not a sub-agent.** When the
-user asks to "open a session", "hand this off", or otherwise delegate a task,
-the default is a brand-new top-level amply run (equivalent to `amp new <name>`),
-NOT `spawn_*` sub-agents. Launch it as a chat-only run with an empty task and a
-descriptive title via `/tmp/launch_chatonly_run.py "<workdir>" "<title>"` (POSTs
-`/api/run/new`), then inject the task/handoff over the chat channel
-(`POST $DB/chat/send?run_id=<RID>`). Reserve `spawn_*` sub-agents for the
-monitor's own short read-only fan-out. Only skip the new-session default if the
-user explicitly asks for a sub-agent.
 
 **Never destroy the user's work.** Do not revert, overwrite, or clean a dirty
 worktree as collateral. Before deleting anything shared, identify the

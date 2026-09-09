@@ -392,7 +392,7 @@ in FUSE-D (`request_wait_answer`): it cannot die on SIGKILL, so killing it does
 not release its `flock`, and only an srcfs restart's EIO-bounce frees the lock
 (`../engineering.md` §External Writes Are Transactions). This lets an operator
 fire jobs through any mix of paths without hand-coordinating a stage storm; the
-earlier hand-serialization advice (`monitoring.md`) is now the fallback, not the
+earlier hand-serialization advice is now the fallback, not the
 mechanism.
 
 The daemon's router lane is the 4th lane, off by default. `TPU_ROUTE_ENABLED`

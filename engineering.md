@@ -468,6 +468,41 @@ to run uncapped: read `memory.max` and `memory.swap.max` from
 `/proc/self/cgroup` and exit if either is unset, because the unsafe path is the
 one that looks fine.
 
+## When The Host Swaps: Thrashing Disconnects Sessions, oomd Kills Silently
+
+Two distinct failure modes on a swap-heavy box, with opposite signatures.
+
+**A high `swap used` is neither alarm nor benign by itself; the paging rate
+separates the two.** A host can sit at tens of GB of swap with nothing
+OOM-killed while VSCode's extension host disconnects every ~20 minutes: `node`
+is merely swapped out and starved of CPU until the heartbeat times out, and the
+client reports only an opaque exit code. Before calling it thrashing require
+both `si` >= ~5MB/s (from `vmstat`) and `load15` >= ~0.8/core, because after a
+big reclaim load stays high for minutes with paging already at zero. The usual
+culprit is idle standing blaze heaps (§Diagnose From Evidence, Not From The
+Most Available Story), not the interactive process that dies.
+
+**`systemd-oomd` kills do NOT increment `/proc/vmstat`'s `oom_kill`, so a
+counter-based check stays silent through a whole outage.** Measured across an
+event that killed 34 processes in one sweep: the counter held at 37 with zero
+delta. The kernel OOM killer and `systemd-oomd` are different mechanisms — oomd
+acts on cgroup PSI memory pressure and kills the whole scope, well before the
+kernel would act, so nothing it does appears in the kernel counter. Detect it in
+the journal instead:
+
+```bash
+journalctl --since '-1h' | grep -E 'systemd-oomd.*(Marked .* for killing|killed [0-9]+ process)'
+```
+
+A whole `tmux-spawn-*.scope` goes at once, so every background job started from
+that tmux dies together, silently, with no error in their own logs. Their
+simultaneous death is the tell: a script that crashed on its own leaves a stack
+trace and dies alone.
+
+`/tmp` is tmpfs and counts against RAM: `df -h /tmp`, and over ~90% run
+`du -sh /tmp/* | sort -rh | head`. Never `rm -rf /tmp/*` blindly — other
+processes' scratch and launcher logs live there.
+
 ## Failure Modes That Only Appear On The Long Path
 
 - **A short run does not validate resume.** Cold start and restore touch

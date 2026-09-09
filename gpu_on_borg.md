@@ -595,7 +595,7 @@ per-arch policy price (`gb200`=20 cr/GPU-hr), so its real projected cost is
 ~1.6. The same `budget_check --query` with `lo_price=0.20` returns
 `new_cost=1.6, fits=true`. The gate rejects on a price the job never pays: a
 gate-precision gap, not real unaffordability. Do NOT patch the shared wrapper/router
-budget logic without operator/monitor sign-off: it is a fleet-global lever.
+budget logic without operator sign-off: it is a fleet-global lever.
 
 What actually works.
 - Sizing down lowers `new_cost` linearly (`≈ 100·chips + fixed`), so `gb200-8`
@@ -603,7 +603,7 @@ What actually works.
   headroom, so it is necessary but not sufficient.
 - Wait for a window. Left enqueued, the fixed dispatch worker re-tests every
   round and fires the instant `headroom >= new_cost`. That is in-policy
-  (`monitor`: "don't idle waiting for price — queue it and go do other work").
+  (standing policy: don't idle waiting for price — queue it and go do other work).
 - Free headroom you own: draining your OWN dead-weight live jobs lowers
   `current`. Terminal jobs (failed/CANCELLED) do not count, so only live
   SUBMITTED/RUNNING jobs are reclaimable. Never drain another agent's
