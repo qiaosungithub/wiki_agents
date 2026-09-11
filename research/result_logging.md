@@ -329,7 +329,7 @@ means the curves do not exist. Opting in to the table writer must be explicit,
 since the default writes nothing and no error. A short `eval_only` job may never
 reach the flush threshold, so its durable evidence is the metrics files under the
 checkpoint bucket. Log that path too. Wiring: `../projects/eqr_jax.md`
-§Experiment Tracking.
+§Experiment tracking: the logging surface.
 
 ### Reading The Curves From The Workstation
 

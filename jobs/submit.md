@@ -5,9 +5,9 @@ Chapter 2 the step-by-step, Chapter 3 the classic bugs. Part of the `jobs/` set;
 the hub is `../jobs.md`. Siblings: `resume.md`, `liveness.md`, `diagnose.md`,
 `report.md`.
 
-The default: `cd` into the code directory, `tpu enqueue` with several `--archs`
-and several data `--metros`, and keep one serial `tpu build-worker` draining the
-queue.
+The default: `cd` into the code directory, `tpu enqueue` with all usable
+`--archs` (among v4, v5p, v6e, v6p, v7) and several data `--metros`, and keep one
+serial `tpu build-worker` draining the queue.
 
 ---
 
@@ -146,13 +146,16 @@ fragmentation, which the allocator rejects seconds later).
 
 ```sh
 cd ~/work/<repo>/<code-subdir>
-tpu enqueue --power=v7-32 --archs=v7,v6p,v5p --metros=cbf,tul,lpp \
+tpu enqueue --power=v7-32 --archs=v7,v6p,v5p,v6e,v4 --metros=cbf,tul,lpp \
             --tier=PROD --job_name=<content-name> \
             --launch=config=my_cfg,exp_name=my_run
 ```
 
 Easy to get wrong:
-- Several `--archs` and several data `--metros`, never one of each (Chapter 3).
+- All usable `--archs` (among v4, v5p, v6e, v6p, v7) and several data `--metros`,
+  never one of each (Chapter 3). Drop an arch only when it cannot run the job
+  (e.g. per-chip HBM too small); size with `--power` so the router scales the
+  slice per generation.
 - `--metros` is PLURAL on enqueue; `--metro` does not exist here.
 - `--job_name` is REQUIRED (the local queue handle); `exp_name=` is the
   XManager / CNS handle. Both name the TASK and what distinguishes this launch,

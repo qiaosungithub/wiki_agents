@@ -102,11 +102,12 @@ whether to drop a redundant job is the operator's call, not the report's.**
   not hours). For a long `starting`, check the launch log rather than reporting
   the age alone.
 - **OUT OF SPEC**: a TRAINING job not on `--tier=PROD`, or any job pinned to a
-  SINGLE arch or SINGLE metro. Every job should name SEVERAL `--archs` and
-  SEVERAL data `--metros` (`submit.md` Chapter 3 §Router and placement flags); a
-  lone arch re-places into the same contested pool and sits PENDING for hours.
+  SINGLE arch or SINGLE metro. Every job should name all usable `--archs` (among
+  v4, v5p, v6e, v6p, v7) and SEVERAL data `--metros` (`submit.md` Chapter 3
+  §Router and placement flags); a lone arch re-places into the same contested
+  pool and sits PENDING for hours.
   When the operator authorizes a re-enqueue, use
-  `--power=<same> --archs=v7,v6p,v5p --metros=<several data metros>` and do NOT
+  `--power=<same> --archs=v7,v6p,v5p,v6e,v4 --metros=<several data metros>` and do NOT
   add `--group`: the router auto-selects it and prefers g3/g5 over g9 at PROD to
   spare the regulated g9 budget (`../infra/tpu_cli.md` `_GROUP_PREF`; `submit.md`
   Chapter 1 §The budget gate). `tpu enqueue`'s "pass --group=9 to pin it" line is
