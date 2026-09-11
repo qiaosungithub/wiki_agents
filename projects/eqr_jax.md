@@ -160,7 +160,7 @@ adding a cell:
 | dfw | `rs-d` | v4 | full (all datasets; added for cheap v4) |
 | las | `dl-d` | v4 | PARTIAL — maze v4 working set only (64x64-offline + companions + settingA/B); NOT settingB_v3 / 128x128 |
 
-Since `las`/`dl-d` is partial, `storage.md` §Existence Is Not Completeness
+Since `las`/`dl-d` is partial, `../storage.md` §Existence Is Not Completeness
 bites: check `_MIRRORED`/`_SUCCESS` on `dl-d` before pinning a job there.
 `research/v7_storage_placement.md` owns the cell survey and the `las` naming
 trap (`la-d`/`lb-d` are `lpp`, not `las`; only `dl-d` is `las`).

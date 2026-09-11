@@ -104,8 +104,8 @@ credential, `borg tasklog`, `analog --remote`, and the F1/`get_job` path can
 all return `PERMISSION_DENIED` (`borg tasklog` SIGABRTs on it), so stop after
 the first. Write diagnostics to the destination, read with `fileutil`: a
 numbered startup marker as the FIRST action in `main()`, one per stage, plus a
-`try/except` dumping the traceback to CNS. Per `../storage.md` §"write a copy's
-evidence to the destination, not to a log".
+`try/except` dumping the traceback to CNS. Per `../storage.md` §Before Touching
+A Payload, write a copy's evidence to the destination, not to a log.
 
 That marker splits two look-alike deaths. `VMGROUP_STATE_RUN`, empty status,
 zero output, no readable log is NOT necessarily a pre-`main()` death, only one

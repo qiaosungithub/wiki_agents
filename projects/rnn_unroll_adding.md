@@ -232,7 +232,7 @@ before concluding anything is absent.
 
 **A cell in the results tab is one clause, and shared context belongs in the
 block header written once.** Notes reached 407 characters per row restating the
-same protocol; `../research/result_logging.md` §Short Cells owns the rule. Per
+same protocol; `../research/result_logging.md` §Short Cells; Formatting Is Part Of The Result owns the rule. Per
 row, write only what changes interpretation — usually just how the comparison
 twin scored.
 

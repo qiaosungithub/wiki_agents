@@ -176,7 +176,7 @@ CitC workspace, absent from submitted HEAD, so a fresh workspace or a rebuilt
 binary from depot does not have it. And it is an inline `re.search`, not a
 named constant, so grep for the warning string `Detected malformed tool call
 markup` to check whether a given binary carries it. The 24.7-minute figure and
-the rule behind it (`engineering.md` §A Tool Call Only Fires As A Structured
+the rule behind it (`../engineering.md` §A Tool Call Only Fires As A Structured
 Call) describe model behaviour and still hold; this guard only shortens the
 recovery.
 
@@ -266,7 +266,7 @@ line, indefinitely.
 *You cannot see the output.* `~/.tpu_bin/serialize_heavy.sh` ended its lock
 setup with `exec 210>"$LOCK" 2>/dev/null`, and `exec` with no command applies
 every redirection to the shell permanently — so blaze's whole progress stream
-landed in `/dev/null` (fixed 2026-09-01; `engineering.md` §Serialize `blaze`).
+landed in `/dev/null` (`../engineering.md` §Diagnose From Evidence, Not From The Most Available Story).
 On any copy that still has it, `TPU_SERIAL_HEAVY=0` skips the shim, and
 `/usr/local/google/tmp/rabbit*.log.INFO.*` holds what stderr lost.
 
@@ -360,8 +360,8 @@ and GCs the old one. The cached path dangles, so every spawn
 (`_spawn_new_run_subprocess` → `subprocess.Popen`) dies with
 `FileNotFoundError`. That 500s `/api/run/new` and `/api/run/start` while the
 read path (`/api/chat`, `/chat/messages`) stays 200 — so only "open/restart a
-line" breaks. Tell it apart from the version-skew 500 (`engineering.md` §Gateway
-Version Skew, which 500s the *read/status* path) by grepping the server log for
+line" breaks. Tell it apart from the version-skew 500 (`../engineering.md`,
+which 500s the *read/status* path) by grepping the server log for
 the endpoint + traceback (`E.... Exception on /api/run/new [POST]` in
 `/usr/local/google/tmp/amply.*.INFO.*`). `_AMPLY_BIN` now resolves from
 `os.path.realpath('/proc/self/exe')`, the inode this process holds open and
@@ -494,7 +494,7 @@ Traps met while building it:
 **One-line host health from `~/.bashrc`, read straight from `/proc` (no deps,
 works in any shell).** Check pressure before launching work on this shared
 workstation, which overloads (load has hit 102); the cause is the
-amply-gateway-restart-loop in `engineering.md` §Do Not Let A Diagnostic Kill The
+amply-gateway-restart-loop in `../engineering.md` §Do Not Let A Diagnostic Kill The
 Thing It Watches.
 
 | Util | Shows |
@@ -505,5 +505,5 @@ Thing It Watches.
 
 Read `cpuload` per-core, not raw. A raw load of 20 is healthy on a 24-core box
 (0.83/core) and on fire on an 8-core one (2.5/core). It is meaningless without
-its denominator (`engineering.md` §Communicating A Result). The util divides for
+its denominator (`../engineering.md` §Communicating A Result). The util divides for
 you; trust `/core`, not the first column.

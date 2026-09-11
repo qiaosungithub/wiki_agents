@@ -176,15 +176,11 @@ section.
 - Packaging freezes the code: the wrapper snapshots it, so later edits cannot
   affect a queued or running job.
 - Verify registration after submit; never assume the transaction completed.
-- Default to `tpu enqueue` plus one serial `tpu build-worker`, for one job as
-  much as a batch: `tpu build-worker start` once, then `tpu enqueue` each run
-  from its own checkout, watching `tpu queue-status`. On this shared
-  workstation, a one-shot `tpu queue` races in-flight builds on the blaze
-  `output_base` and ships a 0-work-unit zombie XID. Only the serial worker,
-  building one at a time, avoids that. Mechanism, cured failure modes, and
-  guards: `../infra/tpu_cli.md` §The Local-Queue Smart Router. `tpu queue`
-  (one-shot, synchronous) is the fallback when you KNOW no other build is in
-  flight.
+- Default to `tpu enqueue` plus one serial `tpu build-worker`, single job or
+  batch; `tpu queue` (one-shot, synchronous) is the fallback only when you KNOW
+  no other build is in flight. §The Local Queue: `tpu enqueue` + Serial
+  Build-Worker owns the mechanism, the concurrent-build zombie XID it cures, and
+  the guards.
 
 ## Name The Experiment After Its Job, Not After Its Model
 

@@ -26,7 +26,7 @@ weighting *breadth of cells*: a one-cell metro is one stockout from useless.
 **`las`/`dl-d` and `sin`/`si-d` are partial mirrors, so do not assume a dataset
 is there.** `las` holds maze64's v4 working set. `sin` holds only the four
 GPU-line corpora above, and has ARC-1 *and* ARC-2, where `las` and `dfw` carry
-ARC-1 only. `storage.md` §Existence Is Not Completeness applies: check the
+ARC-1 only. `../storage.md` §Existence Is Not Completeness applies: check the
 dataset's `_MIRRORED`/`_SUCCESS` on the cell before pinning a job there.
 `dfw`/`rs-d` is the complete 4th mirror.
 
