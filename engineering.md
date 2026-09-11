@@ -1,732 +1,154 @@
 # Engineering Discipline
 
-Read this before changing code, diagnosing a failure, or reporting a result, in
-any checkout. It owns METHOD: the habits that are expensive to relearn.
-`projects/` owns each codebase's semantics; `jobs.md` and `storage.md` own
-infrastructure.
-
-## Verify The Premise Before Changing Anything
-
-- **Reproduce first.** Inspect the relevant code, tests, and recent history, and
-  compare current behavior against the acceptance criteria. "No change needed"
-  is a valid outcome. A failed reproduction is not proof, though: an earlier
-  partial fix produces the same silence.
-- **Prove the smallest thing that can fail, locally, before paying for a remote
-  round trip.**
-- **A green build proves the code compiles, not that it works.** Under relaxed
-  dependency checking a missing import is a runtime error on the remote machine.
-  Run the artifact. Importing the whole graph (a `--help` invocation) costs
-  seconds and catches the entire "died before `main()`" class.
-- **A CLI can reject your flag and still exit 0, so read the OUTPUT of a
-  state-changing command, not just its `rc`.** `xmanager stop --xid=<id>` prints
-  `unrecognized arguments` and returns 0, doing nothing. `borg findjobs
-  --user=<me>` does the same and reads as "you have no jobs in this cell"; two
-  different tools, one shift. The transcript looks like success, so the next
-  sentence you write is "stopped it". For anything destructive, prefer a CLI's
-  own `--dry_run` and confirm the blast radius (how many objects matched, and
-  that the ones you must NOT touch are absent) before the real call. Then close
-  the loop on the target's own artifacts, not on `rc`.
-- **Before claiming completion**, re-read the original request, run the most
-  relevant checks, read their COMPLETE output, and compare the result against
-  the request rather than against your patch. State whatever remains unverified.
-
-## A Write Tool's Success Return Is A Claim About Its Intent, Not An Observation Of The Disk
-
-**After any edit, read the file back and assert the thing you wanted is there.**
-An `edit_file` call passed its `expected_file_hash` guard, returned success
-reporting `+114 -0 lines`, printed a before/after fingerprint transition — and
-the 114 lines were not on disk. An entire method had vanished. Every value in
-that tool result was internally consistent; none of them was a measurement of
-the file. The hash guard protects the PREMISE (nobody else changed the file
-since you read it) and says nothing about the OUTCOME.
-
-**Read the artifact back with an instrument that answers the question you
-actually have.** `grep -c "def my_method"` returning 1 proves the text exists
-somewhere in the file; it does not prove the method is attached to its class. A
-`def` at the wrong indentation greps identically, passes `ast.parse`, and is a
-module-level function the call site can never reach. Walk the class body:
-
-```python
-import ast
-t = ast.parse(open(path).read())
-for n in ast.walk(t):
-  if isinstance(n, ast.ClassDef) and n.name == 'TheClass':
-    print(sorted(m.name for m in n.body if isinstance(m, ast.FunctionDef)))
-```
-
-**A change spanning a definition and its callers belongs in ONE atomic edit.**
-Splitting "add the parameter" and "pass the parameter" across two calls leaves a
-window in which the tree does not build, and a sibling's build sampled exactly
-that window.
-
-**Deleting a file is not deleting its existence; it is deleting every reference
-to it.** An untracked script was removed on request, its BUILD rule was not, and
-the dangling `srcs` aborted the whole package at ANALYSIS — 61 unrelated targets
-reported `NO STATUS` and three agents each read the wall of red as their own
-breakage. Grep for the name before you `rm`, and pass `--keep_going` on any
-wildcard build so one unanalyzable rule degrades to a per-target verdict instead
-of a single misleading boolean.
-
-## Fault-Inject In A Sandbox Copy, And Restore In A Trap
-
-**Never inject a deliberate fault by mutating a file others depend on.** A
-script that broke a shared module, ran a build, then restored it was killed by a
-shell timeout in the window between inject and restore, stranding a knowingly
-broken file in a package three agents were building against. Copy the package to
-`/tmp` and break the copy. This is not a safety tax paid for its own sake: the
-same matrix ran 24x faster against the copy (30 seconds versus twelve minutes of
-build cycles), because it skipped the build system entirely.
-
-When a sandbox is genuinely impossible, two details decide whether a kill leaves
-wreckage. **Write the pristine backup exactly once, before the first injection**
-— the script above re-derived its backup each iteration, so after the first
-failure it "restored" a different fault. And **put the restore in a trap, not at
-the end of the loop body**: `trap 'cp "$PRISTINE" "$SRC"' EXIT` runs on the kill
-path too, which the happy path does not.
-
-**A fault that is "detected" only as a nameless timeout is too weak to count.**
-The obvious response to a 93-second hang is to raise the timeout, which hides
-the fault again. Add a tripwire that fails fast and names the constant it is
-about — and derive it from `BaseException` where ordinary `Exception` would be
-swallowed by the production code under test.
-
-## Two Instruments Disagreeing Is A Finding, Not An Annoyance
-
-**When a second measurement contradicts the first, chase the contradiction
-before you explain it away — especially when the first one flatters you.** A
-cache experiment reported an 80.8% hit rate, reproducible and internally
-consistent. A second probe driving the real production class reported 0%. The
-80.8% was contaminated: four arms shared identical text in one process and the
-last arm read what the earlier ones had written. Isolated, the real figure was
-36.1%. Nothing in a code review would have found this; only the disagreement
-did.
-
-The same shape appears in build verdicts. A cached green describes the tree as
-it was when the result was cached, not the tree you have now; use
-`--nocache_test_results` whenever the verdict is load-bearing. A local sandbox
-run disagreeing with a cached green is what exposed a contaminated shared file.
-
-**A contaminated number welded into a comment outlives the run that produced
-it.** When a measurement is retracted, correct it everywhere it was recorded,
-including the source comment that quotes it.
-
-## Debug Locally On CPU Before You Spend A Remote Round Trip
-
-**After any large code change, run the whole path on CPU with a `local_debug`
-config before submitting a job.** A remote round trip costs a build, a queue
-wait, a schedule and a stagedir; a CPU run costs a couple of minutes and catches
-most of what would have died on the accelerator. Five consecutive TPU launches
-on one line were burned on bugs a workstation would have found in two minutes.
-
-Each repo carries the runner: `scripts/local_debug.sh` (some repos put it at the
-root; `tpu_scripts/debug.sh` is the older shape of the same idea). Read the one
-in your checkout before writing anything new. The mechanism is two parts:
-
-| Part | What it does |
-|---|---|
-| Force CPU with an env var | `JAX_PLATFORMS=cpu` for JAX. Set it before `import jax`; it cannot be set afterwards. Pair it with `XLA_FLAGS=--xla_force_host_platform_device_count=N` to simulate N chips in one process, so sharding and per-device code run too |
-| Point the binary at a `local_debug` config | `--config=configs/load_config.py:local_debug`. It shrinks steps, batch and data so the run finishes in minutes, and keeps every stage the real config has |
-
-**Cover the side paths, not just the training step, because they are where the
-remote-only bugs live.** Logging, visualization, checkpoint save and restore,
-and both online and offline eval each need to execute in the local run. A step
-loop that trains fine and then dies at the first checkpoint has cost the whole
-launch. Concretely, these fire only when the code actually runs:
-
-- A stubbed library raises at CALL time, not import time, so a wandb or plotting
-  stub only fails at the first log or figure, thousands of steps in.
-- A checkpoint save is a multi-host collective; if non-chief ranks skip it, the
-  job HANGS rather than failing. Run `--procs 2` where the script supports it,
-  because a single process cannot exercise a barrier.
-- Distributed paths need a timeout. A deadlock produces no traceback, so an
-  untimed smoke hangs and proves nothing; the EqR runner uses 300s, about 6x its
-  healthy runtime.
-- `/cns` paths reject stdlib file APIs, and eval or checkpoint code is usually
-  where a plain `open()` survives review.
-
-**Make the local run a positive test.** Print a token like `LOCAL_DEBUG_OK` on
-the last line and check for it, rather than trusting the exit code: a piped
-runner reports the last stage's status (§Verify The Premise Before Changing
-Anything), and a timeout kills the wrapper, not the child. If a dependency the
-test needs is unreachable, say so loudly rather than skipping it, or the run
-passes while proving nothing (§A Test That Cannot Fail).
-
-Then, and only then, do the remote debug run. Keep it small and treat it as a
-separate step: it exists to catch what CPU cannot see (real accelerator
-topology, cross-host collectives at true scale, the launcher's own argv and
-staging), not to re-find what the local run already covers.
-
-## Diagnose From Evidence, Not From The Most Available Story
-
-- **Read the deepest relevant failure, not the last line.** A traceback string
-  alone is not a code bug: check for an earlier OOM, an environment error, or a
-  swallowed exception upstream.
-- **Distinguish "it was killed" from "it exited".** Different footprints (exit
-  codes, attempt identity, failure counters, any shutdown marker the program
-  writes itself) and opposite fixes.
-- **A log's last LINE is not proof of life; its last WRITE TIME is.** A remote
-  job's log persists after the job is preempted or dies, so the final `[step
-  N/T]` reports where it STOPPED, not where it IS. Re-reading the same static
-  file confirms the stale number and reads as "healthy, unchanged" when it means
-  "dead": a monitor reported a run "healthy ~11%" three times off a log whose
-  mtime was two hours old, preempted at that step. Check the log's mtime
-  (`fileutil ls -l`) against now, or read authoritative scheduler state (`tpu
-  check` / borg BCL), never the log body alone. Not advanced AND mtime older
-  than a few minutes = preempted.
-- **A cause that does not move when the suspect moves is not the cause.**
-  Correlate the symptom's period or magnitude with the thing you suspect before
-  acting on it.
-- **A serial pipeline does not bound memory; standing servers do.** Each
-  workspace's blaze server holds a multi-GB JVM heap for its whole
-  `max_idle_secs`, one per checkout, whether or not a build runs.
-  `learning/deepmind/config/blazerc` sets that to **7 days** with an 18G heap and
-  leans on `--shutdown_on_low_sys_mem`, which only fires once memory is already
-  tight and whose eviction cold-respawns the heap, deepening the dip. Enumerate
-  resident heaps (`ps` by RSS plus `VmSwap`; a swapped-out heap reads as small in
-  RSS yet still owns the pages) before blaming concurrent builds. Bound it in
-  `~/.blazerc` after the DeepMind `import` (last startup flag wins). That binds
-  only NEW servers. The independent `swap-oom-agent.service` monitor now owns
-  any reclaim of pre-existing servers; the legacy `blaze_reaper.sh` cron entry
-  only logs delegation. A capped `max_idle_secs` is not self-enforcing:
-  `blaze shutdown` can return rc=0 and leave a server alive. Reclaim requires
-  fresh PID/start and pidfd identity, completed-command evidence, verified idle
-  time, and no active children, clients, actual output locks or queued use under
-  `/tmp/blaze-reaper.lock`; then confirm the exact process exited.
-- **Keep Blaze serialization separate from Hg status.** The PATH shims delegate
-  to `~/.tpu_bin/serialize_heavy.sh`. Only Blaze takes
-  `/tmp/host_heavy.<uid>.lock`; Hg goes through `hg_status_guard.py` and its own
-  `/tmp/hg_status.<uid>.lock`. Sharing the lock let one `hg status` block builds
-  for 23 minutes on 2026-09-06. A timeout alone still made builds wait behind
-  every slow query. Neither gate may reuse `/tmp/tpu_build.host.lock`, which
-  covers an entire launch, including upload.
-  Status/st (including global `-R`/`--cwd` options) preserves native arguments,
-  stdout, stderr and ordinary exit codes. It rejects concurrent status queries
-  with exit 75, times out at 120 seconds with exit 124, and imposes a per-workspace
-  five-minute cooldown after timeout. A query still exiting is identified by PID
-  and start time and is not duplicated. Status has no parallel fallback; Blaze
-  retains its existing fallback and cheap-verb behavior. Children do not inherit
-  either lock. `TPU_SERIAL_HEAVY=0` explicitly opts out of these protections.
-  Logs/state are in `~/.tpu_bin/hg_status_guard/`. Do not interpret any nonzero
-  status result as a clean tree. Resolve the real executable from a cached
-  absolute path, since a PATH walk may itself stall on CitC.
-  **Fig status is not necessarily read-only.** Its native auto-widen step scans
-  the entire CitC manifest before applying the requested file filter and may
-  write tracking metadata. The failing workspace repeatedly tried to add 1,813
-  directories, 1,711 from historical build staging; rollback of the metadata
-  caused that work to repeat. Merely adding `.` or ignoring untracked files does
-  not bypass this step. Keep generated staging in a separate non-Fig workspace
-  (the launcher now defaults to `clip_probe`). Use the actual project's Git
-  repository for Git-owned code. Do not delete Fig metadata, discard user files,
-  or restart shared srcfs to make status fast. Evidence and isolated process
-  tests: `~/work/.hg_status_recovery_20260906/`.
-  **Recovery workspace, 2026-09-06:**
-  `/google/src/cloud/qiaos/hg_recovery_20260906/google3` was created at the old
-  workspace's exact p4base. It contains verified copies of the 189 readable
-  Hg-tracked files, the full Amply source tree, and the repaired `tpu_utils`
-  source (316 distinct files). Native status succeeded twice with identical
-  results, and `route_check_test` passed all 113 tests there. This is a source
-  recovery workspace, not a clone of local Hg/Git history or every untracked
-  project. The old `run_amply_workspace` remains in place for live service
-  references and its history; its Fig metadata was not repaired in place.
-  Use the recovery path for Hg work on these recovered sources. Do not silently
-  repoint running services, replace the old alias, or stage builds in the new
-  Fig workspace. The recovery README records manifests and limitations.
-  A fifth property was missing and cost 40 minutes on 2026-09-01, the amply
-  gateway down throughout: **the shim must not swallow stderr.**
-  `exec 210>"$LOCK" 2>/dev/null` reads as "quiet the fd-210 open", but `exec`
-  with no command applies EVERY redirection to the shell permanently — and to
-  whatever it execs. Blaze puts its entire progress stream, its "another command
-  is running" notice, and the dbip `build_request_id` link on stderr, so a build
-  stalled on a CitC snapshot was indistinguishable from a frozen terminal.
-  Brace-group it: `{ exec 210>"$LOCK"; } 2>/dev/null`. Test both gates with a
-  command guaranteed to fail on stderr (for Hg, status outside a repo); a shim that prints nothing
-  there is swallowing. `ls -l /proc/<pid>/fd/2` tells you the same thing about a
-  build already running.
-- **Count blaze SERVERS by process identity, never by grepping for "blaze" in
-  argv.** Every binary blaze ever built runs from a path containing
-  `_blaze_qiaos/.../blaze-out/`, so `ps | grep blaze | wc -l` counts agent
-  workers and daemons and reads as a build storm: 24 matches totalling 7.3 GB
-  resolved to ONE real JVM (0.9 GB) with ZERO builds running. Match the JVM
-  (`blaze(NNN)` / `BlazeServer_deploy.jar`) or count `blaze (build|test|run)`
-  invocations, and state which of the two you measured — "concurrent blaze" is
-  ambiguous between them and the two differ by an order of magnitude.
-- **A cron job's `flock` fd is INHERITED by any blaze server it spawns, so the
-  lock is held for the server's whole `max_idle_secs`, not the script's run.**
-  A `*/5` cron then fires once per idle window instead (measured 61.9min against
-  `max_idle_secs=3600`), and writes no log line at all: the script is never
-  exec'd, so "no errors in the log" is the symptom, not the refutation. Judge by
-  the interval between log entries, and read the holder
-  with `readlink /proc/<pid>/fd/*`, because `fuser` measured empty on a held flock. Fix it
-  with `flock -n -o` in the crontab line (`-o` closes the fd before exec; mutual
-  exclusion during the command is unaffected), never by lowering
-  `max_idle_secs`, which only shortens the hostage. One line, verified: the
-  61.9min cluster went 18 occurrences -> 0 across the next 2.3h, and the
-  freshness alarm it fed went 31/day -> 0.
-- **`timeout` kills the blaze CLIENT; the SERVER builds on and often SUCCEEDS,
-  so a nonzero exit code can describe a build that produced a good binary.**
-  Measured: a fully cached build (7601/7602 actions cached) still took 1738s on a
-  swapping host, and blaze logged `Build completed successfully` after
-  `timeout 900` had killed the client. A "done" stamp gated on that rc is never written,
-  so the work re-fires forever (139 "refresh due" vs 17 "ok" in four days). Gate
-  the stamp on the ARTIFACT, not the rc, size the timeout for a cold build on a
-  loaded host, and capture `rc=$?` on the very next line; any intervening
-  statement resets it.
-- **Judge a server idle by the artifact a build writes, not by the process.**
-  `command*.profile.gz` mtime in the `output_base` is one-per-command and is the
-  judgement that works. Two plausible substitutes are actively dangerous. A
-  missing `blaze_build_log`/`command.log` (absent in 6 of 7 output_bases) stats
-  as epoch 0 and reads as maximally idle, which reaps every server including
-  live ones. And CPU-time delta is never zero (GC and heartbeat threads) and is
-  highest on the fattest idle heap, inverting the ranking it is meant to
-  produce. Guard on top of the judgement (no children, lock holder dead) and
-  make a missing artifact fall back to something conservative.
-- **Two broken things can be true at once.** A real, measurable problem standing
-  next to the failure is not automatically its explanation.
-- **Absence of evidence is evidence.** No log, no status message, and no
-  surviving handle together mean the failure happened before logging existed.
-  Do not re-run to collect logs that cannot exist.
-
-## When A Result Is Rejected, Change The PREDICATE, Not The Command
-
-**A correction re-runs the measurement; it does not fix a broken way of reading
-it.** Told that a survey was wrong, the reflex is to re-issue it with a more
-thorough command (`ls -d` becomes `ls -l`) while the line that turns output into
-a verdict is copied across unchanged. The second run is then just as wrong as
-the first, and now it carries the authority of having been double-checked.
-Re-derive the verdict, not the data: state what would have to be true for the
-old reading to be wrong, and check that.
-
-Two failure shapes hide behind an identical re-run, and both survive a more
-careful command:
-
-| what was actually wrong | why re-running does not catch it |
-|---|---|
-| the **predicate** (grep on text that both outcomes contain) | any command feeding it produces the same verdict |
-| the **subject** (probing the wrong path, the wrong tree, `git show HEAD:f` instead of the worktree) | the reading is correct, but of the wrong object |
-
-The second is the quieter one: in a dirty worktree, the committed file and the
-file on disk are different objects, so a report built from `HEAD` can describe
-work that was finished hours ago as still outstanding. Name the object you
-measured in the finding itself ("in the worktree", "at HEAD"), because the
-sentence is what gets relayed, and by then nobody can tell which one you read.
-
-## A Test That Cannot Fail Proves Nothing — And Often Finds The Bug
-
-**Write the negative control before believing a checker**, and prefer a test
-over another hour of reading logs.
-
-A verifier only ever run against good data is untested; `storage.md` records a
-mirror check that compared a constant against itself and passed against a
-nonexistent destination. So for every checker, break exactly one property
-(truncate the payload, duplicate a key, shorten an index array, flip one byte
-while keeping the length) and require the verdict to flip.
-
-A negative control proves the property it exercised, not the artifact you will
-act on. A memory-wall smoke script injected the fault correctly, was killed by
-the cgroup, and wrote `SMOKE_RC=137` to its log, and still exited `rc=0`: the
-inner status was captured for the log but never became the script's own exit
-code. Every reading was true, but the one a caller would gate on
-(`smoke.sh && echo OK`) was green at the exact moment the wall fired. Name the artifact the
-next reader will actually consume (an exit code, a file, a counter) and assert
-on that one, not on the nearest thing that moved. The author had caught the
-identical shape ("the refusal path returned rc=0") in a different file an hour
-earlier: checking the file you just edited is not the same as checking the
-behaviour you depend on.
-
-The fault you inject is itself a measurement. Two hours of log-reading on four
-identical failures yielded only a plausible story ("storage flaky under
-concurrency"); the retry test took minutes and made the real cause obvious. The
-injected fault left the destination smaller than the boundary, an append cannot
-shrink a file, so another process was writing.
-
-Corollaries worth the line:
-
-- **Report a violation as a verdict, not an exception**, where one bad item
-  would otherwise abort the whole report and hide every other finding.
-- **Keep the slow, obvious implementation** when you optimise a reader, and
-  assert the fast one equals it. Batching reads reorders results, and scoring
-  row A's label against row B's board looks entirely plausible.
-- **A test written against a name that does not exist is the test working.**
-  That drift between a config and the table it must agree with is exactly what
-  it is there to catch.
-- **When a reading and a reality can drift apart, put the freshness check
-  INSIDE the reader.** A log file outlives the process that wrote it, so parsing
-  one measures the past in a way that is indistinguishable from measuring the
-  present. Make the accessor assert an age bound and raise, rather than return a
-  stale value; cross-check the process table when the caller means "is it
-  running". The worst version is a statistic over a frozen file: the same
-  samples come back every call, so the variance collapses and the estimator
-  reads as converged, and a shrinking error bar is the last symptom anyone
-  suspects. Likewise a rate of zero from a dead lane must be an error, not the
-  number 0, or it averages into an aggregate as if it were a measurement.
-- **Before trusting a selector, force it to select, then force it to select
-  everything.** A filter that reaps nothing and a filter that is simply broken
-  produce the identical clean run, so "it touched nothing" is not evidence it
-  discriminates. Run it once with the threshold slammed open and check the
-  ranking is the one you meant: a judgement built on a missing file reads as
-  maximally stale and selects the whole fleet, and one built on a proxy that
-  grows with size (CPU burnt by a big GC heap) ranks the worst offender as the
-  most active. Ask which way a missing or noisy input fails, and prefer the
-  input whose absence fails closed.
-- **Test the fix at a LARGER input than today's, never a smaller one.** A patch
-  that only passes at the current size has not been tested. When a periodic job
-  starts overrunning its period, the tempting proof is to shrink the input
-  (prune the list, drop old rows) and re-measure: the number goes green while
-  the slope is untouched, so the next item added re-breaks it and the regression
-  reads as new. Fix the cost class instead (O(n) serial per-item RPCs become
-  O(1) by fetching once and joining in memory) and demonstrate it by GROWING the
-  input past the failure point, using synthetic rows on a COPY of the live file,
-  never the live one. State the measured cost at 1x, 2x and ~3x the present
-  size; a flat curve is the evidence, a single green run is not.
-
-## Do Not Let A Diagnostic Kill The Thing It Watches
-
-Guards, validators, and telemetry run inside the job but are not the job. Put
-them behind a total comparison that can answer "can't tell", make them swallow
-their own failures, and never let one raise into a training or serving loop. A
-check that can crash a run has negative value.
-
-**A monitor that hardcodes an endpoint reports a false mass-death when that
-endpoint moves.** The amply UX gateway (the `:PORT` server behind the web UI and
-cross-run query tools) has no stable port: on crash (e.g. LOAS2 expiry) it
-relaunches on a fresh port and rewrites `~/.amply/dashboard_url`. Workers are
-reparented to init and survive (verify `pgrep -af 'amply worker|claude-amply.py
-resume'` + `ps -o ppid`: PPID=1 = independent of the gateway). A watcher
-hardcoding the old port probes a dead socket and pages every session DEAD in one
-second. Defenses: (1) read the base URL from `~/.amply/dashboard_url`, never
-hardcode a port; (2) treat a simultaneous all-sessions DEAD with
-`Connection refused` as gateway-down-until-proven, confirm workers alive first, and NEVER
-`amp start`/kill a worker to "recover" (that is what kills a live session). The
-gateway self-heals; repoint the observer, not the observed.
-
-**While diagnosing a stuck healer, read its state; do not invoke it.** A probe
-that runs the self-heal script (even `--help`) can trigger its side effect: a
-rebuild whose `blaze` child outlives your `timeout` wrapper, orphaning to init
-and joining the exact concurrent-build storm you are investigating. The
-`timeout` kills the wrapper, not the grandchild it already forked. Inspect the
-binary, the lock, and the logs directly; run the healer only once, deliberately,
-after you understand the state, never as a way to observe it.
-
-## A Guard's Threshold Is A Claim About Floats, Not About Algebra
-
-I wrote a guard that fired on `spectral_radius >= 1.0`, then argued twice, in
-two commit messages, that it could never fire, because
-`rho = max(exp(-softplus(dt_bias) * exp(a_log)))` is `exp(-positive)` and so
-strictly below 1. The algebra is correct. The guard fired anyway, at step 7586.
-
-In fp32, `softplus(-30) = 9.4e-14`, and `exp(-9.4e-14)` rounds to exactly `1.0`
-because fp32's eps is ~1.2e-7. Any exponent below that saturates. My own earlier
-comment had even said "unreachable except through underflow": I wrote down the
-exception and then reasoned as though it did not exist.
-
-The general shape, which cost three wrong calls on one guard in one night:
-
-1. `>= 1.0` can never fire (wrong: underflow) → changed it to fatal at 0.999
-2. fatal at 0.999 is right (wrong: `rho` is a `torch.max` over 768 channels, so
-   a high value names the slowest-decaying channel, not the model; the run at
-   rho=0.9999 still had a fully intact depth ladder) → changed it to warn
-3. 148 steps at a printed `1.0000` proves it cannot fire (wrong: it fired 11
-   minutes later, because the printed value saturates at `%.4f` before the
-   comparison does)
-
-Two habits would have caught all three: evaluate the expression at extreme
-inputs instead of reasoning about it (five lines of python showed the underflow
-immediately), and check whether the statistic is a max, a mean, or a sample
-before treating it as a property of the whole object.
-
-## A Memory Cap Without A Swap Cap Is Not A Cap
-
-`MemoryMax` alone does not stop a local job from taking the machine down, and it
-fails in the direction that looks safe: the limit really is written into the
-cgroup, `systemd-run` returns 0, and the process keeps running. Its semantics
-simply exclude swap. On a box with 86G of swap, a job under an 8G wall can hold
-8G of RAM plus tens of gigabytes of swap, and the frantic paging that produces
-is itself what drives the memory-pressure signal. `systemd-oomd` kills on PSI,
-not on a limit, so the wall is up and the bomb still goes off.
-
-Measured on this workstation with a probe that really touches 521MB:
-
-```
-systemd-run --scope -p MemoryMax=64M                        → rc=0, probe alive
-systemd-run --scope -p MemoryMax=64M -p MemorySwapMax=0     → rc=137, killed
-```
-
-The blast radius is the whole scope, not the offender. On 2026-08-30T20:07Z an
-uncapped local eval reached 46.7G and oomd took out 31 processes in one tmux
-scope: four unrelated agent lines and the operator's own amply server, all
-restarted together. Nothing in that list had done anything wrong.
-
-So the usable form is both knobs, always:
-
-```bash
-systemd-run --scope -p MemoryMax=8G -p MemorySwapMax=0 <cmd>
-```
-
-And put it behind a wrapper rather than trusting recall: `~/.tpu_bin/memcap`
-takes `[-m LIMIT] <cmd...>`. A script heavy enough to matter should also REFUSE
-to run uncapped: read `memory.max` and `memory.swap.max` from
-`/proc/self/cgroup` and exit if either is unset, because the unsafe path is the
-one that looks fine.
-
-## When The Host Swaps: Thrashing Disconnects Sessions, oomd Kills Silently
-
-Two distinct failure modes on a swap-heavy box, with opposite signatures.
-
-**A high `swap used` is neither alarm nor benign by itself; the paging rate
-separates the two.** A host can sit at tens of GB of swap with nothing
-OOM-killed while VSCode's extension host disconnects every ~20 minutes: `node`
-is merely swapped out and starved of CPU until the heartbeat times out, and the
-client reports only an opaque exit code. Before calling it thrashing require
-both `si` >= ~5MB/s (from `vmstat`) and `load15` >= ~0.8/core, because after a
-big reclaim load stays high for minutes with paging already at zero. The usual
-culprit is idle standing blaze heaps (§Diagnose From Evidence, Not From The
-Most Available Story), not the interactive process that dies.
-
-**`systemd-oomd` kills do NOT increment `/proc/vmstat`'s `oom_kill`, so a
-counter-based check stays silent through a whole outage.** Measured across an
-event that killed 34 processes in one sweep: the counter held at 37 with zero
-delta. The kernel OOM killer and `systemd-oomd` are different mechanisms — oomd
-acts on cgroup PSI memory pressure and kills the whole scope, well before the
-kernel would act, so nothing it does appears in the kernel counter. Detect it in
-the journal instead:
-
-```bash
-journalctl --since '-1h' | grep -E 'systemd-oomd.*(Marked .* for killing|killed [0-9]+ process)'
-```
-
-A whole `tmux-spawn-*.scope` goes at once, so every background job started from
-that tmux dies together, silently, with no error in their own logs. Their
-simultaneous death is the tell: a script that crashed on its own leaves a stack
-trace and dies alone.
-
-`/tmp` is tmpfs and counts against RAM: `df -h /tmp`, and over ~90% run
-`du -sh /tmp/* | sort -rh | head`. Never `rm -rf /tmp/*` blindly — other
-processes' scratch and launcher logs live there.
-
-## Failure Modes That Only Appear On The Long Path
-
-- **A short run does not validate resume.** Cold start and restore touch
-  different data: a fresh tree holds arrays, a restored one also holds optimizer
-  state whose leaves include `None`, scalars, and containers. Budget one
-  deliberate restart before trusting a multi-hour schedule.
-- **Code that runs every N steps fails N steps in.** Mocked or stubbed libraries
-  raise at CALL time, not import time. Probe with `getattr` and degrade.
-- **Anything that installs a handler can steal a stream someone else installed.**
-  Verify the side effect after constructing logging, tracing, or writer objects
-  rather than assuming composition.
-- **A long-lived process keeps state your fix cannot reach.** It is alive, but
-  what it is carrying may be months stale. Two forms bit the same daemon in one
-  night. (a) A half-initialised module survives in `sys.modules`: a lazy `import`
-  that dies partway (transient RPC/gRPC unavailability) leaves the module OBJECT
-  behind, so every later import gets the empty shell and raises
-  `AttributeError: module ... has no attribute X` forever, because Python never retries it. The
-  tell is the FIRST failure differing from all the rest; a fresh process
-  succeeds, which makes it read as "already self-healed". (b) The process's own
-  `argv` freezes a path: a supervisor launched with a symlinked binary path keeps
-  that string for its whole life, working fine until the restart that makes it
-  re-exec, then `rc=127`, hours after the change that broke it. So a fix to
-  resolution logic reaches only NEW processes. After changing how anything is
-  located or imported, enumerate the long-lived processes still carrying the old
-  argv or the old module, and state which ones must be recycled. When a restart
-  hangs, suspect the launcher's frozen path before the code.
-- **`AttributeError` where you expected `ImportError` means the module exists but
-  is incomplete**: a partial init, not a missing dependency and not a version
-  mismatch. Chasing a version skew here wastes the hour. Check whether a fresh
-  process succeeds, which separates "the code is wrong" from "this process is
-  poisoned".
-- **Only `cron` + `setsid` survives on a workstation.** A daemon started from an
-  agent or SSH shell is reaped when that session ends, within a minute, every
-  time. `nohup ... &` straight from a cron entry dies too, because cron reaps the
-  process group when its shell exits. Drive long-lived local work from a cron
-  keepalive that `setsid`s the worker, make the keepalive idempotent (one
-  instance per unit), and delete the entry when the work is done: a keepalive
-  outliving its purpose becomes a second writer (`storage.md`).
-- **A watcher that emits no alarm may be dead, not calm.** A `cron`+`setsid`
-  entry that runs a script by path needs the execute bit. Rewriting that script
-  drops the bit if the editor recreates the file, and then cron/`setsid` fail
-  without a trace, because they swallow the error. The watcher never ticks, and
-  everything it should have paged goes unseen for as long as the quiet lasts.
-  After deploying or editing any keepalive or watcher, prove it actually ran (its
-  own log advanced, or a self-test notification travelled the full chain end to
-  end) before trusting silence. Absence of pages is equally the signature of a
-  monitor that died on the launch pad.
-- **Point `TMPDIR` at real disk before any long local job.** The default can be a
-  small shared tmpfs, and at 100% full it deletes other processes' scratch and
-  breaks job packaging with a no-space error after enough normal output to look
-  like it worked. The same directory being wiped also destroys the launcher logs
-  that map job ids to purpose.
-- **A diagnostic probe is also load.** Repeatedly duplicating a 1.3 GB file to
-  test a hypothesis, on a machine already saturated, worsens the contention being
-  investigated, and can time out the shell running it. `engineering.md` §Do Not
-  Let A Diagnostic Kill The Thing It Watches applies to ad-hoc probes, not just
-  in-process guards.
-
-## Porting Between Related Checkouts
-
-- **Never sync a file wholesale.** Re-apply the local change as a hunk on top of
-  the other side's version. A whole-file copy silently reverts what the local
-  side had added: it still imports and the tests still pass. This produced a
-  config knob that nine configs set and no code read, surviving eleven commits.
-- **Grep for the READER, not the setter.** A setting nothing consumes is worse
-  than a missing one: it promises behavior that does not exist.
-- **A setting can arrive from somewhere that is not a config file.** A grep over
-  every yaml can correctly report that nothing sets a knob while a CHECKPOINT
-  sets it on every restore; a merged `extra.json` re-specified a model's compute
-  dtype that way. When a value surprises you, ask what else writes it.
-- **Related checkouts diverge deliberately.** Preserve each side's execution
-  model, sharding, dependency, and initialization choices; never port runtime,
-  data, or checkpoint behavior as incidental cleanup.
-
-## Sharing One Worktree
-
-Several agents committing into one checkout lose each other's work in ways that
-look like tool corruption.
-
-- **In an autonomous run you are one of the worker processes in the table, so
-  tell your OWN worker from a PEER before you react to it.** A
-  `claude-amply.py new [<task>]` process whose task is the one you were asked to
-  do is your own run's worker, not a peer racing you; match on the argv task
-  name, and note its start time roughly coincides with your session's creation.
-  Mistaking it for a stranger doing "the same task" turned work that was simply
-  mine into an A/B/C decision handed back to the operator instead of getting
-  done. A genuinely separate sibling editing the same files (a different
-  `[task]`, different functions) is the case the rest of this section covers:
-  relocate your edit around its uncommitted hunk and proceed, rather than
-  stopping to ask.
-- **`git commit -- <pathspec>` IGNORES THE INDEX.** It re-reads those paths from
-  the working tree, so a peer's uncommitted hunk in a file you also touched
-  lands in your commit however carefully you staged. Put the pathspec on
-  `git add`, check `git diff --cached` CONTENTS, then `git commit` with NO
-  pathspec. Verify AFTER with `git show HEAD:<file>`, because `git diff --cached`
-  is empty once the commit exists and reads as a false all-clear.
-- **Never leave anything staged.** A `git rm` sitting in the index gets swept
-  into someone else's commit and splits an atomic change in half.
-- **Land a declaration with its implementation.** A config key declared in one
-  commit and implemented in the next opens a window where a yaml sets a field
-  the model does not have, and pydantic drops it in silence.
-- **A suite run in a shared worktree is a smoke signal only.** Attribute nothing
-  without a clean `git archive HEAD` export pinned to your own commit.
-
-## External Writes Are Transactions
-
-Establish identity and target, validate assumptions, write the smallest scope,
-then read the result back. This covers buckets, spreadsheets, shared registries,
-and any state another process can observe.
-
-**Preserve the user's work**: never revert, overwrite, or clean a dirty worktree
-as collateral. Before deleting shared or local data, identify the filesystem,
-the owner, active references, and the recovery path; use a manifest for bulk or
-shared deletion.
-
-**Never kill by pattern.** `pkill -f` / `killall` signal every process whose
-command line contains the string, including the shell running the command, which
-on a workstation is a pane of the operator's tmux. A `pkill -f
-'AGENT_WEB_PORT=8891'` aimed at one test server matched its own invocation and
-took down the operator's entire tmux server: every daemon, session, and
-terminal. The self-match also truncates the command that issued it, so a restart
-written as one `pkill && start` line dies after the kill and never starts
-anything. The thing you were restarting is left DOWN, the shell reports
-`rc=-15`, and nothing says which half ran (measured 2026-08-30 on the budget
-enforcer, which sat dead until the gap was noticed by hand). Resolve to PIDs
-first (`ss -ltnp` for a port, `pgrep -a` / `/proc/<pid>/cmdline` to confirm what
-each is), then signal those PIDs. `fuser -k` on a port is the same trap: check
-who holds it first, and never assume a port is unused (8891 was a real service
-someone else had added). A process group id is not owned by the process you read
-it from either: an unrelated process can share it (measured, pid 2947733 had
-pgid 513289), so `kill -TERM -<pgid>` reaches processes you never enumerated.
-Reading `pid -> pgid` does not answer `pgid -> members`.
-
-**The same pattern used to judge a process ALIVE fails in the opposite
-direction: it revives a shadow.** A watchdog whose liveness test spells out the
-flags (`--max-cancels 8 --jobs-file ...`) stops recognising the daemon the
-moment anyone inserts an option between them, declares the healthy process dead,
-and starts a second one from its own stored command line, which is the OLD one,
-without whatever guard the new flag added. Measured 2026-08-30: adding
-`--sustained-over-seconds=300` to the budget enforcer produced, 35 minutes later,
-a second armed enforcer with no debounce and no `flock`. So match on the part
-that cannot change (the binary, its registry file), never on the tunable flags;
-have the watchdog revive through the SAME lock and flags the real launcher uses;
-and treat a config change as an interface change. Before adding a flag, list
-every reader of that process's observable surface, including the ones that read
-its argv rather than its output.
-
-**A process wedged in uninterruptible-D on a FUSE call is immune to SIGKILL and
-to its siblings dying; only an srcfs restart's EIO-bounce frees it.** A holder
-stuck in `request_wait_answer` (an unanswered CitC/FUSE request, e.g. an
-xmanager orphan of a dead launcher) keeps whatever lock or fd it owns, and
-tearing down the rest of its process tree does not release it: the kernel will
-not deliver a fatal signal until the syscall returns. Restarting srcfs bounces
-the hung syscall with EIO, the process finally dies, and the fd/lock closes.
-That restart is fleet control-plane. It severs every CitC CWD, including the
-amply gateway (`§Do Not Let A Diagnostic Kill` for the fallout), so it is
-operator/sentinel-owned, never a casual fix. Two corollaries: attributing a
-lock's release to "the sibling process died" is almost always a coincidence with
-a concurrent srcfs restart, so check the restart log before believing it; and a
-global D-count gate ("restart when procs_blocked ≥ N") MISSES a low-D-count
-convoy where one orphan holds a lock with waiters queued behind it. Detect that
-by the held lock plus its waiters, not by the aggregate count.
-
-**Before a watchdog reaches for a fleet-wide remedy, check what the tool it is
-watching already does about the same failure.** Both locks the convoy detector
-scans DEGRADE rather than block forever — `tpu_wrapper.sh` takes
-`/tmp/tpu_build.host.lock` with `flock -w ${TPU_SERIAL_BUILD_WAIT:-1800}` and
-`/tmp/tpu_stage.<uid>.lock` with `-w 900`, and on timeout proceeds in PARALLEL
-with a warning, exactly so "a wedged holder can never block the whole fleet's
-launches forever". A wedged holder therefore costs each waiter at most 30
-minutes, not the fleet. The sentinel's `CONVOY_HOLD_SECS` was 90 s — one
-twentieth of that window — so it preempted the CLI's own mitigation almost
-immediately, and its remedy is not local: an srcfs restart severs every FUSE
-call in flight and leaves orphaned connections that pin unrelated processes in
-D-state forever (2026-09-01: three restarts in one day; the 16:02 one held
-monitor-v64's `du /tmp` for 32 minutes, immune to `kill -9`). Raised to 2100 s
-(1800 + margin) so the restart is reserved for a convoy the CLI's own degrade
-path has already failed to clear. The restart itself stays armed and is still
-the only thing that frees a permanently wedged holder — a D-state process never
-releases the lock on its own, and the waiters merely route around it. What
-changed is the timing, not the capability.
-
-## A Tool Call Only Fires As A Structured Call, Never As Prose
-
-**An action you "wrote out" but did not issue as a real, structured tool call
-simply did not happen.** The message was never sent, the command never ran, the
-job never launched, and it fails silently: no error, no output, just a
-downstream party waiting on a thing that never came. The trap is writing the
-call OUT (as tag-style markup, a fenced `bash` snippet, or a "calling
-send_message…" sentence) into your REPLY TEXT instead of emitting it through the
-tool channel. Reasons this recurs: composing a long narrative reply and pasting
-the call inline; a call "interrupted" mid-turn by an incoming notification so
-you re-narrate it rather than re-issue it; copying an example of a call verbatim
-into prose.
-
-- **If a turn's job is to DO something (send a message, run a command, edit a
-  file), the turn's payload must be actual tool calls, not a description of
-  them.** Prose is for talking to the human; it moves no state.
-- **Confirm side-effecting calls landed before you claim them.** After a
-  send/launch/write, read it back through the tool channel (the sent message is
-  in the thread; the row is in the table; nmsg advanced). Do not report "sent"
-  or "approved" from intent alone.
-- **A call you wrote as text stays in your own history and reads as an example
-  to copy.** One session that slipped once did it in 96 of its next 187 turns,
-  stalling each time (median 24.7 min idle). If you catch it, re-issue the call
-  as a real one immediately, and do not quote the bad output back; that only
-  adds another example.
-- **Highest stakes for safety-critical and cross-agent actions.** A dropped
-  `send_message` leaves a peer blocked or a decision unmade; a dropped resume /
-  `kill -CONT` can leave someone's process frozen. Treat an un-confirmed
-  side-effecting call as NOT DONE.
-
-## Communicating A Result
-
-- **Define overloaded terms before using them.** *Step*, *update*, *iteration*,
-  *cycle*, *task*, *segment* mean different things in different sources. Say
-  concretely what the thing is and what it changes. When two sources collide on
-  one word, flag the collision and introduce unambiguous local names BEFORE
-  presenting any number.
-- **A number is meaningless without its protocol**: what it counts, its unit,
-  its denominator, what was held fixed, and whether higher is better. Two
-  numbers are comparable only when those agree.
-- **Separate what the evidence supports from what you inferred**, and keep a
-  pointer to the original trace or log. A summary is a navigation aid, not a
-  substitute for evidence.
-- Lead with the outcome, keep prose short and load-bearing, and say plainly what
-  you did not verify.
+Method for changing code, diagnosing failures, and reporting results in any
+checkout. Two chapters: **Chapter 1** is the principles — one sentence each, so
+you can scan them all in a minute. **Chapter 2** is the concrete drill for
+writing and running NEW code against our fleet. `projects/` owns each codebase's
+semantics; `jobs.md` and `storage.md` own infrastructure; workstation upkeep
+lives in `workstation.md` and `infra/`.
+
+## Chapter 1 — Principles
+
+Each line is a rule, not a story. The evidence that earned it is in git history;
+what matters here is that none of it is buried.
+
+### Before you change anything
+- Reproduce the problem first; "no change needed" is a valid outcome.
+- A failed reproduction is not proof, because an earlier partial fix produces the same silence.
+- Prove the smallest thing that can fail locally before paying for a remote round trip.
+- Before claiming done, re-read the original request and check the complete output against it, not against your patch.
+
+### Trust artifacts, not success returns
+- A green build proves the code compiles, not that it runs — import or `--help` the artifact.
+- A CLI can reject your flag and still exit 0, so read the OUTPUT of a state-changing command, not just its `rc`.
+- After any edit, read the file back and assert the change is actually on disk.
+- Read it back with an instrument that answers your real question (`grep -c` proves text exists, not that a method is attached to its class).
+- A cached green build describes the tree as it was when cached, so pass `--nocache_test_results` when the verdict is load-bearing.
+- A shell pipeline reports its LAST stage's status, so `cmd | head` hides `cmd`'s failure — capture `rc` on the very next line.
+
+### Make edits atomic
+- A change spanning a definition and its callers belongs in ONE edit, or a sibling's build samples the broken window.
+- Deleting a file means deleting every reference to it, so grep the name first and build with `--keep_going`.
+
+### Diagnose from evidence, not the most available story
+- Read the deepest relevant failure, not the last line, because an OOM or a swallowed exception upstream is the real cause.
+- Distinguish "it was killed" from "it exited" — different footprints, opposite fixes.
+- A log's last LINE is not proof of life; its last WRITE TIME is.
+- A cause that does not move when the suspect moves is not the cause.
+- Two broken things can be true at once, so a real problem next to the failure is not automatically its cause.
+- Absence of evidence is evidence: no log and no handle means the failure happened before logging existed.
+
+### A test that cannot fail proves nothing
+- Write the negative control first — break one property and require the verdict to flip.
+- Assert on the artifact the next reader actually consumes (an exit code, a file, a counter), not the nearest thing that moved.
+- Test a fix at a LARGER input than today's, never a smaller one, because shrinking the input hides the slope.
+- Put the freshness check inside the reader, or a statistic over a frozen file reads as converged.
+- Force a selector to select nothing and then to select everything before trusting what it picked.
+- Report a violation as a verdict, not an exception, so one bad item does not hide every other finding.
+- Keep the slow obvious implementation and assert the fast one equals it.
+- Inject faults into a `/tmp` copy, never a shared file, and put the restore in a `trap` so a kill still cleans up.
+
+### When a reading is wrong, fix the predicate, not the command
+- A correction re-runs the measurement; it does not fix a broken way of READING it.
+- Re-check the subject too: in a dirty worktree `HEAD` and the file on disk are different objects, so name which one you measured.
+- When a second measurement contradicts the first, chase it — especially when the first one flatters you.
+- Hedging a number does not make it right; a second independent route to the same value does.
+- Correct a retracted number everywhere it landed, including the source comment that quotes it.
+
+### Guards and diagnostics must not kill the job
+- A guard, validator, or telemetry hook must swallow its own failure and never raise into a training or serving loop.
+- A guard threshold is a claim about floats, not algebra, so evaluate the expression at extreme inputs (underflow makes `exp(-tiny)` round to exactly 1.0).
+- Check whether a statistic is a max, a mean, or a sample before treating it as a property of the whole object.
+- While diagnosing a stuck healer, read its state; do not invoke it, even with `--help`.
+- A memory cap without a swap cap is not a cap, so set `MemoryMax` AND `MemorySwapMax=0`.
+- A diagnostic probe is also load, so do not investigate a saturated machine by adding to its saturation.
+
+### Long-lived processes and the long path
+- A short run does not validate resume, so budget one deliberate restart before trusting a multi-hour schedule.
+- Code that runs every N steps fails N steps in, because stubbed libraries raise at CALL time, not import.
+- A long-lived process keeps state your fix cannot reach — a half-initialised module in `sys.modules`, or a path frozen in its argv.
+- `AttributeError` where you expected `ImportError` means the module exists but is incomplete, not a version skew, and a fresh process tells you which.
+- After changing how anything is located or imported, name which long-lived processes still carry the old argv and must be recycled.
+- Only `cron` + `setsid` survives on a workstation; a daemon from an agent or SSH shell is reaped when the session ends.
+- A watcher that emits no alarm may be dead, not calm, so prove it ran before trusting its silence.
+
+### External writes are transactions
+- Treat any external write as a transaction: establish identity and target, validate, write the smallest scope, then read it back.
+- Preserve the user's work — never revert or clean a dirty worktree as collateral, and use a manifest for bulk or shared deletion.
+- Never kill by pattern; `pkill -f` matches the shell that runs it, so resolve to PIDs first.
+
+### Sharing one worktree
+- In an autonomous run, tell your OWN worker from a PEER by matching the argv task before you react to it.
+- `git commit -- <pathspec>` IGNORES THE INDEX and re-reads the worktree, so it sweeps in a peer's uncommitted hunk — put the pathspec on `git add` instead.
+- Never leave anything staged; a stray `git rm` gets swept into someone else's commit.
+- Land a declaration with its implementation, or a config sets a field the code does not yet have.
+
+### Porting between related checkouts
+- Never sync a file wholesale; re-apply the local change as a hunk, or the copy silently reverts what the local side added.
+- Grep for the READER, not the setter, because a setting nothing consumes is worse than a missing one.
+- A value can arrive from a checkpoint or a merged `extra.json`, not only a config file.
+
+### A tool call only fires as a structured call
+- An action you "wrote out" as prose but did not issue as a real tool call simply did not happen, and it fails silently.
+- If a turn's job is to DO something, its payload must be actual tool calls, because prose moves no state.
+- Confirm a side-effecting call landed (the message is in the thread, the row is in the table) before you claim it.
+
+### Communicating a result
+- Define overloaded terms (step, update, iteration, cycle) before using them.
+- A number is meaningless without its protocol: what it counts, its unit, its denominator, what was held fixed, and whether higher is better.
+- Separate what the evidence supports from what you inferred, and keep a pointer to the trace.
+- Lead with the outcome, keep the prose load-bearing, and say plainly what you did not verify.
+
+## Chapter 2 — Writing And Running New Code
+
+The two low-level drills that a large code change must pass before it earns a
+real run: make the code fit the fleet, then debat it locally, remotely, and only
+then for real.
+
+### Adapt new code to the fleet's infra
+
+A training binary is not standalone: the scheduler, its auto-resume, and the CNS
+evidence layer all read it from the OUTSIDE. A new package must meet six
+contracts, or it launches and silently misbehaves — every one a "looks healthy,
+produced nothing / trained wrong" failure that surfaces only in the loss curve.
+`jobs/resume.md` Chapter 2 owns them in full; the index:
+
+- **Checkpoint layout** is a shape the fleet's parsers already register, and a complete checkpoint is distinguishable from an in-flight one by atomic rename.
+- **Resume channel**: eval and warm-start read `LOAD_FROM`; a pruning training run resumes via `restart_from` + `restart_step`; fail closed on the wrong combination.
+- **Boot banner** names the durable CNS out_dir in the form the evidence layer parses, and a resume logs `resumed from <path> at step <N>`.
+- **Read/write split**: the binary takes its write dir from `$CHECKPOINT_BUCKET`, never from the read path (the classic ELT bug).
+- **`main.py` fails closed** on every under-specified launch (missing config or workdir, an unresolvable resume path), never defaulting to a cold start.
+- **Log mirror**: the job tees stdout+stderr to a durable per-attempt CNS text log before distributed init, and the mirror swallows its own errors.
+
+Two delivery rules that hold across all of the above: pass every resume selector
+through `--launch` (it arrives as an env var), never by shell inheritance
+(silently dropped) nor as an undeclared `--flag` (FATAL at parse); and read a
+checkpoint from any metro but WRITE only to the local one, because a cross-metro
+write gets the job deleted by the pruner. Exact shapes and reference
+implementations: `jobs/resume.md`.
+
+### Local debug, then remote, before a real run
+
+After any large code change, run the whole path on CPU, then one small remote
+run, and only then the real run. A remote round trip costs a build, a queue
+wait, a schedule, and a stagedir; a CPU run costs minutes and catches most of
+what dies on the accelerator.
+
+**Local, on CPU.** Each repo carries the runner — `scripts/local_debug.sh`, or
+the older `tpu_scripts/debug.sh` — so read yours before writing anything. Two
+parts: force CPU with `JAX_PLATFORMS=cpu` set BEFORE `import jax` (pair it with
+`XLA_FLAGS=--xla_force_host_platform_device_count=N` to simulate N chips in one
+process), and point the binary at a `local_debug` config that shrinks
+steps/batch/data but keeps every stage the real config has.
+
+- Cover the side paths, not just the training step — logging, visualization, checkpoint save AND restore, online and offline eval — because that is where the remote-only bugs live.
+- A checkpoint save is a multi-host collective, so run `--procs 2` where supported: a single process cannot exercise a barrier, and a non-chief rank that skips the save HANGS rather than fails.
+- Give any distributed path a timeout, because a deadlock produces no traceback; and remember `/cns` paths reject stdlib `open()`.
+- Make the run a POSITIVE test: print a token like `LOCAL_DEBUG_OK` on the last line and check for it, because a piped runner reports the wrong stage's status and a timeout kills the wrapper, not the child.
+
+**Then remote, small.** Only once the local run is green, do one small remote
+debug run as a separate step. It exists to catch what CPU cannot see — real
+accelerator topology, cross-host collectives at true scale, and the launcher's
+own argv and staging — not to re-find what the local run already covered.
+
+**Then the real run**, and not before both of the above are green.

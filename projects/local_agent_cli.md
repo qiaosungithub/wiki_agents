@@ -176,8 +176,8 @@ CitC workspace, absent from submitted HEAD, so a fresh workspace or a rebuilt
 binary from depot does not have it. And it is an inline `re.search`, not a
 named constant, so grep for the warning string `Detected malformed tool call
 markup` to check whether a given binary carries it. The 24.7-minute figure and
-the rule behind it (`../engineering.md` §A Tool Call Only Fires As A Structured
-Call) describe model behaviour and still hold; this guard only shortens the
+the rule behind it (`../engineering.md` §A tool call only fires as a structured
+call) describe model behaviour and still hold; this guard only shortens the
 recovery.
 
 ## Restarting The Amply UX Server
@@ -266,7 +266,7 @@ line, indefinitely.
 *You cannot see the output.* `~/.tpu_bin/serialize_heavy.sh` ended its lock
 setup with `exec 210>"$LOCK" 2>/dev/null`, and `exec` with no command applies
 every redirection to the shell permanently — so blaze's whole progress stream
-landed in `/dev/null` (`../engineering.md` §Diagnose From Evidence, Not From The Most Available Story).
+landed in `/dev/null` (`../infra/tpu_cli.md` §Serializing Heavy Verbs: Separate Blaze And Hg Locks).
 On any copy that still has it, `TPU_SERIAL_HEAVY=0` skips the shim, and
 `/usr/local/google/tmp/rabbit*.log.INFO.*` holds what stderr lost.
 
@@ -494,8 +494,8 @@ Traps met while building it:
 **One-line host health from `~/.bashrc`, read straight from `/proc` (no deps,
 works in any shell).** Check pressure before launching work on this shared
 workstation, which overloads (load has hit 102); the cause is the
-amply-gateway-restart-loop in `../engineering.md` §Do Not Let A Diagnostic Kill The
-Thing It Watches.
+amply-gateway-restart-loop in `../engineering.md` §Guards and diagnostics must not
+kill the job.
 
 | Util | Shows |
 |---|---|
@@ -505,5 +505,5 @@ Thing It Watches.
 
 Read `cpuload` per-core, not raw. A raw load of 20 is healthy on a 24-core box
 (0.83/core) and on fire on an 8-core one (2.5/core). It is meaningless without
-its denominator (`../engineering.md` §Communicating A Result). The util divides for
+its denominator (`../engineering.md` §Communicating a result). The util divides for
 you; trust `/core`, not the first column.

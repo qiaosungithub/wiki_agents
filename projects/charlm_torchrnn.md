@@ -3,36 +3,33 @@
 Character-level language modelling on tiny-shakespeare, reproducing
 **`jcjohnson/torch-rnn`**. The purpose is a credible dense-supervision LM
 setting in which to test this group's RNN mechanism work, whose home is the
-adding problem (`rnn_unroll_adding.md`).
+adding problem (`rnn_unroll_adding.md`). Two chapters carry what stays true —
+the setting and what each metric means (Chapter 1), and how to run research
+against it (Chapter 2) — and a third records what the experiments have found so
+far (Chapter 3).
 
-## The Setting Is Ambiguous Unless You Name The Repo
+---
 
-**"char-RNN" names at least five incompatible setups; say which one.** Their
-numbers share the unit (nats/char) and are not comparable.
+## Chapter 1 — The Setting And What The Metrics Mean
 
-| Repo | What it is | Why it differs |
-|---|---|---|
-| **`jcjohnson/torch-rnn`** (ours) | Adam, learned embedding, 0.8/0.1/0.1 sequential split | the line below |
-| `karpathy/char-rnn` | RMSprop 2e-3, one-hot, 0.95/0.05, no test split | different data AND optimiser |
-| `karpathy/min-char-rnn.py` | 100-line numpy vanilla RNN | no batching, no val split |
-| `salesforce/awd-lstm-lm` enwik8 | 3x1840 LSTM, 47M params, BPC 1.232 | a tuned recipe, 90M chars, 47 GPU-hours |
-| nanoGPT `shakespeare_char` | Transformer | same vocab, nothing else shared |
+### Which repo, and where everything is
 
-## Where Everything Is
+"char-RNN" is ambiguous on the web; the one we reproduce is
+**`jcjohnson/torch-rnn`** — Adam, a learned embedding, a 0.8/0.1/0.1 sequential
+split.
 
 | Thing | Path |
 |---|---|
 | Code | `~/work/charlm/` (`data_prep.py`, `data_loader.py`, `model.py`, `metrics.py`, `train.py`, `test_data.py`; unroll: `unroll_model.py`, `unroll_optimizer.py`, `unroll_util.py`, `site_probe.py`, `test_unroll.py`) |
-| Interpreter ON THE BOX | **`~/work/charlm/.venv/bin/python`** (a `--system-site-packages` venv; every cell on the tab ran under it, see `wandb-metadata.json` → `executable`). The bare `python3` has NO wandb and, started from `~/work/charlm`, imports the `./wandb` LOG directory as an empty namespace package: `AttributeError: module 'wandb' has no attribute 'init'` is that, not a broken install. |
-| Launchers | `run_official.sh` (torch-rnn default), `lu_d0.sh` (2026-09-05 dropout-0 unroll lr sweep: 3 lr x 4 seeds, 3 per GPU, 45 s stagger, DONE-marker skip) |
-| Upstream Lua mirror (read-only reference) | `~/work/torch-rnn-upstream/` |
-| Native docs | `~/work/charlm/README.md` — measured config table, deliberate divergences |
-| Launcher | `~/work/charlm/run_official.sh` (every flag spelled out, not inherited) |
-| Compute | the 4xA100 boxes; SSH in `../gcp_gpu_ssh.md`. Since 2026-09-06 `~/work/charlm` + `.venv` (system-site-packages, wandb 0.29.0, matplotlib, pytest) + prepared data exist on ALL THREE of `qiaos-4a100-3` (80GB, the main one), `qiaos-4a100` and `qiaos-4a100-2` (40GB, 2 unroll runs per card); code is copied by tarball from the cloudtop copy, so the cloudtop copy is the source of truth and md5s must match before a launch |
-| W&B | project `charlm-torchrnn-baseline`, entity zhh24-massachusetts-institute-of-technology |
+| Interpreter on the box | `~/work/charlm/.venv/bin/python` (see Chapter 2 for why the bare `python3` fails) |
+| Launcher | `~/work/charlm/run_official.sh` — the torch-rnn default, every flag spelled out, not inherited |
+| Upstream Lua mirror (read-only) | `~/work/torch-rnn-upstream/` |
+| Native docs | `~/work/charlm/README.md` — measured config table, deliberate divergences, exact logging keys |
+| Compute | the 4×A100 boxes (SSH in `../gcp_gpu_ssh.md`). `~/work/charlm` + `.venv` + prepared data live on `qiaos-4a100-3` (80GB, the main one), `qiaos-4a100` and `qiaos-4a100-2` (40GB). The cloudtop copy is the source of truth; md5s must match before a launch |
+| W&B | project `charlm-torchrnn-baseline`, entity `zhh24-massachusetts-institute-of-technology` |
 | Results tab | EqR workbook `17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0`, tab **`charlm-torchrnn (qiaos)`** (resolve BY TITLE) |
 
-## The Measured Configuration
+### The measured configuration
 
 Read out of upstream source, then recomputed locally. tiny-shakespeare is
 1,115,394 chars, vocab 65, sha256 `86c4e6aa9db7c042…`.
@@ -45,37 +42,34 @@ Read out of upstream source, then recomputed locally. tiny-shakespeare is
 | parameters (lstm L2 h128) | 243,969 |
 | uniform floor | 6.0224 bpc |
 | **train-unigram floor** | **4.7742 bpc** |
-| measured val bpc (official recipe, 4 seeds, best ckpt) | **2.5775 ± 0.0227 bpc** |
-| measured val acc (same) | **0.4987 ± 0.0090** |
+| baseline val bpc (official recipe, 4 seeds, best ckpt) | **2.5775 ± 0.0227 bpc** |
+| baseline val acc (same) | 0.4987 ± 0.0090 |
 | cost | ~1 min/seed on one A100-80GB (3.0 ms/step, 78 MB) |
 
 **Report against the unigram floor, not the uniform one.** A model that has
 learnt only letter frequencies already reaches 4.7742 bpc.
 
-## There Is No Official torch-rnn Validation Loss
+**There is no official torch-rnn validation loss — do not go looking for a
+target number.** The repo publishes only speed and memory over the first 100
+iterations. The baseline is what we measure, comparable only to runs on this
+same split. Do not import an lr or a schedule from `awd-lstm-lm` either: that is
+a tuned recipe (paper Table 6), but for a different dataset and model scale.
 
-**Do not go looking for a target number; the repo does not publish one.**
-Checked README, `doc/flags.md` and the issue tracker: the only published
-benchmark is **speed and memory over the first 100 iterations**. So the
-baseline is what we measure, and it is comparable only to runs on this same
-split. Also do not import an lr or a schedule from `awd-lstm-lm`: that one IS a
-tuned recipe (paper Table 6) but for a different dataset and model scale.
-
-## Splits, And What Selecting On val Costs
+### The split, and why `val` is "selected on" but not "trained on"
 
 The byte boundaries are upstream's; the roles are ours.
 
 | Slice | Role here | Upstream called it |
 |---|---|---|
 | first 80% | `train` | train |
-| middle 10% | **unused** (kept so the boundaries stay identical; `--eval_sel` to measure it) | val |
+| middle 10% | **unused** (kept so boundaries stay identical; `--eval_sel` to measure it) | val |
 | final 10% | **`val`** — never trained on; the online eval split | test (upstream never touches it) |
 
 **The checkpoint is selected by the lowest online val loss — upstream's own
 protocol — so `val` was never TRAINED on but WAS SELECTED on, and those are
-different claims.** Picking the best of ~18 checkpoints buys an optimistic bias.
-Since its size is not knowable in advance, both are logged and neither is
-derived from the other:
+different claims.** Picking the best of ~18 checkpoints buys an optimistic bias
+whose size is not knowable in advance, so three numbers are logged and none is
+derived from another:
 
 | Key | Model | Meaning |
 |---|---|---|
@@ -83,23 +77,24 @@ derived from the other:
 | `val_final/*` | model at the step budget | selection-free comparison |
 | `val_best_minus_final_bpc` | — | the bias, measured per run |
 
-**Never quote the headline without the bias term beside it.** Measured at this
-budget: **-0.0022 ± 0.0021 bpc**, negligible because the lr decays to 1.95e-6 and
-the model stops moving well before the end. That is a property of THIS schedule
-and must be re-checked whenever it changes.
-
-**Loss and accuracy do not peak at the same step, so a checkpoint chosen on loss
-is not the accuracy-optimal one.** Seed 2 selected at step 2000 on val loss and
-its val acc there is 0.4852, against 0.5039 for the final model — a 1.9-point
-drop invisible in the loss column. This is the concrete reason `val acc (final)`
-stays in the tab next to `val acc (best ckpt)`; a single accuracy column would
-report whichever the loss happened to pick.
+**Never quote the headline without the bias term beside it.** At this budget it
+is −0.0022 ± 0.0021 bpc, negligible because the lr decays to 1.95e-6 and the
+model stops moving well before the end — a property of THIS schedule, to be
+re-checked whenever it changes.
 
 `data_prep.py` carries `schema_version = 2` and refuses a directory written
-under the old `train/val/test` naming, where "val" was the middle slice:
+under the old `train/val/test` naming (where "val" was the middle slice);
 loading it silently would put every number on the wrong bytes.
 
-## Two Upstream Quirks Reproduced Deliberately, Both Behind Flags
+### Accuracy is a secondary metric
+
+**Judge a run by train and val loss; accuracy is a supporting signal only.**
+Loss and accuracy do not peak at the same step, so a checkpoint chosen on loss
+is not the accuracy-optimal one (one seed selected on loss read 0.4852 acc
+against 0.5039 for its final model). `val acc (best ckpt)` and `val acc (final)`
+both stay in the tab for that reason, but neither drives the verdict.
+
+### Upstream quirks reproduced deliberately, both behind flags
 
 * **`--adam_reset_on_decay 1`** (default): `train.lua` replaces the whole
   `optim_config` table on each decay, so **Adam's m/v are discarded every 5
@@ -108,26 +103,37 @@ loading it silently would put every number on the wrong bytes.
   norm clip. `norm` is what most modern code means by "grad_clip 5".
 
 The default schedule takes lr from 2e-3 to **1.95e-6 by epoch 50 (÷1024)**. For
-arm comparisons calibrated on `u_norm`, use a constant lr
-(`--lr_decay_factor 1.0`) and treat decay as its own variable.
+arm comparisons calibrated on `u_norm`, use a constant lr (`--lr_decay_factor
+1.0`) and treat decay as its own variable.
 
-## Known, Explained Divergences From Upstream
+### Known, explained divergences from upstream
 
 | Thing | Upstream | Here | Why |
 |---|---|---|---|
 | parameters | 242,945 | 243,969 | PyTorch `nn.LSTM` carries both `bias_ih` and `bias_hh` (+4H/layer). Arithmetic only. |
-| token ids | 1-indexed (Lua) | 0-indexed | bijection; loss identical, checkpoints NOT interchangeable |
+| token ids | 1-indexed (Lua) | 0-indexed | bijection; loss identical, **checkpoints NOT interchangeable** |
 | gate order | (i,f,o,g) | PyTorch (i,f,g,o) | only affects the forget-bias fill, written to the f-slice **by meaning** |
 
-## The Logging Pipeline (follow it; do not improvise a variant)
+---
 
-**One cell = one W&B group = 4 seeds = one spreadsheet row.** Every piece of
-that sentence is load-bearing.
+## Chapter 2 — Running Research Against This Line
 
-1. **Group routing lives in the launcher**, never in memory. A run launched
-   without an explicit `--wandb_group` inherits whatever the predecessor
+### Use the venv python on the box
+
+**On the box run `~/work/charlm/.venv/bin/python`** (a `--system-site-packages`
+venv; wandb 0.29.0, matplotlib, pytest). The bare `python3` has NO wandb, and
+started from `~/work/charlm` it imports the `./wandb` LOG directory as an empty
+namespace package: `AttributeError: module 'wandb' has no attribute 'init'` is
+that, not a broken install.
+
+### The logging pipeline — one cell = one W&B group = 4 seeds = one row
+
+Every piece of that sentence is load-bearing; do not improvise a variant.
+
+1. **Group routing lives in the launcher's `--wandb_group`, never in memory.** A
+   run launched without an explicit group inherits whatever the predecessor
    hardcoded and lands in someone else's group.
-2. **Stagger seed launches by >= 40 s.** Concurrent `wandb.init` handshakes time
+2. **Stagger seed launches by ≥ 40 s.** Concurrent `wandb.init` handshakes time
    out and kill seeds silently, while the card still reads busy.
 3. **Verify a launch by counting processes per seed**, matching on
    `/proc/*/cmdline` — never by the launcher's own `LAUNCHED` line, and never
@@ -135,173 +141,102 @@ that sentence is load-bearing.
    empty list that reads as success).
 4. **Harvest by GROUP, never by scanning a run list.** `api.runs(project)`
    returns only a recent window, so a scan reports 0 for a group that exists.
-   `~/work/charlm/harvest.py` does this and prints mean ± sd per column.
-5. **train loss is a TAIL-WINDOW MEAN** over the last 10 logged points, with the
-   step window quoted — never the single last sample, which carries full
-   batch-to-batch variance.
-   **The column is NATS, copied verbatim from `harvest.py`'s
-   `train loss (tail-mean)` line.** `train/bpc` is already bits, so dividing it
-   by ln 2 again is the double conversion that put the 2026-09-04 dropout x lr
-   grid on the tab at 2.08x its true value (2.70 "nats" for a 1.30 run), and the
-   unroll block of the same day was written from some other statistic that
-   nobody can reproduce. Both were rewritten on 2026-09-05 with `CORRECTED`
-   notes in the block headers. Cross-check any new train-loss cell against a
-   finished neighbour: a value above the val loss is not a training run that
-   underfits, it is a unit error.
-6. **Write the row** (next section), then read it back.
-7. **Use compact logging by default; do not confuse depth pairs with time
-   sites or merged-update alignment.** `train.py --logging_detail compact`
-   keeps the loss/BPC/validation-accuracy and best/final/reload contract,
-   actual `u_norm`, speed, and depth raw/Adam norms and pairwise cosine.
-   `--logging_detail full` enables the legacy prediction/hidden/spectral/site
-   diagnostics. Probe cadence is the run's `--probe_every` (CLI default 500;
-   existing sweep manifests explicitly use 100), with an extra probe at step 1.
-   Depth mode defaults to `--depth_cosine_depths 1,2,5,10`; log only available
-   individual depths and label the actual remainder `rest_gtD`, never G_(D+1).
-   Compare raw gradients from that training forward and actual current-step
-   Adam directions before weights/divisor/LR; decoder has no deeper pair.
-   `all_nondecoder` concatenates coordinates rather than averaging parameter
-   cosines. Undefined zero-norm pairs are null, not zero. Read the resolved
-   layout in W&B config; `charlm/README.md` owns exact keys and clipping semantics.
-   Time-mode site norms/shares retain offsets from the END (1=last timestep).
-   PNG/snapshots are opt-in (`--site_plot_every`, default -1); scalar depth
-   metrics do not depend on plots. Diagnostic failures must be visible without
-   aborting training. Never mutate historical W&B records or frozen deployments
-   merely to make them resemble the current logging schema.
+   `~/work/charlm/harvest.py` harvests by group and prints mean ± sd per column.
+5. **train loss is a TAIL-WINDOW MEAN** over the last 10 logged points (quote the
+   step window), never the single last sample. **The column is NATS, copied
+   verbatim from `harvest.py`'s `train loss (tail-mean)` line.** `train/bpc` is
+   already bits, so dividing it by ln 2 again is a double conversion — the bug
+   that once put a grid on the tab at 2.08x its true value. Cross-check any new
+   train-loss cell against a finished neighbour: a value above the val loss is a
+   unit error, not a training run that underfits.
 
-### The Row Format
+### Reading the verdict off the tab
+
+**Judge a run by its train loss and val loss relative to neighbouring rows** —
+there is no absolute target (Chapter 1). A run's headline is `val bpc (best
+ckpt)`; keep the `(final)` columns beside it as the selection-free comparison.
+
+### The row format
 
 Columns, in order: `config / run · seed n · train loss (tail-mean) · val loss
-(best ckpt) · val bpc (best ckpt) · val acc (best ckpt) · val loss (final) ·
-val acc (final) · wandb group · notes`. Every metric column is **`mean +- sd`
-over the 4 seeds**; a bare number in one of them is a bug, not a shorthand. The
-two `(final)` columns are not redundant: they are the selection-free comparison,
-and they are what reveals that loss and accuracy peak at different steps.
+(best ckpt) · val bpc (best ckpt) · val acc (best ckpt) · val loss (final) · val
+acc (final) · wandb group · notes`. Every metric column is **`mean +- sd` over
+the 4 seeds**; a bare number is a bug. Shared protocol goes in the **block header
+row, once**; per-row notes carry only what changes interpretation. The
+spreadsheet-write mechanics (the `gsheets --` trap, comma escaping, resolve-by-
+title, read-back) are generic and owned by `../research/result_logging.md`.
 
-Shared protocol goes in the **block header row, once** — never repeated per row.
-Per-row notes carry only what changes interpretation.
+### Logging detail
 
-`gsheets` traps that cost real writes here:
+Use `--logging_detail compact` by default; `full` enables the legacy
+prediction / hidden / spectral / site diagnostics. Diagnostic failures must be
+visible without aborting training, and historical W&B records must never be
+mutated to resemble the current schema. `charlm/README.md` owns the exact keys
+and clipping semantics.
 
-* **Pass cell values after `--`.** A value containing `/` or a leading dash is
-  otherwise parsed as a flag: the command prints its help text, returns rc=0,
-  and writes nothing. `Wrote 1 rows.` absent means the write did not happen.
-* **Escape commas as `\,`** — the CLI splits cells on `,` and rows on `|`.
-* **Resolve the tab by title.** The workbook holds dated backup tabs; a
-  remembered gid writes into a frozen snapshot nobody reads.
-* Read the range back and confirm each value landed in the intended column.
+---
 
-## The Double Last-Layer Dropout (found and fixed 2026-09-05)
+## Chapter 3 — What The Experiments Have Found
 
-**Every fused-baseline cell with `--dropout > 0` written before 2026-09-05
-dropped the LAST layer's output twice.** `CharLM` applied `self.drop` after
-every layer inside its layer loop, the last included, and then a second
-`final_drop` on the same tensor when `--final_dropout 1` -- keep probability
-(1-p)^2 on the decoder input: 0.25 for the blog recipe's p=0.5, 0.81 for the
-grid's p=0.1. Both upstreams drop each layer's output exactly once (torch-rnn
-adds `nn.Dropout` inside its per-layer loop, `LanguageModel.lua:58-60`; gpjt
-puts one Dropout on the LSTM output), and `UnrollCharLM` always did exactly
-that, so **the unroll-vs-baseline comparison at dropout 0.1/0.3 (rows 31-38
-vs 16-27) was confounded**: the baseline was more regularised than its label.
-Affected: blog rows 9-12 and grid rows 16-27 (+ their readings, rows 13 and
-28). Unaffected: torch-rnn rows 4-6 (dropout 0), all unroll rows. Fix:
-`final_dropout` now gates the single last-layer application in BOTH models
-(default 1 = the upstream behaviour); `test_dropout_is_applied_once_per_layer_output_in_both_models`
-counts the `F.dropout` calls. Reruns launched 2026-09-05 21:40Z by
-`lg_fix.sh` (64 runs, groups `grid_*_fixdrop_20260905`, `blog_*_fixdrop_20260905`);
-the reruns REPLACED rows 9-12 and 16-27 on 2026-09-05 23:4xZ (each row's note quotes
-its pre-fix value; readings 13/28 and the unroll verdict in the reading row carry
-`CORRECTED` / `RE-READ` paragraphs). What changed: the fix matters at high dropout
-(blog p=0.5: 2.5882 -> 2.5348, so the blog recipe now BEATS torch-rnn's default by
-0.043 instead of tying it; grid d0.4: 2.51-2.53 -> 2.49-2.51) and is inside noise at
-p=0.1 (2.5003/2.4801/2.4730 -> 2.5126/2.4807/2.4712). New best baseline cell:
-dropout 0.2 / lr 4e-4 = 2.4601+-0.0170 (row 21). The best unroll cell (row 31,
-2.4637+-0.0263) still ties it.
+### The question this line exists to answer
 
-The help text used to claim torch-rnn does not drop the last layer; it does.
+**Whether an unroll mechanism helps here is a NEW question, not a transfer of the
+adding-problem result.** The adding problem gives ONE supervised timestep, so
+early-step gradients vanish and merge-rule reweighting has something to fix.
+Char-LM supervises EVERY timestep and already runs truncated (`seq_length` IS the
+window), so that premise is weakened. The per-position loss profile (`pos/*`) is
+the readout: a flat curve means the carried state is doing the work.
 
-## Tab Layout Of The Unroll Block (after 2026-09-05)
+The mechanism code does not port for free: `unroll_util.py`'s zero-delta trick
+is written for a single-layer vanilla RNN's `W_hh`. An LSTM's `weight_hh_l0` is
+four stacked gate blocks, so its spectral norm is **not** the recurrent
+Jacobian's; `metrics.py` logs each gate block separately for that reason.
+`--model_type rnn` is the path that connects to the existing machinery.
 
-Rows 31-34 uniform weight (d0.1/d0.3 x lr 2e-4/4e-4), 35-37 uniform at dropout 0
-(lr 2e-4/3e-4/4e-4), 38-39 the MEAN divisor control (`--unroll_mode mean`, divide
-by sum w = n: lr 2e-4 still running toward the 200-epoch cap, lr 2e-3 = 2.5154
-reproduces the sqrt cell at lr 2e-4), 40-41 per-site clip 0.02 on the row 31/32
-recipe (`--site_clip`: neutral at lr 2e-4, +0.015 inside sd; never fires at lr
-4e-4 where it is a pure seed replicate of row 32), 42-45 the 1/i weight, 46 the
-reading. Rows were inserted with `insert-rows --range`, which shifts everything
-below intact. The DEPTH-site sweep (`--site_index depth --depth_max {4,16,100}`,
-lr 2e-4/4e-4, dropout 0.1, groups `unroll_depth<d>_d0.1_lr<lr>_20260905`) was
-launched 2026-09-05 23:3xZ by `lu_depth.sh` and is not on the tab yet.
+### Best cells so far
 
-## Depth Sites: What Happened On The First Night (2026-09-05/06)
+- **Overall best: 1/depth `d_max=4` = 2.4242 ± 0.0139 bpc** (lr 2e-4).
+- Baseline best: dropout 0.2 / lr 4e-4 = 2.4601 ± 0.0170.
+- Best time-site unroll: 2.4637 ± 0.0263 — ties the baseline.
 
-`--site_index depth --depth_max D` (`depth_sites.py`, exact VJP recurrence,
-dropout masks replayed via `UnrollCharLM.forward(masks=...)`): depths 1..D are
-sites, plus one remainder site. Measured on the 80GB box, 5 runs per card:
-d_max=4 is FASTER than time sites (5 Adam sites instead of 100), 16 is ~1.5x,
-100 is ~3.6x slower per step. **Uniform weight over depth bands fails at
-D=100**: after 4 epochs val sat at 4.85 bpc, the unigram floor, in all 8 seeds
-(stopped). Deep bands carry no signal but per-band Adam normalizes them to
-O(1), so the merge is ~95 noise directions against ~5 signal ones. D=16
-learned ~5x slower per epoch than time sites; D=4 at lr 4e-4 tracked time
-sites at lr 2e-4 (a ~2x effective-lr shift from divisor sqrt(5) vs sqrt(100)).
-The operator's answer is `--depth_weight inv_depth` (band b gets 1/b, orthow
-divisor sqrt(sum 1/b^2)): groups `unroll_depthinv{100,16,4}_d0.1_lr{2e-4,4e-4}_20260906`,
-results (logged 2026-09-06 as the DEPTH SITES block, tab rows 49-62): **1/depth
-d_max=4 = 2.4242+-0.0139 bpc (lr 2e-4), the best cell on the tab**, 0.036 below
-the fixed baseline's best (2.4601) and 0.040 below the best time-site cell
-(2.4637), ~2 pooled sd; 1/depth d_max=16 = 2.4500/2.4504, d_max=100 =
-2.4285/2.4297 (band count is irrelevant once deep bands are down-weighted); uniform d_max=4 =
-2.4728/2.4478, uniform d_max=16 = 2.6020/2.5726 (noise-diluted), uniform
-d_max=100 stuck at the unigram floor (stopped). The weight on the deep bands
-matters more than the band count; 1/depth prefers lr 2e-4, uniform d_max=4
-prefers 4e-4 (divisor 1.21 vs 2.2). Cost: d_max=4 is faster per step than time
-sites and holds 5 Adam sites instead of 100. Dropout 0.2 / lr 4e-4 for the
-time-site arm (rows 42-43): sqrt 2.4925, mean 2.5208, both worse than dropout
-0.1 / lr 2e-4, so the time-site arm does not want the baseline's dropout.
+### Per-site alignment: the divisor is sqrt(n) late, ~n early
 
-## Per-Site Alignment: Why The Divisor Is sqrt(n) Late And ~n Early
+The per-site merge divides the summed update by a divisor that keeps the merged
+vector at one site's norm: `d* = ||sum_i x_i|| / rms_i ||x_i||`, which is sqrt(n)
+if the sites are orthogonal and n if they are aligned (n = 100 here).
 
-`analyze_site_align.py` (run on the box with the venv python, read-only) takes
-a checkpoint, the raw per-site gradients on a few train batches and the per-site
-Adam updates rebuilt from the checkpoint's `site_opt` moments, and reports the
-pairwise cosine structure plus **d\* = ||sum_i x_i|| / rms_i ||x_i||**, the
-divisor that keeps the merged vector at one site's norm (sqrt(n)=10 if the
-sites are orthogonal, n=100 if aligned). Measured 2026-09-05 (C=100):
+**Once training has settled the sites are near-orthogonal (`d*` ≈ 11–25), so the
+sqrt(n) divisor is about right; at init they are aligned (mean cos 0.84–0.90,
+`d*` 78–94), so sqrt(n) is ~9x too small.** `--unroll_mode mean` (divide by
+sum w = n) exists for that early aligned regime. A finer per-(site, loss)
+decomposition of `w_hh_0` is essentially orthogonal (mean cos ~0.001); only
+same-loss terms of adjacent sites align (cos 0.22 at lag 1), so site t's gradient
+is a sum of ~(C−t) near-orthogonal pieces, which is why the raw norm grows toward
+the front of the window.
 
-| where | raw site grads g | per-site Adam updates u |
-|---|---|---|
-| seed-0 INIT | mean cos 0.84-0.90, d\* 78-94 (aligned) | no state yet |
-| trained, dropout 0, lr 2e-4 (final) | mean cos 0.02-0.06 (b_0 0.14), d\* 17-25 (b_0 38) | mean cos ~0.01, **d\* 11.5-14.6** (b_0 19) |
-| trained, dropout 0.1, lr 2e-4 (09-04 cell) | d\* 15-19 (w_hh_2 37) | d\* 10.6-13.5 (b_0 19) |
+### Depth sites: deep bands must be down-weighted
 
-So the sqrt(n) divisor is about right once training has settled (the merged
-update is 1.2-1.5x one site's, 1.9x for the bias), and ~9x too small at the
-start, when every site pushes the same way. The finer per-(site, loss)
-decomposition of `w_hh_0` (5050 terms) is essentially orthogonal: mean cos
-0.001 overall and 0.001 within a site across losses; only same-loss terms of
-adjacent sites align (cos 0.22 at lag 1, <0.02 past lag 10). Site t's gradient
-is therefore a sum of ~(C-t) near-orthogonal pieces, which is why the raw
-norm grows toward the front of the window. `--unroll_mode mean` (divide by
-sum w = n) exists for the aligned regime; groups
-`unroll_unmean_d0_lr{2e-4,2e-3}_20260905` are its first test.
+`--site_index depth --depth_max D` makes depths 1..D sites (plus one remainder),
+via an exact VJP recurrence with dropout masks replayed. Cost: `d_max=4` is
+faster than time sites (5 Adam sites instead of 100), 16 is ~1.5x, 100 ~3.6x
+slower per step.
 
-**Dropout 0 for the uniform arm (rows 35-37, 2026-09-05)** is worse than 0.1
-at every lr (2.5040-2.5401 bpc vs 2.4637), best lr 3e-4, early stop at 22-35
-epochs; the no-unroll dropout-0 point is still untested.
+**Uniform weight over depth bands FAILS at D=100** — val sits at the unigram
+floor (4.85 bpc) in every seed, because the deep bands carry no signal but
+per-band Adam normalizes them to O(1), so the merge is ~95 noise directions
+against ~5 signal ones. **The fix is `--depth_weight inv_depth`** (band b gets
+1/b, ortho divisor sqrt(sum 1/b²)): it yields the best cell on the tab, and the
+weight on the deep bands matters more than the band count.
 
-## Open Question This Line Exists To Answer
+### The double last-layer dropout bug (rule)
 
-The adding problem gives **one** supervised timestep, so early-step gradients
-vanish and merge-rule reweighting has something to fix. Char-LM supervises
-**every** timestep and already runs truncated (`seq_length` IS the window), so
-the premise is weakened. Whether any unroll mechanism helps here is therefore a
-NEW question, not a transfer of the adding-problem result. The per-position loss
-profile (`pos/*`) is the readout: a flat curve means the carried state is doing
-the work.
-
-Note the mechanism code does not port for free — `unroll_util.py`'s zero-delta
-trick is written for a single-layer vanilla RNN's `W_hh`. An LSTM's
-`weight_hh_l0` is four stacked gate blocks, so its spectral norm is **not** the
-recurrent Jacobian's; `metrics.py` logs each gate block separately for that
-reason. `--model_type rnn` is the path that connects to the existing machinery.
+**Each layer's output must be dropped exactly once; `final_dropout` (default 1 =
+upstream behaviour) gates the single last-layer application in BOTH models.**
+Before the fix, `CharLM` with `--dropout > 0` dropped the last layer twice (once
+inside the layer loop, once as `final_drop`), giving keep probability (1−p)² on
+the decoder input and silently over-regularising the baseline relative to its
+label — which confounded the unroll-vs-baseline comparison at dropout 0.1/0.3.
+Both upstreams drop each layer's output once, and `UnrollCharLM` always did too.
+`test_dropout_is_applied_once_per_layer_output_in_both_models` counts the
+`F.dropout` calls. The fix matters at high dropout (blog p=0.5: 2.5882 → 2.5348)
+and is inside noise at p=0.1.

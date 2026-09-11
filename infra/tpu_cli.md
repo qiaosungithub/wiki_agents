@@ -117,6 +117,37 @@ stop everything running on it; the partial view belongs to the guest.
 `scripts/test_operator_scope.sh` pins all of it, with `xmanager` and `tmux`
 shadowed by shell functions so it touches nothing real.
 
+## Serializing Heavy Verbs: Separate Blaze And Hg Locks
+
+**Keep Blaze serialization separate from Hg status.** The PATH shims delegate to
+`~/.tpu_bin/serialize_heavy.sh`. Only Blaze takes `/tmp/host_heavy.<uid>.lock`;
+Hg goes through `hg_status_guard.py` and its own `/tmp/hg_status.<uid>.lock`.
+Sharing one lock let a single `hg status` block builds for 23 minutes. Neither
+gate may reuse `/tmp/tpu_build.host.lock`, which covers an entire launch
+including upload. Children do not inherit either lock; `TPU_SERIAL_HEAVY=0` opts
+out. Status/st preserves native arguments, stdout, stderr and exit codes; rejects
+a concurrent status query with exit 75; times out at 120s with exit 124; and
+imposes a per-workspace five-minute cooldown after a timeout. Do not read any
+nonzero status result as a clean tree, and resolve the real executable from a
+cached absolute path, since a PATH walk may itself stall on CitC.
+
+**The shim must not swallow stderr.** `exec 210>"$LOCK" 2>/dev/null` reads as
+"quiet the fd-210 open", but `exec` with no command applies EVERY redirection to
+the shell permanently, and to whatever it execs — so blaze's progress stream, its
+"another command is running" notice, and the dbip link vanish, and a build
+stalled on a CitC snapshot is indistinguishable from a frozen terminal.
+Brace-group it: `{ exec 210>"$LOCK"; } 2>/dev/null`. Test each gate with a command
+guaranteed to fail on stderr (for Hg, status outside a repo); a shim that prints
+nothing there is swallowing.
+
+**Fig status is not necessarily read-only.** Its native auto-widen step scans the
+entire CitC manifest before applying the file filter and may write tracking
+metadata (one failing workspace repeatedly tried to add 1,813 directories, most
+from historical build staging). Adding `.` or ignoring untracked files does not
+bypass it. Keep generated staging in a separate non-Fig workspace (the launcher
+defaults to `clip_probe`); do not delete Fig metadata or restart shared srcfs to
+make status fast.
+
 ## The Cache Daemon
 
 Status commands read a cache file, so they are instant; the background daemon
@@ -288,8 +319,8 @@ workstation limitation only, and a job writes fine; use the browser URLs in
 Two things share this core: the default smart cell pick every `tpu queue` now
 does (`pick_cell`), and the advanced local queue that drains unlimited enqueues
 with auto-reroute (`route_check` / `queue_cli`). User-facing workflow is
-`../jobs/submit.md` §Choosing Where To Run (the default) and §The Local Queue
-(advanced). Neither replaces the one-shot `tpu queue`; the picker only pins a
+`../jobs/submit.md` §The smart router picks the cell and the group (the default)
+and §The two queues and the serial build-worker. Neither replaces the one-shot `tpu queue`; the picker only pins a
 `--cell` onto it. Modules in the google3 half, each a `pytype_strict_library`
 with its own `pytype_strict_contrib_test`:
 
@@ -390,7 +421,12 @@ unlocked rather than blocking forever, and `flock` auto-releases on process
 death, so a killed `tpu queue` never wedges it. The exception is a holder wedged
 in FUSE-D (`request_wait_answer`): it cannot die on SIGKILL, so killing it does
 not release its `flock`, and only an srcfs restart's EIO-bounce frees the lock
-(`../engineering.md` §External Writes Are Transactions). This lets an operator
+(`../engineering.md` §External writes are transactions). That restart is fleet
+control-plane and operator-owned, so before reaching for it note that the CLI's
+own locks already degrade after their `-w` window: a wedged holder costs each
+waiter at most ~30 min, not the fleet. Detect a convoy by the held lock plus its
+waiters, not by an aggregate D-count, which misses a one-orphan convoy. This lets
+an operator
 fire jobs through any mix of paths without hand-coordinating a stage storm; the
 earlier hand-serialization advice is now the fallback, not the
 mechanism.

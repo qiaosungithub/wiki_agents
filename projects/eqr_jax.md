@@ -80,14 +80,14 @@ discipline `../research/result_logging.md`.
   the board diagonal). A rebuild needs PaliGemma's half-width `[row(q),
   col(q)]`-then-DUPLICATE layout; plain 1-D `rope` is fine with a prefix.
 - **Never sync a file between the two checkouts wholesale** (`../engineering.md`
-  §Porting Between Related Checkouts). This repo lost `_online_eval` from
+  §Porting between related checkouts). This repo lost `_online_eval` from
   `train.py` that way while nine yamls kept setting `evaluation.online_eval`.
 
 ## Launch And Packaging
 
 - **Edit the unrestricted home checkout, launch from a `/tmp` copy.** Packaging
   is a unique CitC snapshot, so post-package edits never reach the job, and
-  several agents share the checkout (`../jobs/submit.md` §Submission Contract).
+  several agents share the checkout (`../jobs/submit.md` §The launcher, config, and packaging).
   `rsync -aL` the tree minus `.git`/`data`/`logs`, write the config there, then
   `tpu enqueue` *from* that copy: the default serial path (`../jobs.md`), which
   records the copy as the entry `workdir`. `-aL` is required because
@@ -96,7 +96,7 @@ discipline `../research/result_logging.md`.
   queue-status` shows SUBMITTED) — a `workdir` that vanishes before its turn is
   parked HELD, not packaged.
 - Write the run into `configs/remote_run_config.yml` and launch without a config
-  argument (`../jobs/submit.md` §Submission Contract). EqR-jax consequence: `configs/`
+  argument (`../jobs/submit.md` §The launcher, config, and packaging). EqR-jax consequence: `configs/`
   holds only templates (`local_debug`, `remote_run`, per-task); recover a
   finished experiment's config from its snapshot with `sexy <xid>`. Launching by
   config name leaves a file behind.

@@ -6,7 +6,14 @@ means. `../research/result_logging.md` owns the write mechanics, the "settle the
 protocol first" rule, and every column map — rebuild that map from the live
 header each time.
 
-## One Benchmark Name, Several Numbers
+Chapter 1 is what each score means and its floor; Chapter 2 is how to report one
+on the VLM tab.
+
+---
+
+## Chapter 1 — What Each Score Means
+
+### The number that counts, per benchmark
 
 **Report the variant named here; the alternatives are different numbers, not
 rounding.** Pretraining rows take stage-1 final metrics, SFT rows stage-2 final
@@ -23,14 +30,15 @@ metrics: two adjacent rows even when one run covers both stages.
 | DocVQA | ANLS per `vlm_data.md`. Stage-3 training already includes DocVQA-train through the OV1.5 grouped stream, so this is in-domain supervised evaluation, never zero-shot document generalization | — |
 | RefCOCOg valid answers | a diagnostic: note it when already logged, else `n/a`; never open result data solely to compute it | — |
 
-**Red on a metric means strictly below its own floor above; red on a label means
-a verified encoder misconfiguration.** Each floor is protocol-specific, so one
-borrowed from a neighbour raises false alarms. Those are two different signals,
-and inserting a row inherits both: clear inherited backgrounds before reapplying
-either. A result under a superseded protocol is marked
-protocol-invalid instead, never scored against a floor.
+### Floors are protocol-specific
 
-## The Colour Table Of The VLM Tab
+**Each floor is protocol-specific, so one borrowed from a neighbour raises false
+alarms.** A result under a superseded protocol is marked protocol-invalid, never
+scored against a floor.
+
+---
+
+## Chapter 2 — Reporting A Result On The VLM Tab
 
 **This file is the canonical owner of what a background colour means on the VLM
 tab.** `../research/result_logging.md` owns the write mechanics and the "clear
@@ -50,7 +58,9 @@ it for every row that used it correctly.
 
 Scope job-level signals to the identity column and value-level signals to the
 metric cell, so two true statements never contend for one background. Red is
-about a number, blue is about the run that produced it, and `WandB / run`
-already identifies the run. Verify a colour by reading it back: export the
-workbook to xlsx and resolve each cell's `fillId` against `styles.xml`. That
-shows every colour in use, and whether one is free before you claim it.
+about a number, blue is about the run that produced it, and `WandB / run` already
+identifies the run. Inserting a row inherits both the metric and label
+backgrounds; clear them before reapplying either. Verify a colour by reading it
+back: export the workbook to xlsx and resolve each cell's `fillId` against
+`styles.xml`. That shows every colour in use, and whether one is free before you
+claim it.

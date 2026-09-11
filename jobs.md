@@ -6,8 +6,8 @@ accelerator naming and shapes, `infra/` the market, allocator, and CLI
 internals. Read those only when the rules here do not explain what you see.
 
 **Before you submit anything after a large code change, run the CPU
-`local_debug` path first** (`engineering.md` §Debug Locally On CPU Before You
-Spend A Remote Round Trip). A build plus a queue wait plus a schedule is the
+`local_debug` path first** (`engineering.md` §Local debug, then remote, before a
+real run). A build plus a queue wait plus a schedule is the
 expensive way to find a bug a workstation finds in two minutes.
 
 This is a hub. The detail lives in `jobs/`, one file per lifecycle phase; read

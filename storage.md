@@ -247,7 +247,7 @@ A bulk sweep must carry a known-missing row. One path at a time a human notices
 the error text, but a `for cell in ...` loop compresses each answer to one word
 and hides the broken predicate. Include a path you know is absent and require it
 to report absent: the sweep is evidence only once its negative control has fired
-(`engineering.md` §A Test That Cannot Fail).
+(`engineering.md` §A test that cannot fail proves nothing).
 
 An absent tree is also not the same shape as an empty one. `.../data/` listing
 nothing can mean the directory is empty *or* that its parent never existed. The

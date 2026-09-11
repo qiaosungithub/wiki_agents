@@ -5,27 +5,34 @@ Read this when changing training, checkpointing, resume, or evaluation code in
 and benchmark mirrors: `vlm_data.md`. Reporting a result: `vlm_metrics.md`.
 Current code and native configs outrank this file.
 
-## Contract
+Chapter 1 is how training, checkpointing, resume, and eval work; Chapter 2 is
+running and verifying a change; Chapter 3 is the silent-correctness traps that
+report healthy while the result is wrong.
 
-- **Type 1 checkouts** (`README.md`, `../storage.md`): data, checkpoints, and
-  compute in one region. Validate locality before listing or opening a payload;
-  fail fast on a missing path.
-- Keep each checkout's execution model. A pmap checkpointing pattern may be
-  wrong for a globally sharded JIT/HSDP TrainState; a port keeps each side's
-  sharding, dependency, and initialization choices.
+---
+
+## Chapter 1 — How Training, Checkpointing, Resume, And Eval Work
+
+### The checkout contract
+
+**A VLM checkout is a Type 1 payload — data, checkpoints, and compute in one
+region — and keeps its own execution model.** Validate locality before listing or
+opening a payload, and fail fast on a missing path (`README.md`,
+`../storage.md`).
+
 - The staged config is the experiment definition. WandB and the spreadsheet
   record what ran; old row numbers and incident job ids are not architecture.
-- Name the concern before changing code (model semantics, mesh/batch, data
-  stream, checkpoint transaction, stage transition, final eval). Then exercise
-  it with the smallest smoke test hitting the real path, and read the logs and
-  produced state. A clean process exit proves nothing.
+- A pmap checkpointing pattern may be wrong for a globally sharded JIT/HSDP
+  TrainState; a port keeps each side's sharding, dependency, and initialization
+  choices.
 
-## Mesh, Model, And Data Stream
+### Mesh, model, and data stream
 
-- **Process-local batch shape comes from the data mesh axes only**: the last
-  mesh axis is the model axis, not data parallelism. Shard explicitly and
-  mesh-aware for activation constraints and checkpoint restore; no mesh context
-  is guaranteed during shape evaluation.
+**Process-local batch shape comes from the data mesh axes only: the last mesh
+axis is the model axis, not data parallelism.** Shard explicitly and mesh-aware
+for activation constraints and checkpoint restore; no mesh context is guaranteed
+during shape evaluation.
+
 - Never materialize full vocabulary logits where a hidden-space token loss
   exists, and never gather a full sharded TrainState onto every host.
 - Deliberate model behavior stays unless the task changes it: prompt-causal
@@ -40,7 +47,7 @@ Current code and native configs outrank this file.
 - WebDataset shuffle state is expensive to serialize; align snapshot cadence
   with durable checkpoints unless explicitly testing replay.
 
-## Checkpoints, Stage Boundaries, Final Eval
+### Checkpoints, Stage Boundaries, Final Eval
 
 **A checkpoint counts only after four steps, in order.** Every process writes
 pending dataloader state; the model/optimizer checkpoint completes under the
@@ -66,41 +73,24 @@ marker, never a `Saving` line or a sidecar path.
   never read a remote bucket. Roots, mirror validation, exact-count rules, and
   Stage-3 final eval scoring (DocVQA, RealWorldQA) are in `vlm_data.md`.
 
-## Distributed Eval And Mesh: The Silent-Correctness Traps
+---
 
-Two migration bugs each left a run converging and reporting healthy while the
-result was wrong. Nothing failed, so nothing flagged them.
+## Chapter 2 — Running And Verifying A Change
 
-- **A distributed eval must ask the sharding which global rows each rank owns;
-  never assume `PROC_INDEX * B`.** The generation step returns the global
-  gathered batch (`local_B * num_proc` rows), but a host-local
-  `zip(batch["aux"], out_strs, batch["is_pad"])` stops at the shortest. So every
-  rank silently scored `out_strs[0:local_B]`, process 0's answers. Ranks 1..N
-  then score at chance and the pooled number collapses (VQAv2 read 16.84 vs
-  67.63) while teacher-forced train acc still matches to -0.0003 — collapsed
-  eval with a perfect training curve is the diagnosis: the bug is in the
-  autoregressive path, not the model. The separating probe is per-rank accuracy;
-  a global offset-shift test reads as "alignment fine". Invert the placement
-  from the sharding and raise on a row-count mismatch.
-- **An unknown accelerator in the mesh table must fail loud, not fall back to a
-  flat 1-D mesh.** `get_mesh()` looked `device_kind` up in a `TOPOLOGIES` table
-  and, on no match, silently built a `(N,)` mesh meant for CPU/GPU debug. v7 was
-  missing, so every param sharded across all devices and every matmul paid a
-  full-mesh collective. That is 7x slower but correct, so it survived a full
-  production run. A fallback that preserves correctness is the hardest bug to
-  see. Make `get_mesh` warn on an unknown kind, and probe the mesh a real slice
-  builds.
-  Register v7 by its `device_kind` — `tpu7`, not `v7`; the wrong key looks like
-  a fix and changes nothing (`../tpu_reference.md`).
+### Exercise the real path before you trust it
 
-## Telemetry Goes To The Checkpoint Bucket, Never `workdir`
+**Name the concern before changing code, then exercise it with the smallest
+smoke test that hits the real path.** The concerns are model semantics,
+mesh/batch, data stream, checkpoint transaction, stage transition, and final
+eval. Read the logs and the produced state; a clean process exit proves nothing.
 
-**`$CHECKPOINT_BUCKET` is the only location outliving the task**; `workdir` on a
-TPU worker is the task's own tmpfs. Scalars survive through the datatable.
+### Getting telemetry out and reading it back
+
+**`$CHECKPOINT_BUCKET` is the only location outliving the task; `workdir` on a
+TPU worker is the task's own tmpfs.** Scalars survive through the datatable.
 Images written via `Writer.write_images` do not survive on Borg in either
 `jax_llava` or `PaliGemma-baseline`: all three sinks are dead there — google3
-`wandb` mock, tensorboard refused at construction, PNG fallback under
-`workdir`.
+`wandb` mock, tensorboard refused at construction, PNG fallback under `workdir`.
 
 - Create the destination directory first; CNS refuses a write into a missing
   parent. Swallow telemetry failures, which must never kill a run. Verify:
@@ -108,8 +98,41 @@ Images written via `Writer.write_images` do not survive on Borg in either
   `logs/`.
 - `http://flatboard/xid/<XID>` renders scalars only; images are at
   `http://datatable/xid/<XID>/viz`. Read scalars back from the workstation per
-  `../research/result_logging.md` §Reading The Curves From The Workstation
-  (the bucket first, then `gbrowser --corp screenshot`); read images with
-  `fileutil cp` from `$CHECKPOINT_BUCKET/viz/`. Images sent to a datatable
-  need their own table; large arrays interleaved into the scalar table make
-  flatboard unusably slow even when nobody opens it.
+  `../research/result_logging.md` §Reading The Curves From The Workstation (the
+  bucket first, then `gbrowser --corp screenshot`); read images with
+  `fileutil cp` from `$CHECKPOINT_BUCKET/viz/`.
+- Images sent to a datatable need their own table; large arrays interleaved into
+  the scalar table make flatboard unusably slow even when nobody opens it.
+
+---
+
+## Chapter 3 — Silent-Correctness Traps
+
+Two migration bugs each left a run converging and reporting healthy while the
+result was wrong. Nothing failed, so nothing flagged them.
+
+### A distributed eval must place rows by the sharding, not by rank index
+
+**A distributed eval must ask the sharding which global rows each rank owns;
+never assume `PROC_INDEX * B`.** The generation step returns the global gathered
+batch (`local_B * num_proc` rows), but a host-local
+`zip(batch["aux"], out_strs, batch["is_pad"])` stops at the shortest, so every
+rank silently scored `out_strs[0:local_B]`, process 0's answers. Ranks 1..N then
+score at chance and the pooled number collapses (VQAv2 read 16.84 vs 67.63)
+while teacher-forced train acc still matches to -0.0003. Collapsed eval with a
+perfect training curve is the diagnosis: the bug is in the autoregressive path,
+not the model. The separating probe is per-rank accuracy; a global offset-shift
+test reads as "alignment fine". Invert the placement from the sharding and raise
+on a row-count mismatch.
+
+### An unknown accelerator in the mesh table must fail loud
+
+**An unknown accelerator in the mesh table must fail loud, not fall back to a
+flat 1-D mesh.** `get_mesh()` looked `device_kind` up in a `TOPOLOGIES` table
+and, on no match, silently built a `(N,)` mesh meant for CPU/GPU debug. v7 was
+missing, so every param sharded across all devices and every matmul paid a
+full-mesh collective. That is 7x slower but correct, so it survived a full
+production run; a fallback that preserves correctness is the hardest bug to see.
+Make `get_mesh` warn on an unknown kind, and probe the mesh a real slice builds.
+Register v7 by its `device_kind` — `tpu7`, not `v7`; the wrong key looks like a
+fix and changes nothing (`../tpu_reference.md`).

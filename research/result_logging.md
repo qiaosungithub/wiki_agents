@@ -4,7 +4,7 @@ Owns writing a result into a project's shared experiment spreadsheet, finding
 a job's chart, and reading a job's curves back from the workstation (§Reading
 The Curves From The Workstation). Per-tab column semantics: `../projects/vlm_metrics.md`,
 `../projects/eqr_jax.md`. "A number is meaningless without its protocol":
-`../engineering.md` §Communicating A Result. **Read this every time you log**: a
+`../engineering.md` §Communicating a result. **Read this every time you log**: a
 wrong row or column looks like a right one and nothing errors. Write via the
 `gsheets` CLI (`/google/bin/releases/gemini-agents-gsheets/gsheets`) and its
 skill, never by scraping the URL.
@@ -295,7 +295,7 @@ reformatting or structural cleanup, unless the user authorizes editing the
 original.
 
 The recurring failure is two numbers that look alike and mean different things;
-`../engineering.md` §Communicating A Result owns the general rule. Five things
+`../engineering.md` §Communicating a result owns the general rule. Five things
 decide whether a value may enter a row:
 
 | Settle | Because |
