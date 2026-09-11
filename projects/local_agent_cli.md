@@ -216,10 +216,11 @@ usually needs the server back, not `amp start`.
 **Give the gateway a cwd in `~/work`, not in the citc workspace, and this
 cannot recur.** `blaze run` forces the workspace cwd on it; running the
 already-built binary directly (below) does not. Note who creates the hazard:
-`.monitor_watch/srcfsd_wedge_sentinel.sh` auto-restarts srcfs on its convoy and
-D-count triggers, and prints a warning that the gateway's cwd was just severed
-— but nothing consumes that warning, which is exactly how the 2026-09-01
-outage began.
+the srcfs convoy sentinel used to auto-restart srcfs on its convoy and D-count
+triggers and print a warning that the gateway's cwd was just severed — but
+nothing consumed that warning, which is exactly how the 2026-09-01 outage began.
+(That sentinel was retired with the monitor mechanism on 2026-09-10; see the
+note at the gateway-watchdog paragraph below.)
 
 **`amply-launch` now does this itself** (`~/.bashrc` `_amply_blaze`, rewritten
 2026-09-01), so the one-line revive in the tmux pane is enough and the `cd` in
@@ -433,9 +434,14 @@ back. Audit by hand with `fix_manifest.py --check` (exit 1 means a repair is
 due). The 2026-09-07 repair receipts and the pre-fix MANIFESTs are in
 `~/.monitor_prompts/amply_repair_20260907T1924/`.
 
-**A gateway watchdog cannot fix a dead database, so it now checks both.**
-`~/work/.monitor_watch/watchdog_selfheal.sh` (cron, every 2 min) probed only the
-gateway. Through those 2h11m it therefore restarted the GATEWAY eleven times,
+**A gateway watchdog cannot fix a dead database, so it now checks both.** The
+ops watchdog is `~/.tpu_bin/tpu_ops_watchdog.sh` (cron `*/2`, lock
+`/tmp/tpu-ops-watchdog.lock`), relocated and slimmed from the retired
+`~/work/.monitor_watch/watchdog_selfheal.sh` on 2026-09-10 when the monitor
+mechanism was retired; it now supervises ONLY the TPU pipeline + amply infra
+(amply-localdb, gateway, tpu-check-daemon, dispatch worker, budget_enforcer) and
+no longer starts any monitor alert loop. Its logs are in `~/.tpu_bin/logs/`. The
+earlier version (cron, every 2 min) probed only the gateway. Through those 2h11m it therefore restarted the GATEWAY eleven times,
 each new one pointed at a database that did not exist, and reported nothing about
 the thing that was actually broken. It now also reads `amply-localdb.service`'s
 `ActiveState` and, on `failed` or `inactive` only, issues `reset-failed` +

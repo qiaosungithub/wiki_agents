@@ -30,7 +30,7 @@ ssh all need it. `gcloud auth list` shows the copied accounts; keep passing
 | Thing | `sqa-large` | `sqa` |
 |---|---|---|
 | Amply: `amply-localdb.service` + `amply-ux.service` | running; gateway URL in `~/.amply/dashboard_url` (port 44127 on 2026-09-08; it picks its own) | stopped |
-| crontab (44 active lines: sentinels, watchers, dispatch loops) | installed | removed (copies under `~/migrate_backup_20260907_175207/system/`) |
+| crontab (19 active lines after the 2026-09-10 monitor retirement; was 44) | installed | removed (copies under `~/migrate_backup_20260907_175207/system/`) |
 | tmux `npu-daemon`, `tpu-dispatch`, `tpu-reroute`, `tpu-build-worker`, `npu-build-worker` | running, one `route_check` per role | killed |
 | `tpu_utils` binaries | `/usr/local/google/_blaze_qiaos/c99224759024385897e236938d1772c2_buildrabbit/...` (+ compat symlink `bb5e05891304127daf0b480f4298d971_buildrabbit` for `tpu_reroute_loop_v17.sh`, which hardcodes that root) | old roots, no longer used |
 | `jetski-hub.service` | **kept inactive on purpose** (see below) | running |

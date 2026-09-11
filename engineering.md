@@ -582,6 +582,17 @@ processes' scratch and launcher logs live there.
 Several agents committing into one checkout lose each other's work in ways that
 look like tool corruption.
 
+- **In an autonomous run you are one of the worker processes in the table, so
+  tell your OWN worker from a PEER before you react to it.** A
+  `claude-amply.py new [<task>]` process whose task is the one you were asked to
+  do is your own run's worker, not a peer racing you; match on the argv task
+  name, and note its start time roughly coincides with your session's creation.
+  Mistaking it for a stranger doing "the same task" turned work that was simply
+  mine into an A/B/C decision handed back to the operator instead of getting
+  done. A genuinely separate sibling editing the same files (a different
+  `[task]`, different functions) is the case the rest of this section covers:
+  relocate your edit around its uncommitted hunk and proceed, rather than
+  stopping to ask.
 - **`git commit -- <pathspec>` IGNORES THE INDEX.** It re-reads those paths from
   the working tree, so a peer's uncommitted hunk in a file you also touched
   lands in your commit however carefully you staged. Put the pathspec on
