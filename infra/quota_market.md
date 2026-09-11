@@ -7,7 +7,7 @@ not explain it, or before setting any price cap.
 **This file covers the accelerator market only.** Everything below prices
 chip-hours and is irrelevant to a CPU-only job, which bills in GCU against a
 different ledger. An unschedulable CPU job is almost never a market outcome; see
-`../jobs.md` §Requirements And Runtime for its pool.
+`../jobs/submit.md` §Requirements And Runtime for its pool.
 
 ## The Allocator Model
 

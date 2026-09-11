@@ -232,7 +232,7 @@ column). GPU pricing also does not follow TPU intuition, and BATCH is not
 reliably cheaper than PROD for a given family — so compare the two tiers in the
 live reading rather than assuming an ordering. BATCH is preemptible whatever it
 costs, so training never goes there; an eval may, and picks its tier by whether
-it must finish (`gpu_on_borg.md` Rule 6, `jobs.md` §Requirements And Runtime).
+it must finish (`gpu_on_borg.md` Rule 6, `jobs/submit.md` §Requirements And Runtime).
 
 A written-down price has been wrong in both directions here: once low while the
 market was high (an unlaunchable job looked cheap), once high while the market

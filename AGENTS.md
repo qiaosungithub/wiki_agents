@@ -18,7 +18,7 @@ and each has a `README.md` index.
 | Path | Owns |
 |---|---|
 | `engineering.md` | Method: how to verify, diagnose, port, and report. |
-| `jobs.md` | Queue, inspect, resume, debug a cluster job. |
+| `jobs.md` | Hub: routes to `jobs/` — submit, resume, liveness, diagnose, report a cluster job. |
 | `storage.md` | Where data lives, reading it fast, cleaning up safely. |
 | `tpu_reference.md` | Accelerator names, memory, legal shapes, ratios. |
 | `gpu_on_borg.md` | Run an NVIDIA GPU job on Borg via `tpu enqueue` (CUDA build, NCCL, tiers, traps). |
@@ -39,10 +39,13 @@ and each has a `README.md` index.
 | **After a large code change, before submitting a job** | `engineering.md` §Debug Locally On CPU Before You Spend A Remote Round Trip |
 | Find a checkout or its boundaries | `projects/README.md` |
 | Queue, inspect, resume, debug a job | `jobs.md`, then the project guide |
-| **Resume a job / write anything that passes a checkpoint to a job** | `jobs.md` §The `LOAD_FROM` Contract |
-| Submit a job or a batch (default `tpu enqueue` + serial `tpu build-worker`; auto cell / `--metro`) | `jobs.md` §The Submission Queue In One Screen |
-| A CPU-only batch job will not schedule | `jobs.md` §Requirements And Runtime |
-| Choose a cell (now auto-picked); preflight before packaging | `jobs.md` §Choosing Where To Run |
+| **Report job status to the operator** (the minimal live-jobs list; `tpu check` only, never npu) | `jobs/report.md` |
+| **Resume a job / write anything that passes a checkpoint to a job** | `jobs/resume.md` §The `LOAD_FROM` Contract |
+| **Resume a TRAINING run that keeps checkpointing** (never `LOAD_FROM`) | `jobs/resume.md` §The `restart_from` Contract |
+| **Write / port a training package** (checkpoint layout, resume flags, boot banner, `main.py` fail-closed) | `jobs/resume.md` §New Training Package Startup Contract |
+| Submit a job or a batch (default `tpu enqueue` + serial `tpu build-worker`; auto cell / `--metro`) | `jobs/submit.md` §The Submission Queue In One Screen |
+| A CPU-only batch job will not schedule | `jobs/submit.md` §Requirements And Runtime |
+| Choose a cell (now auto-picked); preflight before packaging | `jobs/submit.md` §Choosing Where To Run |
 | A job will not schedule; capping spend | `infra/quota_market.md`, `tools/limit_order.sh` |
 | Change the `tpu` CLI or its daemon | `infra/tpu_cli.md` |
 | TPU codename, HBM, legal shape, equivalence | `tpu_reference.md` |
@@ -61,11 +64,12 @@ and each has a `README.md` index.
 | A write fails, or a job produced 0-byte logs | `storage.md` §An Over-Quota Cell Looks Like A Broken Program |
 | Resume skips work, or a 0-byte file counts as done | `storage.md` §Existence Is Not Completeness |
 | Reclaim local disk, or prune checkpoints | `storage.md` §Local Disk Cleanup, §Checkpoints Are The Default Reason A Cell Fills Up |
+| **The core research idea / the "idea page"** — the shared-weight optimizer hypothesis every experiment line tests (normalize each call-site gradient, then weighted-sum) | `research/normalize_then_sum.md` |
 | Manage a long experiment; tracker evidence | `research/README.md` |
 | Build or verify a multi-GB artifact on distributed storage | `storage.md` §Building A Multi-Gigabyte Artifact |
 | A big write is silently truncated or keeps restarting | `storage.md` §Two Writers On One Output Path |
-| A data-movement job: workstation or cluster? | `jobs.md` §Where The Storage CLI Exists |
-| A job says `RUN` but produces nothing | `jobs.md` §`state: RUN` Is Not Evidence |
+| A data-movement job: workstation or cluster? | `jobs/liveness.md` §Where The Storage CLI Exists |
+| A job says `RUN` but produces nothing | `jobs/liveness.md` §`state: RUN` Is Not Evidence |
 | Write a checker, or a verification keeps saying OK | `engineering.md` §A Test That Cannot Fail |
 | **An edit reported success but the change is missing**; deleting a file breaks an unrelated build | `engineering.md` §A Write Tool's Success Return Is A Claim About Its Intent |
 | Fault-inject safely; a killed script left a broken shared file | `engineering.md` §Fault-Inject In A Sandbox Copy, And Restore In A Trap |
@@ -115,8 +119,8 @@ is slow, and most of what dies on the accelerator dies on a workstation too
 **Jobs.** On this SHARED workstation, submit through `tpu enqueue` plus one
 serial `tpu build-worker`; that is the default that dodges the concurrent-build
 zombie XID. Use `tpu queue` one-shot only when no other build is in flight.
-Never call `xm launch` / `xmanager launch` directly (`jobs.md` §Submission
-Contract).
+Never call `xm launch` / `xmanager launch` directly (`jobs/submit.md`
+§Submission Contract).
 
 **Never train on BATCH.** Every TRAINING job passes `--tier=PROD` explicitly.
 `BATCH` is a paying best-effort tier: it bills the group, it is not the free
@@ -130,7 +134,7 @@ to carry "BATCH is EVAL-ONLY" / "Run evals only on BATCH"; the operator states
 plainly (2026-09-07) that they never asked for that — their rule is and always
 was **train on PROD only**. The invented half cost real time: the FID 50k evals
 (50,000 generated images each) were preempted repeatedly on BATCH before being
-moved (`jobs.md` §Requirements And Runtime).
+moved (`jobs/submit.md` §Requirements And Runtime).
 
 **A chip count is not a size.** Per chip, `v7 = v6p ≈ 2.17x v6e ≈ 4.34x v5p ≈
 7.23x v4 ≈ 10.09x v5e`, so matching a `v6p-16` needs a `v6e-32`. Asking for
@@ -170,7 +174,7 @@ clear it once the job writes its own first checkpoint; a pinned `LOAD_FROM`
 overrides auto-resume forever and reads as training instability. Leave
 `CHECKPOINT_BUCKET`, where the job writes, alone. Reading a checkpoint across a
 metro is survivable; writing across one gets the job deleted by the pruner
-(`jobs.md` §The `LOAD_FROM` Contract).
+(`jobs/resume.md` §The `LOAD_FROM` Contract).
 
 **Logging results.** Re-read the tab's header and neighboring rows every time;
 layout drifts and a stale column map mis-files a number without erroring. Place

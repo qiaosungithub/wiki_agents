@@ -396,7 +396,7 @@ checkpoint path breaks at least one family in this fleet.**
 | paligemma, jax_llava | `checkpoint_<N>` — a flax file |
 | torch ports | `step_<N>.pt` — **a single FILE, not a directory** |
 
-The rule for passing one to a job is in `jobs.md` §The `LOAD_FROM` Contract. Two traps make
+The rule for passing one to a job is in `jobs/resume.md` §The `LOAD_FROM` Contract. Two traps make
 it worse. A path must point at the leaf: a bucket root or a `checkpoints/` parent raises
 `FileNotFoundError` *after* printing a reassuring metadata warning. And identical files are
 not identical roles — a `ckpt_util.py` byte-for-byte the same as another checkout's can be
@@ -471,7 +471,7 @@ Verify the storage layer's primitives yourself. Two assumptions that cost hours:
 Server-side beats streaming by enough to change where the job runs: `append`/`cp`
 inside the storage layer is roughly two orders of magnitude faster than a
 read-and-write loop carrying every byte through the process, at seconds of local
-CPU. The "big copy" job is a controller, not a pipe; `jobs.md` §Where The Storage
+CPU. The "big copy" job is a controller, not a pipe; `jobs/liveness.md` §Where The Storage
 CLI Exists owns the placement consequence and the throughput numbers.
 
 Mirrors must compare CONTENT, not size: a size-only check accepts a destination

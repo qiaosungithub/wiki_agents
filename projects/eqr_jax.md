@@ -87,7 +87,7 @@ discipline `../research/result_logging.md`.
 
 - **Edit the unrestricted home checkout, launch from a `/tmp` copy.** Packaging
   is a unique CitC snapshot, so post-package edits never reach the job, and
-  several agents share the checkout (`../jobs.md` §Submission Contract).
+  several agents share the checkout (`../jobs/submit.md` §Submission Contract).
   `rsync -aL` the tree minus `.git`/`data`/`logs`, write the config there, then
   `tpu enqueue` *from* that copy: the default serial path (`../jobs.md`), which
   records the copy as the entry `workdir`. `-aL` is required because
@@ -96,7 +96,7 @@ discipline `../research/result_logging.md`.
   queue-status` shows SUBMITTED) — a `workdir` that vanishes before its turn is
   parked HELD, not packaged.
 - Write the run into `configs/remote_run_config.yml` and launch without a config
-  argument (`../jobs.md` §Submission Contract). EqR-jax consequence: `configs/`
+  argument (`../jobs/submit.md` §Submission Contract). EqR-jax consequence: `configs/`
   holds only templates (`local_debug`, `remote_run`, per-task); recover a
   finished experiment's config from its snapshot with `sexy <xid>`. Launching by
   config name leaves a file behind.
@@ -114,7 +114,7 @@ discipline `../research/result_logging.md`.
 
 Every trap below fails at module-import time, which on Borg means an empty
 `status.message` and no log at all. **Reproduce locally in ~45s instead of
-guessing** (`../jobs.md` §Debugging A Job That Dies With No Log).
+guessing** (`../jobs/diagnose.md` §Debugging A Job That Dies With No Log).
 `strict_deps = False` hides all the packaging ones at build time, so a green
 build proves nothing.
 
@@ -197,8 +197,7 @@ checkpointing from a multi-host slice.
   `mean_puzzle_examples = 1` and every corpus holds 1000 groups, so
   `steps_per_epoch` floored to 1 and `epochs: 50000` meant 50,000 steps.
   Distrust the concept in an old config or checkpoint.
-- Verify a resume by step progress, not exit status (`../jobs.md` §A restart
-  loop is not evidence of a crash). The retired
+- Verify a resume by step progress, not exit status (`../jobs/liveness.md` §Preemption, Restart, And Resume). The retired
   `epochs / train_epochs_per_iter` design checkpointed an exhausted cursor, so a
   resume evaluated `while N < N`, yielded zero batches, and exited 0 — every
   restart looking like a clean success.

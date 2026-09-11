@@ -288,7 +288,7 @@ workstation limitation only, and a job writes fine; use the browser URLs in
 Two things share this core: the default smart cell pick every `tpu queue` now
 does (`pick_cell`), and the advanced local queue that drains unlimited enqueues
 with auto-reroute (`route_check` / `queue_cli`). User-facing workflow is
-`../jobs.md` §Choosing Where To Run (the default) and §The Local Queue
+`../jobs/submit.md` §Choosing Where To Run (the default) and §The Local Queue
 (advanced). Neither replaces the one-shot `tpu queue`; the picker only pins a
 `--cell` onto it. Modules in the google3 half, each a `pytype_strict_library`
 with its own `pytype_strict_contrib_test`:

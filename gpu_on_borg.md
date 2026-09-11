@@ -126,7 +126,7 @@ wrapper, daemon).
 
 The wrapper rsyncs the launch dir into a renamed stagedir and builds
 `//<stagedir>:main`. Name the target `main`, the entry `main.py`, both at the
-launch root (`jobs.md` §Debugging owns the renamed-stagedir idiom). Minimal
+launch root (`jobs/diagnose.md` §Debugging A Job That Dies With No Log owns the renamed-stagedir idiom). Minimal
 torch GPU `BUILD`:
 
 ```python
@@ -151,7 +151,7 @@ py_binary(
 ```
 
 Two dep traps each cost a silent pre-`main()` death, caught only by a local
-build plus `--help`. Do it FIRST (`jobs.md` §Debugging):
+build plus `--help`. Do it FIRST (`jobs/diagnose.md` §Debugging A Job That Dies With No Log):
 
 | Trap | Symptom | Fix |
 |---|---|---|
