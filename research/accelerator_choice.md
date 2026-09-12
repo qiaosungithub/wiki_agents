@@ -72,7 +72,7 @@ A capacity table does not predict acquisition. Minute by minute against the real
 queue, 14 of 16 live-price samples said `capped` while the queue was holding or
 granting v6p-64: 12.5% accurate. The cause is a granularity mismatch. Preflight
 reads a *group*-level window, while grants are *cell*-level and opportunistic.
-Details and the price-cache trap: `../infra/quota_market.md`.
+Details and the price-cache trap: `../infra/market.md`.
 
 > To know whether you can get a slice, queue for one. Use the table for price
 > trends, never for a go/no-go.
@@ -104,7 +104,7 @@ tpu build-worker start   # serial worker drains it (the default path — ../jobs
   rather than roam to a no-data cell (fail-closed). Pin `cell=` in `--launch`
   only to hit one exact cell; `--metros` is less brittle. Before 2026-08
   `--power` ignored `--metro` and you hand-pinned; fixed, and `--power`+`--metros`
-  compose (`../infra/tpu_cli.md`).
+  compose (`../infra/router.md`).
 - Use the real workload. A sleep loop shows neither whether preemption
   interrupts useful work nor comparable throughput.
 - Bucket in the compute metro you named (`../storage.md`). A cross-metro

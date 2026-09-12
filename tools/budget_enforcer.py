@@ -119,6 +119,11 @@ def active_prod_jobs(jobs_file, cache_file):
         prod.append({'xid': xid, 'cost': cost, 'tpu_type': tpu_type,
                      'tier': tier, 'name': (e.get('exp_name', '') or '')[:40],
                      'has_ckpt': bool(e.get('bucket_cp_path')),
+                     # ★Carry the PATH, not just a bool. _has_checkpoint_on_disk
+                     # reads r['bucket_cp_path']; the row never had it, so its
+                     # CNS probe was DEAD CODE and every pause was refused with
+                     # "no bucket_cp_path in ledger" no matter what the ledger held.
+                     'bucket_cp_path': (e.get('bucket_cp_path', '') or ''),
                      'has_stagedir': bool(e.get('stagedir'))})
     prod.sort(key=lambda r: r['cost'], reverse=True)
     prod_total = sum(r['cost'] for r in prod)
@@ -280,12 +285,73 @@ def _record_pending_resume(r, jobs_file):
         return False, f'{type(e).__name__}: {e}'
 
 
-def _has_checkpoint_on_disk(r):
+# CNS ".../logs" roots to search for a run dir by XID when a row carries no
+# bucket_cp_path. A cross-cell wildcard (/cns/*-d/...) does NOT parse -- fileutil
+# rejects a wildcard cell -- so a fallback must try each concrete cell in turn.
+# Seeded static, then augmented from every distinct root the ledger already
+# records, so adding a cell needs no edit here.
+_CNS_LOG_ROOTS_SEED = (
+    '/cns/el-d/home/qiaos/eqr_data/logs',
+    '/cns/is-d/home/qiaos/eqr_data/logs',
+    '/cns/oi-d/home/qiaos/eqr_data/logs',
+    '/cns/si-d/home/qiaos/eqr_data/logs',
+    '/cns/go-d/home/qiaos/eqr_data/logs',
+)
+
+
+def _known_cns_log_roots(jobs_file):
+    """Static seed plus every distinct '.../logs' root the ledger records, so a
+    new cell is picked up automatically."""
+    roots = set(_CNS_LOG_ROOTS_SEED)
+    try:
+        data = json.load(open(jobs_file))
+        for e in data.values():
+            if not isinstance(e, dict):
+                continue
+            m = re.match(r'(/cns/[^/]+/.+/logs)/', (e.get('bucket_cp_path') or '').strip())
+            if m:
+                roots.add(m.group(1))
+    except Exception:
+        pass
+    return sorted(roots)
+
+
+def _find_run_dir_by_xid(xid, jobs_file):
+    """Reconstruct a run's CNS dir from its XID when the ledger row has no
+    bucket_cp_path (e.g. not backfilled yet) -- the case that used to blind the
+    enforcer. Globs each known log root for '*/xid_<XID>_*'. Returns the path or
+    ''."""
+    xid = str(xid)
+    if not xid.isdigit():
+        return ''
+    for root in _known_cns_log_roots(jobs_file):
+        try:
+            p = subprocess.run(['timeout', '60', 'fileutil', 'ls', '-d',
+                                f'{root}/*/xid_{xid}_*'],
+                               capture_output=True, text=True, timeout=90)
+        except Exception:
+            continue
+        if p.returncode == 0:
+            for ln in (p.stdout or '').splitlines():
+                ln = ln.strip()
+                if f'/xid_{xid}_' in ln:
+                    return ln
+    return ''
+
+
+def _has_checkpoint_on_disk(r, jobs_file=None):
     """物理校验 CNS 上真有 checkpoint。查不到 -> 不该 pause(砍了就回不来)。
-    返回 (verdict, detail);verdict: True=有 / False=确定没有 / None=查不了。"""
+    返回 (verdict, detail);verdict: True=有 / False=确定没有 / None=查不了。
+
+    ★台账缺 bucket_cp_path 不再等于"没有 checkpoint"。行里没有路径时(未回填),
+    先用 XID 在已知 CNS 根目录里兜底找 run 目录,再校验 —— 而不是直接判 False
+    把每个作业都当成不可 pause(那正是 enforcer 从不真正 pause 的旧 bug)。"""
     b = (r.get('bucket_cp_path') or '').strip()
     if not b:
-        return False, 'no bucket_cp_path in ledger'
+        b = _find_run_dir_by_xid(
+            r.get('xid', ''), jobs_file or os.path.expanduser('~/.tpu_jobs.json'))
+        if not b:
+            return False, 'no bucket_cp_path in ledger and none found on CNS by xid'
     try:
         p = subprocess.run(['timeout', '120', 'fileutil', 'ls', b],
                            capture_output=True, text=True, timeout=150)
@@ -333,7 +399,7 @@ def pause_and_requeue(r, jobs_file, dry_run, local_queue_file=None,
     # 闸 2:pause 的前提是"以后能从 checkpoint 接着跑"。CNS 上没有 checkpoint 就
     # 不是 pause,是永久丢进度 —— 方向必须是"查不到就不砍"。
     if not dry_run:
-        _ck, _ckdetail = _has_checkpoint_on_disk(r)
+        _ck, _ckdetail = _has_checkpoint_on_disk(r, jobs_file)
         if _ck is not True:
             return False, (f"REFUSED to pause {xid}: checkpoint 未确认 "
                            f"({_ckdetail})。砍了就回不到 {r.get('name')} 的进度,"

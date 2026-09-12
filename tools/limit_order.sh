@@ -17,7 +17,7 @@
 #     of that group. This script refuses it without --i-understand-group-scope.
 #  3. Dry run is the default for any write. You must pass --apply to commit.
 #
-# Reference: ../infra/quota_market.md (scope table, lease exemption, the rule
+# Reference: ../infra/market.md (scope table, lease exemption, the rule
 # that the comparison uses the POOL-WIDE price, so moving cells never unblocks
 # a triggered cap).
 set -uo pipefail

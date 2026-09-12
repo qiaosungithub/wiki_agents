@@ -48,8 +48,10 @@ and each has a `README.md` index.
 | Submit a job or a batch (default `tpu enqueue` + serial `tpu build-worker`; auto cell / `--metro`) | `jobs/submit.md` Chapter 2 — Submitting A Job, Step By Step |
 | A CPU-only batch job will not schedule | `jobs/submit.md` Chapter 3 §Tiers and CPU-only |
 | Choose a cell (now auto-picked); preflight before packaging | `jobs/submit.md` Chapter 2 — Submitting A Job, Step By Step |
-| A job will not schedule; capping spend | `infra/quota_market.md`, `tools/limit_order.sh` |
+| A job will not schedule; capping spend | `infra/market.md`, `tools/limit_order.sh` |
+| **A job is `BUDGET_DEFERRED`, or a running job was paused/cancelled and you suspect the income/10 cap** | `infra/budget.md` |
 | Change the `tpu` CLI or its daemon | `infra/tpu_cli.md` |
+| Change the smart cell-picker, the local queue and auto-reroute, or the serial build-worker | `infra/router.md` |
 | TPU codename, HBM, legal shape, equivalence | `tpu_reference.md` |
 | GPU arch token, NVLink domain, legal shape, card code | `tpu_reference.md` §NVIDIA GPUs |
 | **Run a GPU job on Borg** (`tpu enqueue --tpu_type=h100-8`); CUDA build, NCCL, device_count==0, GPU preemption | `gpu_on_borg.md` |

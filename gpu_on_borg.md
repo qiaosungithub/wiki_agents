@@ -534,7 +534,9 @@ guarantee reclaim -- we were ABOVE`).
   `budget_check` pricing, so compare numbers, not comments. At 800 cr/hr a
   free-pool GPU job ranks with the fleet's priciest and dies first.
   Mispricing, not preemption, is the biggest measured survival threat on GPU. If
-  a long GPU job vanishes, `grep` your XID in the enforcer log first.
+  a long GPU job vanishes, `grep` your XID in the enforcer log first. The gate
+  mechanism and its other failure modes are `infra/budget.md` §Errors; this rule
+  is the GPU-specific reading of it.
 - A long-lived daemon prices from the table it imported at startup, not the one
   on disk, so a fix lands only on restart. Same job, same enforcer, two minutes
   apart across a restart: `cost=800` before, `cost=6` after. The fixed table sat

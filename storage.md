@@ -2,7 +2,7 @@
 
 Owns where data and checkpoints live, quota and accounting, copy sizing,
 distributed-read latency, and safe cleanup. Job launching is `jobs.md`, chip
-prices `infra/quota_market.md`, per-project data schemas `projects/`. Read before
+prices `infra/market.md`, per-project data schemas `projects/`. Read before
 choosing a location, before putting a remote read on an interactive path, and
 before deleting anything.
 

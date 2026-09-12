@@ -2,8 +2,8 @@
 
 Naming, memory, legal shapes, and per-chip equivalence. Every layer of the
 stack names the same chip differently, so all aliases live in one table.
-Launching is `jobs.md`, pool and CLI internals `infra/tpu_cli.md`, prices
-`infra/quota_market.md`.
+Launching is `jobs.md`, CLI internals `infra/tpu_cli.md`, prices
+`infra/market.md`.
 
 ## Name Mapping
 
@@ -21,7 +21,7 @@ Launching is `jobs.md`, pool and CLI internals `infra/tpu_cli.md`, prices
 |---|---|
 | `GHOSTFISHLITE` (101) is v7, not v5e | A launcher mapping `v5e` to `ghostfishlite` builds a request for the wrong hardware |
 | The literal `v6p` raises `Unknown ResourceType 'v6p'` at submit time | v6p must be `ghostfish` |
-| `ResourcePrices` and other Spanner tables key on the numeric ids | Use them when querying GQM directly (`infra/quota_market.md`) |
+| `ResourcePrices` and other Spanner tables key on the numeric ids | Use them when querying GQM directly (`infra/market.md`) |
 | A generation reaches `tpu queue`/`tpu preflight` before this table mentions it | Verify rather than assume: `tpu preflight --tpu_type=<gen>-<n> --json` either returns a `cells_ok` list or names the type unknown |
 | `v7x` is an external name and does not mean v7 | Cloud vocabulary maps `V7X`→`TPU7X` onto `GHOSTFISH` (92) = v6p; internal v7 is `GHOSTFISHLITE` (101). Nothing in the launcher emits or accepts `v7x` |
 
@@ -101,7 +101,7 @@ at half the compute and is compared against siblings as if the hardware matched.
 | Compute ratio ≠ speedup; decide from the bound your job is actually in | HBM bandwidth does not track compute: v6e scores 2x v5p on compute but 0.58x its bandwidth, so memory-bound work (long-context attention, small-batch decode) runs slower on v6e than on v5p. v6p/v7 gain 2.66x bandwidth against 4.34x compute, real but not the headline number |
 | int8 does not carry over | v4/v5e/v5p/v6e accelerate int8 (2x) and int4 (4x); v6p/v7 accelerate fp8 (2x) and give int8 no speedup at all (1x). An int8-tuned model moved from v5p to v6p/v7 must switch to fp8 to gain anything |
 | v6p is 4.34x v5p, not 2x; re-derive the ratio rather than repeating a remembered one | An earlier table here said 2x and made the router recommend twice the hardware a request needed |
-| Equivalent compute is not equivalent price; `v7 = v6p` says nothing about what they cost | Measured on one afternoon: `v7-32` PROD priced 8x its `v6p-32` equivalent, and the same family's price moved ~2x within an hour. "v7 ≈ v6p, take either" is a compute statement being read as a procurement one. If a job's `allowed_archs` spans both, check the live market before assuming the router picked the cheap side. Timestamp any price you quote; it expires in minutes (`infra/quota_market.md`) |
+| Equivalent compute is not equivalent price; `v7 = v6p` says nothing about what they cost | Measured on one afternoon: `v7-32` PROD priced 8x its `v6p-32` equivalent, and the same family's price moved ~2x within an hour. "v7 ≈ v6p, take either" is a compute statement being read as a procurement one. If a job's `allowed_archs` spans both, check the live market before assuming the router picked the cheap side. Timestamp any price you quote; it expires in minutes (`infra/market.md`) |
 
 ## Legal Shapes
 
@@ -151,7 +151,7 @@ the same `tpu enqueue` path but with an explicit `--tpu_type=<gpu>-<n>` and
 
 `xm.ResourceType` is case-insensitive and the kwarg name is the lowercase enum
 name, so `JobRequirements(h100=8)` works directly. Card codes key the GQM and
-market Spanner tables (`infra/quota_market.md`).
+market Spanner tables (`infra/market.md`).
 
 | Arch token (`--tpu_type`) | `xm.ResourceType` | Card code | HBM | NVLink domain |
 |---|---|---:|---:|---:|
