@@ -149,14 +149,36 @@ wrote metrics, and the settings easy to get wrong: explicit opt-in, rank-0 only,
 periodic flush). A report that says "the workstation cannot read the datatable"
 has skipped them.
 
-### "Clean up the finished runs" means `tpu clear`
+### "Clean up a job" / "清理 job" means `tpu clear` — nothing else
 
-**"Clean up the finished runs" means `tpu clear`, not deleting data — an
-ambiguous phrase over unrelated tools.** `tpu clear` tidies the BOARD, archiving
-(never deleting) finished and failed entries to `~/.tpu_jobs_legacy.json`, which
-config recovery still resolves; cleared entries leave the board one daemon cycle
-(~60s) later. `tpu gc` sweeps CNS checkpoints. Use `clear` for a cluttered
-`tpu check`, `gc` only for a filling cell.
+**"Clean up a job" means `tpu clear <xid>`: archive one finished run off the
+board AND out of the local queue. It never deletes data.** The phrase is
+otherwise ambiguous across five unrelated tools (below), so treat `tpu clear` as
+its single canonical meaning and ask before assuming any other.
+
+`tpu clear <xid> [xid...]` archives (never deletes) the named run's board entry
+to `~/.tpu_jobs_legacy.json` — config recovery still resolves an archived id —
+AND archives its local-queue row into the SAME legacy record (`queue_row` key),
+matching by XID. Cleared entries leave the board one daemon cycle (~60s) later.
+
+**It archives only a FINISHED (DONE/FAILED) queue row and refuses a live one**
+(QUEUED/BUILDING/SUBMITTED/RUNNING/HELD) — the row is the router's handle on a
+job still on the cluster, and dropping it strands the work, exactly as
+`tpu dequeue` refuses a live row. Stop a live job with `tpu cancel <xid>` first
+(verify against XManager, not the queue), then clear it once it has ended. **There
+is deliberately no `tpu clear all`** — a blanket sweep is the one un-undoable
+mistake, so name the XIDs.
+
+The other four "cleanup" senses are DIFFERENT operations with different owners —
+never silently pick one when someone says "清理 job":
+
+| Phrase might mean | Tool / action | Owner |
+|---|---|---|
+| Archive a finished run off the board + queue (**the default**) | `tpu clear <xid>` | this section |
+| Stop a live job | `tpu cancel <xid>` | §`tpu cancel`, `liveness.md` |
+| Drop a not-yet-live QUEUE row / un-HELD one | `tpu dequeue` / `tpu requeue` | `../infra/router.md`, `submit.md` |
+| Reclaim local workstation disk | targeted `du` + safe delete | `../storage.md` §Local Disk Cleanup |
+| Prune old CNS checkpoints (rarely needed) | `tpu gc` | `../storage.md` |
 
 ---
 
