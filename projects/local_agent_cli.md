@@ -19,10 +19,9 @@ run only looks dead.
 
 **A command named `claude` is blocked by this host's `ai_agent_execution`
 policy, so Claude Code is exposed as `clod`.** Only the name is refused. The
-binary runs fine, so never conclude Claude Code is unavailable here. Same shape
-for `amp` (Amply chat), `gemini` (Jetski), `gpt` (Codex): each dispatches
-`list / search / resume / rename / clear` to a session helper, else launches the
-agent.
+binary runs fine, so never conclude Claude Code is unavailable here. Same shape for `amp` (Amply chat), `gemini` (Jetski), `gpt` (Codex), `clod`
+(Claude Code): each dispatches `new / list / search / id / resume / rename / clear`
+to a session helper, else launches the agent.
 
 `clod` runs Claude Code in a bubblewrap jail under `--permission-mode auto`.
 Both layers are deliberate: the classifier catches bad tool calls, bwrap
@@ -38,9 +37,9 @@ session's policy.
 
 ### Named Startup: Registration, Readiness, And Native Names
 
-The naming logic lives in `agent-island/claude-amply.py` and
-`codex-session-name.mjs`; `.bashrc` and `~/.local/bin/gpt` use them on each new
-invocation. No gateway or database restart is needed for these CLI changes.
+The naming logic lives in `agent-island/claude-amply.py`, `codex-session-name.mjs`,
+and `gemini-session-helper.sh`; `.bashrc` and `~/.local/bin/gpt` use them on each
+new invocation. No gateway or database restart is needed for these CLI changes.
 
 **`amp new NAME` applies `/annotate/title` as soon as the exact run ID is
 registered, and registration is not readiness.** An independent read-only status
@@ -58,6 +57,8 @@ input. Unsupported named-start options, including `--profile`, fail before
 creating a thread, so use unnamed `gpt new` followed by the TUI's `/rename` for
 those. Original unnamed new/resume behavior is preserved. Do not restore the
 rejected global newest-thread or background title-watcher approaches.
+
+**`gemini new [NAME]` passes `--title=NAME` with an empty prompt to `agentapi new-conversation` before exec'ing into the CLI.** `agentapi` requires a prompt positional argument, so a blank prompt creates the conversation and binds the title without triggering an unsolicited turn. It discovers `ANTIGRAVITY_LS_ADDRESS` automatically (falling back to `/proc` or `~/.gemini/jetski/daemon/ls_*.json` if unset in the shell). The local `.system_generated/custom_title.txt` and `conversation_summaries.db` are both updated before `os.execvp` hands the terminal to the interactive Jetski CLI (`/google/bin/releases/jetski-devs/tools/cli --conversation <id>`).
 
 ### `amp` Sends Operator Messages While The Agent Works
 
