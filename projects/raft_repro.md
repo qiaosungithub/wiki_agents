@@ -264,3 +264,45 @@ atomic-add noise, so the check compares fnet/cnet gradients relative to the
 largest one. The two-band alignment ratio r at init is 1.0 / 1.22 / 1.29 for w =
 0 / 0.5 / 1. The sweep is w in {0, 0.2, 0.5, 1.0} at the baseline lr, run names
 `raftsmall_d1w{0,02,05,1}_{C,CT}_s<seed>`.
+
+---
+
+## The JAX/google3 port (RAFT-google-sqa -> raft_launch)
+
+A separate codebase from the PyTorch `~/work/raft/` above. This is the JAX /
+Scenic optical-flow trainer: git source of truth at `~/work/RAFT-google-sqa`
+(github), launched from a non-git file-copy mirror `~/work/raft_launch` via `tpu
+enqueue`. The wrapper relocates the `:main` py_binary into a renamed stagedir and
+builds it there.
+
+### A stray `configs/BUILD` in the launch workdir voids config packaging, so every launch dies with zero CNS bytes
+
+**Keep `raft_launch/configs/BUILD` absent: if that file exists, Blaze treats
+`configs/` as a subpackage boundary, and `data = glob(["configs/**/*.py"])` in
+`raft_launch/BUILD` then captures zero files instead of the config payload.**
+`configs/load_config.py` never reaches the relocated binary's runfiles, so every
+job dies at flag-parse time with `OSError: Failed loading config file ... No such
+file or directory: .../configs/load_config.py`. That happens before the first log
+beacon, so the job writes zero bytes to CNS and `tpu check` reports "CODE BUG:
+unrecoverable application failure", which reads as a pre-main() death with no
+readable log. The glob is `allow_empty = True` (the canonical in-place build
+wants a no-op there), so the empty result is silent at build time and only bites
+at runtime.
+
+It recurs because `raft_launch` is a file-copy mirror of the github repo. The
+github `RAFT-google-sqa/configs/BUILD` is legitimate and must stay (it defines the
+`:base_config` py3_library used for the Python imports), but any cp/rsync of
+github into `raft_launch` drags it into the launch workdir, where it must not be.
+Neither staging path removes it: the tpu wrapper's staging rsync and the `tpu
+enqueue` snapshot (`queue_cli.py::_STAGE_EXCLUDES`) exclude only build and data
+junk, not `BUILD`. A frozen enqueue snapshot that looks clean was taken after the
+file had already been deleted, not self-healed. Only `configs/` is data-globbed,
+so `configs/BUILD` is the one dangerous file; the other subpackage `BUILD` files
+in the tree are legitimate and must be left alone.
+
+Fix: sync with `raft_launch/sync_from_github.sh`, which mirrors github with
+`--exclude=/configs/BUILD` and then strips any pre-existing copy, so the broken
+state cannot be produced. After a sync done any other way, run
+`raft_launch/strip_configs_build.sh`, which is idempotent, removes only
+`configs/BUILD`, and fails closed if `configs/load_config.py` is missing. Never
+delete the github `RAFT-google-sqa/configs/BUILD`.

@@ -90,6 +90,8 @@ and each has a `README.md` index.
 | **The amply gateway is down**; `amp new` worker dies at `os.getcwd()`; `amply-launch` prints nothing | `projects/local_agent_cli.md` §Restarting The Amply UX Server |
 | **Amply's database, snapshots, the local Spanner universe**; `/span/tmp` is dead; restart localdb / gateway order; migrate old runs | `projects/local_agent_cli.md` §The Amply Database Is A Local Spanner Test Universe |
 | Agent web app, or a local agent CLI | `projects/agent_web.md`, `projects/local_agent_cli.md` |
+| **The remote-control job interface** (lyy launches runs by `git push`; status mirrored back as a git repo); the poller / status daemon; `run_config.yml` schema | `projects/remote_control.md` |
+| **Survival game / the sqa-remote run pipeline** (collaborator's stay-alive multi-agent sim; each `sqa-remote` commit == one LOCAL amply run; codex→amply adaptation; results pushed to many-agent-result) | `projects/survival_sqa_remote.md` |
 
 ## Global Rules
 

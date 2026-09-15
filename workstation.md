@@ -53,6 +53,35 @@ under `/usr/local/google/tmp` on `sqa` as the only copy.
 This box runs many checkouts, and what takes it down is almost never a running
 build — it is idle standing servers and uncapped local jobs.
 
+**The single biggest standing consumer is `srcfsd`, whose content cache
+auto-sizes to total RAM unless you cap it.** `/lib/init/exec-srcfsd.sh` starts
+CitC's FUSE daemon with `--srcfs_content_cache_max_mem_bytes=-1`, and `-1` means
+"pick a default from total system memory" (the non-auto default is 512 MB); on
+this 117 GB host it grew to ~116 GB (42 GB RSS + 74 GB swap), by itself past any
+30%-of-RAM target and accounting for nearly all swap in use. It is a cache of
+cold pages, not a leak — `vmstat` shows `si/so ≈ 0` while it sits — so cap it
+only when you actually need the memory back, not on sight. Cap it in
+`/etc/default/srcfs`, the sanctioned override the init script sources and appends
+AFTER the `-1` (last flag wins); the file is root-owned and both the edit and the
+restart need interactive sudo, so an agent cannot do this step — hand the
+operator a script to run:
+
+```bash
+# /etc/default/srcfs
+DAEMON_OPTS="--srcfs_content_cache_max_mem_bytes=8589934592"  # 8 GiB
+sudo systemctl restart srcfs.service
+```
+
+An 8 GiB cap took it to ~5 GB RSS + 0 swap; it is 16x srcfsd's own 512 MB base
+so the hit-rate cost should be small, though build latency was not benchmarked.
+Two consequences of the restart, both to clean up after: it recreates the
+`/google/src` FUSE mount, which silently kills any long-lived process whose cwd
+sits on it (the tpu daemon and build-workers — see `infra/tpu_cli.md` §A Frozen
+Board Means The Daemon Lost Its cwd), and objfs then GCs the freshly-unreferenced
+checker binaries, so after any srcfs restart rebuild them (`blaze build
+experimental/users/qiaos/tpu_utils:{money_check,quota_check,infra_check,route_check}`)
+and recycle the daemon/workers from a cwd off the mount.
+
 **A serial pipeline does not bound memory; standing servers do.** Each
 workspace's blaze server holds a multi-GB JVM heap for its whole
 `max_idle_secs`, one per checkout, whether or not a build runs.

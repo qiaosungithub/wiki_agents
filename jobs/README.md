@@ -13,3 +13,4 @@ allocator, and CLI internals.
 | `liveness.md` | Preemption and restart budget, `state: RUN` is not evidence anything runs, where the storage CLI does and does not exist, and worker identity / paths / local disk. |
 | `diagnose.md` | A failing or silent job: diagnosis order, is one XID alive, debugging a job that dies with no log, launcher-side failures that look like scheduler failures, and metrics and curves. |
 | `report.md` | Reporting job status to the operator: the shortest useful live-jobs list, owner filtering, real progress and ETA, finished / pending / held. |
+| `wandb_upload.md` | The tpu-side automatic W&B upload: a finished tpu job's datatable replayed into a `xid-<XID>` W&B run using the `config.wandb` identity the launcher stashed in the registry; the `wandb-upload-tpu` daemon; contrast with the npu twin. |

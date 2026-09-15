@@ -20,6 +20,7 @@ only the one your task names. `jobs/README.md` indexes them.
 | Survive preemption; tell a live job from a dead `state: RUN`; where the storage CLI exists; worker identity / paths / local disk | `jobs/liveness.md` |
 | A job failed or went silent: diagnosis order, is one XID alive, no-log debugging, launcher-side failures, metrics and curves | `jobs/diagnose.md` |
 | Report job status to the operator (the minimal live-jobs list; `tpu check` only, never npu) | `jobs/report.md` |
+| A finished tpu job should auto-upload to W&B; where its run/identity comes from; the `wandb-upload-tpu` daemon | `jobs/wandb_upload.md` |
 
 Current wrapper code, allocator configuration, work-unit state, and logs outrank
 these guides whenever implementation details change.
