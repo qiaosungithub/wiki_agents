@@ -49,7 +49,7 @@ Include the original objective's loss coefficients and reduction convention in `
 
 ## Validation settings
 
-The prototype settings are mazes and char-LM. Maze64 at 60k updates is the recommended fast maze recipe; Maze128 remains a later scale check. The larger candidates are Parcae, ELT and TRM on ARC-AGI-1. On 2026-09-07, the owner agreed to remove CoDi from the main plan because its joint teacher/student/distillation recipe complicates attribution. This experiment-selection decision does not stop any running job.
+The prototype settings are mazes and char-LM. Maze64 at 60k updates is the recommended fast maze recipe; Maze128 remains a later scale check. The larger candidates are Parcae, ELT and TRM on ARC-AGI-1. CoDi is excluded from the main plan because its joint teacher/student/distillation recipe complicates attribution; excluding it does not stop a job already running.
 
 The priority backup candidates are ALBERT supervised fine-tuning and RAFT optical flow. The owner wants broadly recognizable baselines: CLRS and MoDL are deprioritized, and SimCLR is excluded. RAFT's recurrent gradient paths support the method, but its multiple supervised losses require relative-distance grouping and extra backward computation. See the [RAFT graph checks, compute audit and ELT DEV estimate](../archive/audits/20260907-raft-applicability-elt-dev.md).
 

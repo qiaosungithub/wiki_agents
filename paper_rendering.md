@@ -1,42 +1,44 @@
 # Paper Report Rendering
 
-Read this when laying out, rendering, or debugging the HTML/PDF of a paper
-deep-reading report. Report content requirements are in `paper_reading.md`.
-The PDF is produced with WeasyPrint, which runs no page JavaScript.
+Owns the HTML and PDF of a paper deep-reading report. What a report must contain
+is `paper_reading.md`. The PDF is produced with WeasyPrint, which runs no page
+JavaScript.
 
-## Formula, Derivation, And Pseudocode Line Breaks
+Chapter 1 is the HTML source and its line structure; Chapter 2 is figures, the
+PDF, and inspection.
 
-Do not rely on literal source newlines inside an ordinary
-`<div class="formula">`. With the default `white-space: normal`, HTML collapses
-newlines and runs of spaces into one space. A browser may appear to separate the
-content only because it wraps at the viewport edge; the A4 print layout is
-narrower and uses different font metrics, so WeasyPrint can concatenate intended
-lines and then break equations at arbitrary, semantically wrong positions.
-`overflow: auto` is not a print fix because a PDF has no horizontal scrollbar;
-content may instead wrap badly or be clipped.
+---
 
-Encode line structure explicitly according to the content:
+## Chapter 1 — The HTML Source
 
-1. For equations and short derivations, use one block element per semantic line,
-   such as `<div class="eq-line">...</div>`, or explicit `<br>` elements. Break
-   before or after meaningful operators (`=`, `+`, an implication, or a condition),
-   and give continuation lines a deliberate indent. Do not expect indentation in
-   the HTML source to survive normal whitespace handling.
-2. For code or pseudocode whose indentation is meaningful, use
-   `<pre class="formula">...</pre>` and set `white-space: pre-wrap`. Escape `<`,
-   `>`, and `&` inside it. Avoid a nested inline `<code>` style unless its
-   background and padding are explicitly reset for the block.
-3. Give formula blocks a print-safe fallback: `overflow-wrap: anywhere`,
-   `word-break: normal`, and `overflow: visible`; choose a print font size and
-   line height that fit the A4 content width. Manual semantic breaks remain the
-   primary layout mechanism—the fallback must not be the thing deciding where a
-   long equation breaks.
-4. Use `break-inside: avoid` only for a block known to fit on one page. Split a
-   long algorithm or derivation into smaller logical blocks instead of forcing a
-   page-sized unbreakable box, which creates blank pages or overflow.
-5. Do not depend on client-side MathJax/KaTeX execution for the PDF: WeasyPrint
-   does not run page JavaScript. Use already-rendered static markup/SVG, MathML
-   known to work in the chosen renderer, or print-safe HTML text.
+### The browser HTML is the canonical report
+
+**Keep the browser HTML as the canonical report, and make every print-only change
+in a temporary copy (Chapter 2).** Build a new report on the established HTML
+template of `readings/tutorials/` rather than a new design. A bilingual report is
+two HTML files with matching section ids, each linking to the other.
+
+### Do not rely on source newlines
+
+**Do not rely on literal source newlines inside an ordinary
+`<div class="formula">`, because at the default `white-space: normal` HTML
+collapses newlines and runs of spaces into one space.** A browser can look right
+only because it wraps at the viewport edge. The A4 print layout is narrower and
+uses different font metrics, so WeasyPrint can join intended lines and break
+equations at semantically wrong positions. `overflow: auto` is not a print fix,
+because a PDF has no horizontal scrollbar; content wraps badly or is clipped.
+
+### Encode each kind of content explicitly
+
+**Choose the encoding by the kind of content, and keep manual semantic breaks as
+the primary layout mechanism.**
+
+| Content | Encoding |
+|---|---|
+| Equations and short derivations | One block element per semantic line, such as `<div class="eq-line">...</div>`, or explicit `<br>` elements. Break before or after a meaningful operator (`=`, `+`, an implication, or a condition), and indent continuation lines deliberately, because source indentation does not survive normal whitespace handling |
+| Code or pseudocode whose indentation matters | `<pre class="formula">...</pre>` with `white-space: pre-wrap`. Escape `<`, `>`, and `&` inside it, and avoid a nested inline `<code>` style unless its background and padding are reset for the block |
+| Every formula block | A print-safe fallback: `overflow-wrap: anywhere`, `word-break: normal`, and `overflow: visible`, with a print font size and line height that fit the A4 content width. The fallback must not decide where a long equation breaks |
+| A long algorithm or derivation | Smaller logical blocks. Use `break-inside: avoid` only for a block known to fit on one page, because a page-sized unbreakable box creates blank pages or overflow |
 
 A robust plain-HTML pattern is:
 
@@ -48,46 +50,53 @@ A robust plain-HTML pattern is:
 </div>
 ```
 
-Before delivery, render the actual PDF and inspect every formula/pseudocode page
-at readable resolution. Check that the intended line count survived, indentation
-still carries the right grouping, no token or subscript is clipped, no line is
-broken at an arbitrary symbol, and the block is not split across pages. Browser
-HTML inspection alone is insufficient; `pdftotext -layout` is a useful secondary
-check but does not replace visual inspection.
+### Math must render without JavaScript
 
-## Assets And Rendering
+**Never depend on client-side MathJax or KaTeX for the PDF, because WeasyPrint
+runs no page JavaScript.** Use already-rendered static markup or SVG, MathML known
+to work in the renderer, or print-safe HTML text.
 
-- Prefer figures from the arXiv source package; rasterize vector PDFs and resize
-  very large images before embedding them under `assets/<slug>/`.
-- Size each figure according to its information density in the **rendered PDF**,
-  rather than defaulting every image to `width: 100%`. A simple single-curve
-  plot, small architecture sketch, or qualitative example should normally use
-  roughly half a page or less. Reserve near-full-page figures for genuinely
-  dense multi-panel evidence whose labels would otherwise be unreadable.
-- Use figure-specific print classes or `max-width` / `max-height` constraints to
-  balance readability, surrounding explanation, whitespace, and page count.
-  An image that is technically legible but unnecessarily occupies an entire
-  page is a layout failure. Conversely, do not shrink a dense plot until its
-  axes or legend become unreadable; crop/split panels or transcribe key values
-  into HTML instead.
-- Rebuild LaTeX tables as searchable HTML rather than screenshots.
-- If images are embedded, also render a same-basename PDF. Use the existing print
-  override, set a writable `XDG_CACHE_HOME`, pass the tutorials directory as
-  WeasyPrint's base URL, and avoid CSS Grid in the print copy. These constraints
-  prevent font-cache hangs, missing relative assets, and pathological layout
-  time.
-- `tutorials/_pdf_print_override.html` is shared by every report. Read it fresh at
-  render time and do not hand-patch it per report. Its `.grid > .box` flex-basis is
-  tuned against a measured WeasyPrint threshold (percentages are treated as the
-  content box, so too large a basis silently stacks every box full-width); the file's
-  comment records the measurement. If you must change it, re-measure on a real
-  report, not a toy page, and re-render every report that already shipped.
-- Keep the browser HTML as the canonical report; print-only transformations
-  belong in a temporary copy.
-- Inspect both a contact sheet and the relevant pages at readable resolution.
-  Check not only clipping and font size, but also whether each figure's visual
-  footprint is proportional to the evidence it carries and whether avoidable
-  blank or figure-only pages were introduced.
+---
 
-Exact extraction and rendering snippets from prior work are retained under
+## Chapter 2 — Figures, The PDF, And Inspection
+
+### Size a figure by its information density
+
+**Size each figure by its information density in the rendered PDF, not by
+defaulting every image to `width: 100%`.** A simple single-curve plot, small
+architecture sketch, or qualitative example normally takes half a page or less;
+reserve near-full-page figures for dense multi-panel evidence whose labels would
+otherwise be unreadable.
+
+- Use figure-specific print classes or `max-width` / `max-height` constraints to balance readability, surrounding explanation, whitespace, and page count.
+- A legible image that fills a whole page is a layout failure, and so is a dense plot shrunk until its axes or legend are unreadable. Crop or split its panels, or transcribe key values into HTML.
+- Prefer figures from the arXiv source package. Rasterize vector PDFs and resize very large images before embedding them under `assets/<slug>/`.
+- Rebuild LaTeX tables as searchable HTML, not screenshots.
+
+### Render a same-basename PDF through the shared print override
+
+**If images are embedded, also render a same-basename PDF from a temporary print
+copy.**
+
+- Use the existing print override, set a writable `XDG_CACHE_HOME`, pass the tutorials directory as WeasyPrint's base URL, and avoid CSS Grid in the print copy. These prevent font-cache hangs, missing relative assets, and pathological layout time.
+- `tutorials/_pdf_print_override.html` is shared by every report, so read it fresh at render time and never hand-patch it per report.
+- Its `.grid > .box` flex-basis is tuned against a measured WeasyPrint threshold. WeasyPrint treats percentages as the content box, so too large a basis silently stacks every box full-width; the file's comment records the measurement.
+- If you must change the override, re-measure on a real report, not a toy page, and re-render every report that already shipped.
+
+### Inspect the real PDF before delivery
+
+**Browser HTML inspection is not sufficient, so render the actual PDF and look at
+every formula and pseudocode page at readable resolution, plus a contact sheet of
+the whole document.** `pdftotext -layout` is a useful secondary check but does not
+replace looking.
+
+| Check | Failure it catches |
+|---|---|
+| Line count and indentation | Intended lines joined, or their grouping lost |
+| Tokens and subscripts | Clipping |
+| Line breaks | A line broken at an arbitrary symbol |
+| Page breaks | A block split across pages, or an avoidable blank or figure-only page |
+| Figure footprint | A figure whose size does not match the evidence it carries |
+
+Exact extraction and rendering snippets from earlier work are kept in
 `archive/details/paper_reading.md` for troubleshooting only.
