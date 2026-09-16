@@ -161,11 +161,14 @@ to `~/.tpu_jobs_legacy.json` — config recovery still resolves an archived id �
 AND archives its local-queue row into the SAME legacy record (`queue_row` key),
 matching by XID. Cleared entries leave the board one daemon cycle (~60s) later.
 
-**It archives only a FINISHED (DONE/FAILED) queue row and refuses a live one**
-(QUEUED/BUILDING/SUBMITTED/RUNNING/HELD) — the row is the router's handle on a
-job still on the cluster, and dropping it strands the work, exactly as
-`tpu dequeue` refuses a live row. Stop a live job with `tpu cancel <xid>` first
-(verify against XManager, not the queue), then clear it once it has ended. **There
+**It archives only a FINISHED (DONE/FAILED) queue row and refuses any other**
+(QUEUED/BUILD_REQUESTED/BUDGET_DEFERRED/BUILDING/SUBMITTED/RUNNING/HELD) — the row
+is still the router's live handle, and dropping it strands the work, exactly as
+`tpu dequeue` refuses a non-terminal row. How you end it first splits on whether it
+is on the cluster: a SUBMITTED/RUNNING row has an XID, so `tpu cancel <xid>` (verify
+against XManager, not the queue); a row not yet built has no XID and is dropped with
+`tpu dequeue <id> --force` (next section), never `tpu cancel`. Clear a row only once
+it has ended. **There
 is deliberately no `tpu clear all`** — a blanket sweep is the one un-undoable
 mistake, so name the XIDs.
 
@@ -179,6 +182,28 @@ never silently pick one when someone says "清理 job":
 | Drop a not-yet-live QUEUE row / un-HELD one | `tpu dequeue` / `tpu requeue` | `../infra/router.md`, `submit.md` |
 | Reclaim local workstation disk | targeted `du` + safe delete | `../storage.md` §Local Disk Cleanup |
 | Prune old CNS checkpoints (rarely needed) | `tpu gc` | `../storage.md` |
+
+### A refused dequeue is not a deadlock — only SUBMITTED/RUNNING have an XID
+
+**`tpu dequeue` refuses every non-terminal row by default, but only SUBMITTED and
+RUNNING (plus the brief BUILDING window) are on the cluster with an XID. A
+QUEUED / BUILD_REQUESTED / BUDGET_DEFERRED / HELD row has no XID and nothing on
+Borg, so `tpu dequeue <id> --force` removes it completely — no XID, no `tpu cancel`
+needed.** The refusal is fail-closed, not proof the job is live; `--force` is the
+sanctioned exit, and the command's own REFUSED message names which case you are in.
+
+| Queue state | On the cluster? | To remove it |
+|---|---|---|
+| QUEUED, BUILD_REQUESTED, BUDGET_DEFERRED | no — no XID, not built yet | `tpu dequeue <id> --force` (complete; no cancel) |
+| HELD | no — parked before building | `tpu dequeue <id> --force`; read the HELD note first, it may record a trap |
+| BUILDING | a worker is building it NOW; XID imminent, none yet | a short wait, not a deadlock: let it reach SUBMITTED, then `tpu cancel <xid>`; or `--force` to drop the row and own the orphan XID it will produce |
+| SUBMITTED, RUNNING | yes — live, has an XID | `tpu cancel <xid>` (verify against XManager, never the queue) |
+
+**BUILDING is the only state that resembles the trap "dequeue won't stop it, cancel
+has no XID yet" — and it is a wait, not a deadlock:** the build finishes in under a
+minute and yields an XID you then cancel. Every state above BUILDING never reaches
+the cluster, so `--force` is safe and final there. `../infra/router.md` owns what
+each state means; this table owns what to run.
 
 ---
 

@@ -198,7 +198,7 @@ or no XID — `diagnose.md`).
 | `tpu enqueue --power=… --archs=… --metros=… --job_name=… --launch=…` | Add a run to the local queue. `--power` and `--archs` are required together. |
 | `tpu queue-status` (alias `tpu qs`) | The local queue plus, live, why each job waits or where it is placeable. |
 | `tpu build-worker start` \| `stop` \| `status` | The serial build-worker in its own tmux session; one build in flight. |
-| `tpu dequeue <job_id>` | Remove one entry before it is submitted. |
+| `tpu dequeue <job_id>` | Remove a not-yet-live entry. Refuses a non-terminal row by default (fail-closed); a QUEUED/BUILD_REQUESTED/BUDGET_DEFERRED/HELD row has no XID, so `--force` drops it completely — a refusal is not a deadlock (`diagnose.md` §A refused dequeue is not a deadlock). |
 | `tpu requeue [job_id…]` | Return HELD job(s) to QUEUED after you fix the cause. |
 | `tpu route-tick [--reroute --nodry_run]` | One router pass by hand; `--reroute` cancels and re-queues jobs PENDING past 10 min. |
 | `tpu queue …` | Deprecated one-shot synchronous submit; the fallback when no worker is up. |

@@ -104,6 +104,22 @@ threshold.** Two structural rules follow:
   under a second; chaining pays that tax repeatedly. They share no state and
   write to disjoint outputs.
 
+**At most one daemon may write a given cache file, and the guard belongs inside
+the daemon script, not the launcher that starts it.** A lock wrapped around one
+launch path (the watchdog's `flock`) leaves every other start path free to spawn
+a second writer on the same `$TPU_CHECK_CACHE_FILE`: a hand-run script or a
+second `tmux` session bypasses it, and two daemons publishing one cache is how
+the board goes stale and incoherent. Put the lock in `tpu_check_daemon.sh`
+itself, where every launch path must pass through it; chasing the restarter
+through the process tree does not work, because each candidate is a `bash -c`
+under the shared `tmux` server and a setsid'd child loses the link. Key the lock
+by the canonical cache path, so the TPU and NPU daemons never exclude each other
+(different caches) while two on one cache do. Re-exec under `flock -n -o`: `-n`
+makes a duplicate exit at once instead of queueing, and `-o` closes the lock fd
+before the daemon runs so a long-lived child (the blaze server) cannot inherit
+the lock and hold it past the daemon's own death. `TPU_DAEMON_NO_SINGLETON=1` is
+the escape hatch for a deliberate second instance.
+
 ### Job Bookkeeping
 
 **The live registry is the file `tpu check` renders from; an older predecessor
