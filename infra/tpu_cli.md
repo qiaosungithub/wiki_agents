@@ -33,6 +33,15 @@ to the depot, the git repo is the only recovery path. Verify with `g4 files
 //depot/google3/experimental/users/<user>/tpu_utils/...`: "no such file(s)"
 means the git repo is still the only copy.
 
+### Every Source File Belongs In The Repo, Not Just A Checkout
+
+**Every file the build needs lives in the git repo as its one canonical copy; a checkout is a build target you sync into, never a place to edit or to keep a spare.** A file that exists only in a CitC checkout is outside version control, so each checkout that touches it keeps a private copy and they drift apart unnoticed. Then the daemons build from one checkout while an edit lands in another, and the change never ships.
+
+- Track every file blaze compiles, the router (`route_check.py`, `route_lib.py`) and their tests included, not only the checkers. A file the build reads that `git ls-files` does not show is the next silent divergence.
+- Edit in the repo, then run `sync_router_to_workspace.sh` to push into the build checkout before `blaze build`. Do not edit the checkout copy in place.
+- Do not keep a second "backup" or "recovered" checkout as a parallel copy: two copies drift, and git history is the archive already.
+- You cannot enforce this by freezing the stale copies. On CitC `chmod` does not stick and a marker file dropped in a checkout may not persist, so the enforcement is simply that one repo is the only thing anyone edits.
+
 ### One Tool, Two Operators
 
 **`npu` is `tpu` with a different registry, not a fork.** A collaborator (lyy)
