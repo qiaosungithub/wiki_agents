@@ -2,7 +2,7 @@
 
 Reproduce RAFT-small (Teed & Deng, ECCV 2020) on the authors' Chairs+Things
 (C+T) schedule, then compare ordinary AdamW against the per-relative-distance
-normalize-then-sum optimizer (`../research/normalize_then_sum.md`). The
+normalize-then-sum optimizer (`../research/looped_nanogpt_per_site.md`). The
 applicability audit that chose RAFT-small and verified the gradient decomposition
 is `../archive/audits/20260907-raft-applicability-elt-dev.md`. Chapter 1 is the
 setting and what the eval numbers mean, Chapter 2 how to run a job on either the

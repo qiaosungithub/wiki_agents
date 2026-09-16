@@ -1,7 +1,7 @@
 # Maze64 turnaround, backup benchmarks, and ELT cost
 
 Audited 2026-09-07. This follows the [initial timing audit](20260907-baseline-runtime.md)
-and the [normalize-then-sum research premise](../../research/normalize_then_sum.md).
+and the [normalize-then-sum research premise](../../research/looped_nanogpt_per_site.md).
 The owner has agreed to remove CoDi from the main validation plan. No training
 jobs were launched, stopped, or reconfigured for this investigation.
 

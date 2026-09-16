@@ -40,6 +40,14 @@ the URL by hand (§Chart Links).
 | VLM (PaliGemma / JAX LLaVA) | `1FlcygQbGBTqHLJeiKdwxS0nP41SPMJrtX-kCJq8d7SQ` | the cleaned PaliGemma/JAX LLaVA tab |
 | `EqR` / `EqR-jax` | `17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0` | `EqR-refactored`. `EqR-reproduction` is pre-refactor, read-only history |
 | char-LM / torch-rnn | `17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0` | `charlm-torchrnn (qiaos)`. Every metric cell is `mean +- sd` over 4 seeds; one cell = one wandb group. Headline columns are the HELD-OUT split; the selection split has its own trailing column. Row format and the `gsheets --` trap: `../projects/charlm_torchrnn.md` |
+| looped nanoGPT (the idea line) | `17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0` | `looped nanogpt` — the current research tab (`../research/looped_nanogpt_per_site.md`, parcae / loopformer / ouro). It took over from the old `Parcae unroll-optim (qiaos)` tab; log parcae / looped results here, not there. |
+
+**Any new nanoGPT-setting run logs to the `looped nanogpt` tab by default.** That
+is the active research tab from now on, and it replaces the old `Parcae
+unroll-optim (qiaos)` tab. Open a titled block at the bottom of the live tab for
+a new line, as every family there does. The call/loss-diagonal line's own
+`nanoGPT (qiaos)` tab is a separate line and is NOT replaced
+(`../projects/nanogpt_depth.md`).
 
 **Resolve a tab by title, never by gid.** Both workbooks hold a tab with the same
 gid for different projects, plus dated backup tabs of each other. A gid writes

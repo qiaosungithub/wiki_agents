@@ -1,7 +1,7 @@
 # Baseline runtime and experiment selection, 2026-09-07
 
 This is a dated measurement, not standing infrastructure guidance. The research
-formulation lives in [normalize_then_sum.md](../../research/normalize_then_sum.md).
+formulation lives in [looped_nanogpt_per_site.md](../../research/looped_nanogpt_per_site.md).
 The raw downloads and calculations are in
 [.baseline_timing_20260907](../../../.baseline_timing_20260907/).
 

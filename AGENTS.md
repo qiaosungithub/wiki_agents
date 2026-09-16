@@ -69,7 +69,7 @@ and each has a `README.md` index.
 | A write fails, or a job produced 0-byte logs | `storage.md` §An Over-Quota Cell Looks Like A Broken Program |
 | Resume skips work, or a 0-byte file counts as done | `storage.md` §Existence Is Not Completeness |
 | Reclaim local disk, or prune checkpoints | `storage.md` §Local Disk Cleanup, §Checkpoints Are The Default Reason A Cell Fills Up |
-| **The core research idea / the "idea page"** — the shared-weight optimizer hypothesis every experiment line tests (normalize each call-site gradient, then weighted-sum) | `research/normalize_then_sum.md` |
+| **The core research idea / the "idea page"** — the per-site optimizer hypothesis every experiment line tests (give each call site its own normalized gradient, then weighted-sum) and the clean looped-nanoGPT setting (parcae / loopformer / ouro) built to test it | `research/looped_nanogpt_per_site.md` |
 | Manage a long experiment; tracker evidence | `research/README.md` |
 | Build or verify a multi-GB artifact on distributed storage | `storage.md` §Building A Multi-Gigabyte Artifact |
 | A big write is silently truncated or keeps restarting | `storage.md` §Two Writers On One Output Path |
