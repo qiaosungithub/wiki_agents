@@ -151,4 +151,11 @@ debug run as a separate step. It exists to catch what CPU cannot see — real
 accelerator topology, cross-host collectives at true scale, and the launcher's
 own argv and staging — not to re-find what the local run already covered.
 
+**A remote debug run may enqueue with `--priority=1`, so it schedules ahead of
+normal work (which sits at the default `priority=0`).** This is the one standing
+exception to the rule that `--priority>0` is operator-only (`jobs/submit.md`): a
+debug run is small and short and you are waiting on it interactively, so jumping
+the shared queue costs the other jobs almost nothing. Keep it at `1` — that is
+enough to lead the queue — and do not carry the flag over to the real run.
+
 **Then the real run**, and not before both of the above are green.

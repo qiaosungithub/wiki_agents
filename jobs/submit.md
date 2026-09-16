@@ -37,7 +37,7 @@ prints `Smart cell: pinned --cell=…`.
 
 - Do NOT pass `--group` on `tpu enqueue`: the router re-places the job as price
   and capacity shift, and a pin defeats that. The CLI nudges "Pass --group=9 to
-  pin it" — ignore it. A manual `--group`, like `--priority>0`, is operator-only.
+  pin it" — ignore it. A manual `--group`, like `--priority>0`, is operator-only (the one `--priority` exception is a small remote debug run at `--priority=1`, `../engineering.md`).
 - `--cell` always wins. `--metros` constrains the pick to data-co-located metros.
   `TPU_NO_SMART_CELL=1` opts out.
 
@@ -161,7 +161,8 @@ Easy to get wrong:
   XManager / CNS handle. Both name the TASK and what distinguishes this launch,
   not just the model.
 - Training passes `--tier=PROD`. Do not pass `--group`, nor `--priority>0`
-  without the operator's permission.
+  without the operator's permission — the standing exception is a small remote
+  debug run at `--priority=1` (`../engineering.md`).
 - A checkpoint-sharded resume also passes `--topology_locked`, so the router only
   moves it within the same mesh geometry (`v6p-32` and `v7-32` are both `2x4x4`;
   `v6e-32` is not) — see `resume.md`.
@@ -235,7 +236,7 @@ verdict — trust it over the surrounding prose: `[[STAGE_SRC_REFUSED]]`,
 |---|---|---|
 | `tpu enqueue --dry_run` still submitted and pre-debited the budget | `--dry_run` belongs to `route-tick`; on enqueue it does nothing and defaults true | there is no rehearsal mode — read the queue file / `tpu queue-status`, never the command's own output |
 | Startup dies "Could not locate …" | `--config=configs/x_config.yml` gets wrapped into `configs/configs/x_config.yml_config.yml` | pass a BARE mode name (`--config=trm_sudoku`) |
-| The whole queue is parked for a shift | someone enqueued `--priority>0`; the queue drains highest-priority-first | default is `priority=0`; `--priority>0` is operator-only |
+| The whole queue is parked for a shift | someone enqueued `--priority>0`; the queue drains highest-priority-first | default is `priority=0`; `--priority>0` is operator-only, except a small remote debug run at `--priority=1` (`../engineering.md`) |
 | A job is pinned to a group and not re-placed | `--group` passed on enqueue overrides the router | never pass `--group` on enqueue |
 
 ### Tiers and CPU-only
