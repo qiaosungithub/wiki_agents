@@ -25,6 +25,7 @@ and each has a `README.md` index.
 | `gpu_on_borg.md` | Run an NVIDIA GPU job on Borg via `tpu enqueue` (CUDA build, NCCL, tiers, traps). |
 | `gcp_gpu_ssh.md` | SSH to the GCP GPU VMs (viscam-cloud); OS Login vs metadata keys. |
 | `workstation.md` | The Cloudtop itself: `sqa-large` (migrated from `sqa` 2026-09-08), ssh, what runs where, re-sync, jetski-hub owns the web app. |
+| `machine_health.md` | Diagnose a slow/overloaded box: load, memory, swap, idle blaze heaps, `srcfsd`, orphaned FUSE `find`s, reaping idle amply sessions. |
 | `projects/` | Per-checkout semantics and boundaries. |
 | `research/` | Running experiments; logging results. |
 | `reports/` | Writing and rendering paper reports. |
@@ -81,7 +82,7 @@ and each has a `README.md` index.
 | **Log a result to the spreadsheet**; find a chart | `research/result_logging.md` |
 | **Read a job's curves / harvest `train/*` from the workstation**; the urge to write "the workstation cannot read the datatable" | `research/result_logging.md` §Reading The Curves From The Workstation |
 | Write or render a paper report | `reports/README.md` |
-| **The workstation is swapping / VSCode-SSH keeps disconnecting**; reclaim idle blaze servers | `workstation.md` §Reclaiming Memory: Idle Blaze Heaps, Swap, And OOM |
+| **The box is slow / high load / swapping / VSCode-SSH keeps disconnecting**; builds crawling; **is a build too slow** (the ~40s floor; >60s never normal); reclaim idle blaze heaps or memory; a recursive `find` on `/google/src`; reap idle amply sessions | `machine_health.md` |
 | `EqR` / `EqR-jax` | `projects/eqr_jax.md` |
 | RNN unroll optimizer / adding problem / gradient propagation science line | `projects/rnn_unroll_adding.md` |
 | **char-LM / torch-rnn reproduction**; which "char-RNN" repo; the 4-seed cell -> wandb group -> spreadsheet row pipeline | `projects/charlm_torchrnn.md` |

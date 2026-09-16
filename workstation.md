@@ -48,112 +48,64 @@ afterwards (idempotent, self-verifying). `/usr/local/google/_blaze_qiaos` and
 targets (`tpu_utils` took 54 s from the Forge cache), and treat old build logs
 under `/usr/local/google/tmp` on `sqa` as the only copy.
 
+## What Survives A Reboot, And What Restarts The Resident tmux Daemons
+
+**Every resident daemon needs a boot-persistence owner, because a tmux session
+does not survive a reboot and a process started from an agent or ssh shell is
+reaped when that shell ends** (`engineering.md`: only cron + setsid survives).
+There are four owners; know which one owns a given daemon before you "fix" a
+missing one.
+
+| Owner | Daemons it brings back | Trigger |
+|---|---|---|
+| systemd user units + linger | `amply-localdb`, `amply-ux` (the amply server), `jetski-hub` | boot (`WantedBy=default.target`) + `Restart=always` |
+| `~/.tpu_bin/tpu_ops_watchdog.sh` | tpu-check-daemon, TPU dispatch-worker, TPU `budget_enforcer`, amply-gateway probe | cron `*/2` |
+| `lyy-work/bootstrap_loops.sh` | lyy loops (decider / launcher / harvest / sheet / dashpub), chipwatch | cron `@reboot` + `*/10` |
+| `~/bootstrap_daemons.sh` | the ten tmux daemons below | cron `@reboot sleep 150` + `*/5` |
+
+**`~/bootstrap_daemons.sh` owns the ten daemons that previously had no reboot
+path at all**: `npu-daemon`, `npu-reroute`, `npu-build-worker`,
+`tpu-build-worker`, `tpu-scheduler`, `survival-poller`, `remote-control-poller`,
+`wandb-upload`, `wandb-upload-tpu`, `google-job-info`. Before 2026-09-15 they had
+no `@reboot` line and no unit, so the 2026-09-14 reboot left them down until they
+were hand-started 36 minutes later. Each has a launcher in
+`~/.tpu_bin/daemon_launchers/<session>.sh` that reproduces the exact command tmux
+recorded; the bootstrap starts only the missing ones and is safe to re-run.
+
+Three things it gets right that a naive rewrite breaks:
+
+- **It starts each session through `bash -lic`**, which sources `~/.bashrc` and so
+  defines the `xmanager` shell function (from
+  `/google/data/ro/teams/dmgi/configs/google_xm_bashrc`). cron's bare environment
+  lacks that function, and a submitting daemon started straight from cron then
+  fails to launch jobs **silently** — the same trap `bootstrap_loops.sh` documents.
+- **Its liveness guard is `tmux has-session -t =<name>`, with the `=` for an EXACT
+  match.** A bare name matches by PREFIX, so `wandb-upload` matches the live
+  `wandb-upload-tpu`, and the real npu-side uploader reads as "alive" forever and
+  never restarts. This is a real bug that a dry-run cannot catch (both look alive
+  while both are up); it only shows once one of the pair is actually down.
+- **It deliberately does NOT cover tpu-check-daemon, the TPU dispatch-worker, or
+  `budget_enforcer`** — the `*/2` ops watchdog already keeps those alive, and a
+  second copy is two daemons on one cache, which is a failure mode, not
+  redundancy (`tpu_cmd`). The two build-WORKERS are separate from the
+  dispatch-worker and are the bootstrap's job.
+
+The LLM monitor line was retired on 2026-09-10; its persistent host,
+`swap-oom-agent.service`, is **stopped and disabled** (2026-09-15). It had been
+crash-looping every 20 s for a day because it hardcodes `~/.local/bin/codex`,
+which no longer exists, and it dies in `Host.__init__` before doing anything —
+so it started no daemons and had no side effects. Its domains are covered by
+`srcfsd_autoheal.sh` (swap/OOM) and `tpu_ops_watchdog.sh` (TPU + amply). To
+revive it (against the retirement), point `CODEX` at `/usr/bin/codex` in both
+`swap_oom_agent_host.py` and `~/.tpu_bin/sentinel_notify.py`, then re-enable.
+
 ## Reclaiming Memory: Idle Blaze Heaps, Swap, And OOM
 
-This box runs many checkouts, and what takes it down is almost never a running
-build — it is idle standing servers and uncapped local jobs.
-
-**The single biggest standing consumer is `srcfsd`, whose content cache
-auto-sizes to total RAM unless you cap it.** `/lib/init/exec-srcfsd.sh` starts
-CitC's FUSE daemon with `--srcfs_content_cache_max_mem_bytes=-1`, and `-1` means
-"pick a default from total system memory" (the non-auto default is 512 MB); on
-this 117 GB host it grew to ~116 GB (42 GB RSS + 74 GB swap), by itself past any
-30%-of-RAM target and accounting for nearly all swap in use. It is a cache of
-cold pages, not a leak — `vmstat` shows `si/so ≈ 0` while it sits — so cap it
-only when you actually need the memory back, not on sight. Cap it in
-`/etc/default/srcfs`, the sanctioned override the init script sources and appends
-AFTER the `-1` (last flag wins); the file is root-owned and both the edit and the
-restart need interactive sudo, so an agent cannot do this step — hand the
-operator a script to run:
-
-```bash
-# /etc/default/srcfs
-DAEMON_OPTS="--srcfs_content_cache_max_mem_bytes=8589934592"  # 8 GiB
-sudo systemctl restart srcfs.service
-```
-
-An 8 GiB cap took it to ~5 GB RSS + 0 swap; it is 16x srcfsd's own 512 MB base
-so the hit-rate cost should be small, though build latency was not benchmarked.
-Two consequences of the restart, both to clean up after: it recreates the
-`/google/src` FUSE mount, which silently kills any long-lived process whose cwd
-sits on it (the tpu daemon and build-workers — see `infra/tpu_cli.md` §A Frozen
-Board Means The Daemon Lost Its cwd), and objfs then GCs the freshly-unreferenced
-checker binaries, so after any srcfs restart rebuild them (`blaze build
-experimental/users/qiaos/tpu_utils:{money_check,quota_check,infra_check,route_check}`)
-and recycle the daemon/workers from a cwd off the mount.
-
-**A serial pipeline does not bound memory; standing servers do.** Each
-workspace's blaze server holds a multi-GB JVM heap for its whole
-`max_idle_secs`, one per checkout, whether or not a build runs.
-`learning/deepmind/config/blazerc` sets that to 7 days with an 18G heap and leans
-on `--shutdown_on_low_sys_mem`, which fires only once memory is already tight and
-whose eviction cold-respawns the heap, deepening the dip. Bound it in
-`~/.blazerc` AFTER the DeepMind `import` (last startup flag wins), which binds
-only NEW servers. Before blaming concurrent builds, enumerate resident heaps by
-RSS plus `VmSwap` — a swapped-out heap reads small in RSS yet still owns the
-pages.
-
-**Count blaze SERVERS by process identity, never by grepping "blaze" in argv.**
-Every binary blaze ever built runs from a path containing `blaze-out/`, so
-`ps | grep blaze | wc -l` counts agent workers and daemons and reads as a build
-storm (24 matches / 7.3 GB resolved to ONE real JVM at 0.9 GB with zero builds
-running). Match the JVM (`blaze(NNN)` / `BlazeServer_deploy.jar`) or count
-`blaze (build|test|run)` invocations, and say which you measured — the two differ
-by an order of magnitude.
-
-**`timeout` kills the blaze CLIENT; the SERVER builds on and often SUCCEEDS**, so
-a nonzero exit can describe a build that produced a good binary (a fully cached
-build still took 1738s on a swapping host and logged `Build completed
-successfully` after `timeout 900` killed the client). Gate any "done" stamp on
-the ARTIFACT, not the rc, and size the timeout for a cold build on a loaded host.
-
-**Judge a server idle by the artifact a build writes, not by the process.**
-`command*.profile.gz` mtime in the `output_base` is one-per-command and works.
-Two substitutes are dangerous: a missing `command.log` stats as epoch 0 and reads
-as maximally idle (reaps live servers), and CPU-time delta is never zero (GC,
-heartbeat) and is highest on the fattest idle heap, inverting the ranking. Guard
-on top (no children, lock holder dead) and make a missing artifact fall back
-conservative.
-
-**A cron job's `flock` fd is INHERITED by any blaze server it spawns, so the
-lock is held for the server's whole `max_idle_secs`, not the script's run.** A
-`*/5` cron then fires once per idle window (measured 61.9 min against
-`max_idle_secs=3600`) and writes NO log line, because the script is never exec'd
-— "no errors in the log" is the symptom, not the refutation. Judge by the
-interval between log entries; read the holder with `readlink /proc/<pid>/fd/*`
-(`fuser` measures empty on a held flock). Fix with `flock -n -o` in the crontab
-line (`-o` closes the fd before exec), never by lowering `max_idle_secs`.
-
-**A memory cap without a swap cap is not a cap.** `MemoryMax` alone excludes
-swap: the limit is written, `systemd-run` returns 0, and the job holds its RAM
-allowance plus tens of GB of swap, whose paging is itself what trips
-`systemd-oomd` (which kills on PSI, not on the limit). Always set both, and
-prefer the wrapper `~/.tpu_bin/memcap [-m LIMIT] <cmd...>`:
-
-```bash
-systemd-run --scope -p MemoryMax=8G -p MemorySwapMax=0 <cmd>
-```
-
-The blast radius is the whole scope, not the offender: one uncapped local eval
-reached 46.7G and oomd took out 31 processes in one tmux scope, including the
-operator's own amply server. A script heavy enough to matter should REFUSE to run
-uncapped (read `memory.max` / `memory.swap.max` and exit if either is unset).
-
-**A swap-heavy box has two failure modes with opposite signatures.** A high
-`swap used` is neither alarm nor benign by itself — the paging RATE separates
-them. VSCode-SSH disconnecting every ~20 min is usually `node` merely swapped
-out and CPU-starved; before calling it thrashing require both `si >= ~5MB/s`
-(`vmstat`) and `load15 >= ~0.8/core`. And `systemd-oomd` kills do NOT increment
-`/proc/vmstat`'s `oom_kill`, so a counter check stays silent through an outage;
-detect it in the journal instead:
-
-```bash
-journalctl --since '-1h' | grep -E 'systemd-oomd.*(Marked .* for killing|killed [0-9]+ process)'
-```
-
-A whole `tmux-spawn-*.scope` goes at once, so every background job from that tmux
-dies together silently — their simultaneous death is the tell. `/tmp` is tmpfs
-and counts against RAM (`df -h /tmp`); never `rm -rf /tmp/*` blindly.
+**Moved to `machine_health.md`** — the whole playbook for load, memory, swap,
+idle blaze heaps, `srcfsd`, orphaned FUSE scanners, and reaping idle amply
+sessions now lives there, so there is one canonical copy. This page owns the
+host's identity, what runs where, and boot persistence; `machine_health.md` owns
+diagnosis and mitigation.
 
 ## How The Home Copy Was Done, And How To Re-Sync
 

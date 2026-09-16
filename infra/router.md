@@ -88,6 +88,20 @@ alike. It is released before the build/launch, since different-checkout builds d
 not collide (only the token bucket was shared), and `-w 900` degrades to
 unlocked rather than blocking forever.
 
+### The ~40s Build Floor Is Structural (Per-Run Target Name)
+
+**One job build's blaze `Elapsed time` floors at ~40s because each launch
+packages a uniquely-named per-run target (`//…/eqr_run_<ts>_<hash>:main`), so the
+~7 GB `.par` relinks from zero on every build (`0/N actions cached`, novel bytes
+only tens of MB) and that one relink is the whole critical path.** A stable
+target label would let the relink cache and drop well under 40s, but the per-run
+name is what freezes each queued job's snapshot, so the floor is a property to
+measure against, not a bug to fix in place. Above the floor a build scales with
+package size up to ~55s. Whether a slow build is a real problem, and how to
+triage it, is owned by `../machine_health.md` §How Slow Is A Build Too Slow —
+measure blaze's own `Elapsed time:` line there, not end-to-end wall time (which
+also carries staging and launch).
+
 ## Usage
 
 ### Building It
