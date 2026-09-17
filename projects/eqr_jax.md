@@ -256,6 +256,7 @@ no real external tracker unless current code proves one was created.
   they were constructed with, so a metric writer steals it back and the log
   stops dead mid-run. Call `logging_util.reattach_absl_handlers()` afterwards;
   it repoints `get_absl_handler().python_handler`, not the outer object.
+- For a train step to show on the `tpu check` board, process 0 must `print` a progress line to stdout/stderr each interval; writing metrics only to the CLU writer (tfevents/Datatables) leaves the board blank. The board tails the mirrored `rank_*.log`, which is a tee of stdout/stderr, and absl `logging.info` does NOT reach it (google3 routes absl to a borglet C++ file, not the Python stream the tee captures) -- only a bare `print` does. The torch ports already print `[parcae-torch] step N ...`; a diffusion trainer that only called `write_scalars` (ELT via `simple_diffusion`) showed a frozen startup-only log and STEP 0 until a process-0 `print` was added next to the scalar write.
 - Resume uses the experiment identity (`resume_xid`) and its workdir; verify
   checkpoint and config continuity before treating appended charts as one run.
   Checkpoints go to `$CHECKPOINT_BUCKET`, never `workdir`;

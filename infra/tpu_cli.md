@@ -120,6 +120,13 @@ before the daemon runs so a long-lived child (the blaze server) cannot inherit
 the lock and hold it past the daemon's own death. `TPU_DAEMON_NO_SINGLETON=1` is
 the escape hatch for a deliberate second instance.
 
+### The Log-Tail Sidecar
+
+**A per-round board process reopens a cold Colossus channel to every cell each round, and opening a far cell's channel dominates the tail phase; a long-lived sidecar that keeps the channels warm is what makes distant jobs' tails render.** The board renders each running job's last log lines by reading the largest `rank_*` file under its checkpoint bucket. This host is treated as different-metro from every cell, so the cost is latency, not bytes: opening a far cell's channel (e.g. si-d, measured from this workstation) costs far more than the ~16 KB read, and the board is spawned fresh each round so it pays that open every time. A single round's reads already share one warm channel per cell; the waste is across rounds.
+
+- **`infra_check --tail_cache_daemon` is a resident process that opens each channel once and reuses it for its whole life**, refreshing the tail of every registered bucket into `~/.tpu_tail_cache.json` (env-scoped by `TPU_TAIL_CACHE_FILE`, like the registry). Warm reads are several times faster than the cold first pass. It holds an flock on the cache's `.lock` for its whole life, so a second copy exits rather than racing the file. Boot-persistence is `bootstrap_daemons.sh` (tmux `tpu-tail-cache`), not `tpu_ops_watchdog.sh`: it writes a DIFFERENT file from `tpu_check_daemon`'s `~/.tpu_check_cache.txt`, so the "two daemons on one cache" rule does not apply.
+- **The board consults the sidecar first and direct-reads only what it misses, so the design is strictly additive.** Only `ok`/`nolog` results are ever written (never a failed read), and the board trusts an entry only while fresh (a bounded age well under the staleness alarm). A dead, missing, stale, or corrupt sidecar therefore makes every bucket fall back to a direct read — byte-for-byte the pre-sidecar behaviour — so the daemon can never make the board worse, only faster.
+
 ### Job Bookkeeping
 
 **The live registry is the file `tpu check` renders from; an older predecessor
@@ -325,6 +332,7 @@ daemon look stuck.**
   training" still comes from `STEP × sec/step`. Add a wrapper column by editing
   the per-section `*_headers`/`*_caps` lists and the matching `*_rows.append(...)`;
   no daemon rebuild needed.
+- **A rank-log tail read seeks from the file's end, and CNS raises its own `SeekError` — not `OSError` — when the file is shorter than the window.** The tail reader does `seek(-N, SEEK_END)` to grab the last N bytes; a log smaller than N (the torch ports write only a few KB) makes that seek run off the front. On a local POSIX file that is `OSError`, but CNS/`epath` raises a `SeekError` that is not an `OSError`, so an `except OSError` lets it escape and the whole read is misreported as an unreadable failure — no tail, and for torch jobs STEP falls back to 0 since STEP is parsed from that tail. Catch broadly and recover by reading the whole (small) file. General rule: a CNS/`epath` I/O guard must not assume the local-filesystem exception type.
 
 ### A Preempted Job Is Dead, Not Pending
 
