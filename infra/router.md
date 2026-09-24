@@ -102,6 +102,31 @@ triage it, is owned by `../machine_health.md` §How Slow Is A Build Too Slow —
 measure blaze's own `Elapsed time:` line there, not end-to-end wall time (which
 also carries staging and launch).
 
+### A Preferred Pool Is Skipped When It Cannot Hold The Job
+
+**The dispatch worker tries g5, then g3, then g9 for each unpinned job, and
+skips g5 or g3 when that pool cannot actually hold the job.** g9 is the last
+resort and is never skipped, so a skip only moves a job on. The check exists
+because g5 and g3 are exempt from the G9 budget bar, so their budget probe always
+says the job fits. Without it every job went to g5 even when g5's floor was full
+and its balance near zero, and those jobs sat PENDING or were reclaimed.
+`route_lib.group_can_hold` decides, from what `route_check.load_group_capacity`
+reads out of the quota, money and market caches in `~/.tpu_quota_cache_dir`:
+
+| Checked in this order | Verdict |
+|---|---|
+| The job's price is above the pool's own limit order for that family | skip: GQM refuses it however empty the pool is |
+| Floor minus used minus chips already sent there but not running covers the job | use the pool: floor chips cost no balance and are not reclaimed |
+| The balance covers `GROUP_BALANCE_RESERVE_H` hours of the pool's above-floor spend, pending jobs and this one included | use the pool, above its floor |
+| Anything else, including a cache that is missing or older than `GROUP_CAPACITY_MAX_AGE_S`, an unknown shape, or no price | skip (fail closed) |
+
+A job re-routed off a pool also cools that pool for that job
+(`cooldown_groups`, strikes stacking inside the window), so the preference order
+does not hand it straight back. A caller pin bypasses both checks. To see why a
+job landed where it did, read its line in the dispatch worker log
+(`~/.tpu_bin/logs/tpu_dispatch_worker.log`): `-> group g3 (...; skipped g5:
+<reason>)`.
+
 ## Usage
 
 ### Building It
