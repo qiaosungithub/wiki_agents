@@ -42,10 +42,14 @@ those per-method differences.
 
 ## Results tab
 
-**Log conclusions from this line to the `looped nanogpt` tab** of the workbook
-`17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0` (resolve by title, not gid). It
-took over from the old `Parcae unroll-optim (qiaos)` tab, and is the default
-research tab from now on: any new nanoGPT-setting run logs here.
-`../research/result_logging.md` §Which Tab owns the routing rule and the write
-mechanics.
+**Log every parcae / loopformer / ouro run from this line to the `looped nanogpt`
+tab of its own workbook, `1zVNvnD8CshpT-gUzEmHZCKnAcmkf6wZHdDUu69LFPEo`.** That
+workbook is a curated copy: superseded runs and non-best sweep points were
+pruned, so it holds the rows worth comparing against. The same-titled
+`looped nanogpt` tab in the EqR workbook
+(`17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0`) is the unpruned history and is
+read-only now, as is the older `Parcae unroll-optim (qiaos)` tab there. Because
+the two tabs share a title, pick the workbook by ID first and only then the tab
+by title. `../research/result_logging.md` §Which Tab owns the routing rule and
+the write mechanics.
 

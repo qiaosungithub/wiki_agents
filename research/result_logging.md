@@ -40,14 +40,19 @@ the URL by hand (§Chart Links).
 | VLM (PaliGemma / JAX LLaVA) | `1FlcygQbGBTqHLJeiKdwxS0nP41SPMJrtX-kCJq8d7SQ` | the cleaned PaliGemma/JAX LLaVA tab |
 | `EqR` / `EqR-jax` | `17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0` | `EqR-refactored`. `EqR-reproduction` is pre-refactor, read-only history |
 | char-LM / torch-rnn | `17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0` | `charlm-torchrnn (qiaos)`. Every metric cell is `mean +- sd` over 4 seeds; one cell = one wandb group. Headline columns are the HELD-OUT split; the selection split has its own trailing column. Row format and the `gsheets --` trap: `../projects/charlm_torchrnn.md` |
-| looped nanoGPT (the idea line) | `17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0` | `looped nanogpt` — the current research tab (`../research/looped_nanogpt_per_site.md`, parcae / loopformer / ouro). It took over from the old `Parcae unroll-optim (qiaos)` tab; log parcae / looped results here, not there. |
+| looped nanoGPT (the idea line) | `1zVNvnD8CshpT-gUzEmHZCKnAcmkf6wZHdDUu69LFPEo` (its own workbook) | `looped nanogpt` — the curated research tab for parcae / loopformer / ouro (`../research/looped_nanogpt_per_site.md`). The same-titled tab in `17pvrMbOKOKFiIa-…` and `Parcae unroll-optim (qiaos)` there are read-only history. |
 
-**Any new nanoGPT-setting run logs to the `looped nanogpt` tab by default.** That
-is the active research tab from now on, and it replaces the old `Parcae
-unroll-optim (qiaos)` tab. Open a titled block at the bottom of the live tab for
-a new line, as every family there does. The call/loss-diagonal line's own
-`nanoGPT (qiaos)` tab is a separate line and is NOT replaced
-(`../projects/nanogpt_depth.md`).
+**Every parcae / loopformer / ouro run, and any new nanoGPT-setting run, logs to
+the `looped nanogpt` tab of workbook
+`1zVNvnD8CshpT-gUzEmHZCKnAcmkf6wZHdDUu69LFPEo` by default.** It is a pruned copy
+that keeps only the rows worth comparing against. The EqR workbook still holds a
+tab with the SAME title, `looped nanogpt`: that one is the unpruned history and
+is read-only, so resolving the title inside the wrong workbook writes into a
+frozen tab and nothing errors. Pick the workbook by ID, then the tab by title.
+Inside the tab, put a new row next to its comparison target (§Where The Row
+Goes); a new line of work opens a titled block below the method it belongs to.
+The call/loss-diagonal line's own `nanoGPT (qiaos)` tab is a separate line and
+stays in the EqR workbook (`../projects/nanogpt_depth.md`).
 
 **Resolve a tab by title, never by gid.** Both workbooks hold a tab with the same
 gid for different projects, plus dated backup tabs of each other. A gid writes

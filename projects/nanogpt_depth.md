@@ -68,9 +68,11 @@ W&B entity `zhh24-massachusetts-institute-of-technology`, project
 `nanogpt-depth`. The shared workbook is
 `17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0`. This line logs to its own
 `nanoGPT (qiaos)` tab (call/loss diagonal), which is NOT being replaced. The
-separate looped-methods program, and new nanoGPT-setting work generally, default
-to the `looped nanogpt` tab (`../research/result_logging.md` §Which Tab, which
-owns the routing rule and governs the writes). Resolve any tab by title and
+separate looped-methods program (parcae / loopformer / ouro), and new
+nanoGPT-setting work generally, default to the `looped nanogpt` tab of a
+DIFFERENT workbook, `1zVNvnD8CshpT-gUzEmHZCKnAcmkf6wZHdDUu69LFPEo`
+(`../research/result_logging.md` §Which Tab, which owns the routing rule and
+governs the writes). Resolve any tab by title and
 re-read its live header.
 
 ### Stage, launch, harvest, audit
