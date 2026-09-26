@@ -74,9 +74,6 @@ broken because the split looked like it had covered them:
   one `npu quota` ran `tmux kill-session -t tpu-daemon` and killed it. The
   quota/money cache is legitimately shared, but the daemon writing it belongs to
   the account owner.
-- A consumer that reaches past the registry may still read the owner's:
-  `infra_check` reads a hardcoded `~/.tpu_jobs.json`, not `$TPU_JOBS_FILE`.
-  Treat any unscoped path here as a latent instance of this bug.
 
 **The owner stays unscoped on purpose**: whoever pays for the quota needs to see
 and stop everything running on it; the partial view belongs to the guest. Scope
@@ -129,10 +126,32 @@ the escape hatch for a deliberate second instance.
 
 ### Job Bookkeeping
 
-**The live registry is the file `tpu check` renders from; an older predecessor
-file is no longer written and survives only as a resume fallback.** Three
-distinctions matter:
+**The live registry (`~/.tpu_jobs.json`, scoped by `TPU_JOBS_FILE`) is the file
+`tpu check` renders from, and every write to it or to its archive goes through
+`registry_store.py` in the checker half; nothing else opens either file for
+writing.** Writers that each truncated, parsed and rewrote the whole table on
+their own silently dropped entries, so the module owns the whole protocol and
+its docstring is canonical:
 
+- **Unreadable is not empty.** An empty or unparsable registry is retried and
+  then raises; it is never treated as `{}` and written back, which is how one
+  writer's truncation window erased every entry. A launch that cannot be
+  registered is stashed in `<registry>.unwritten.jsonl`, never dropped.
+- **The lock is held across the whole read-modify-write, on the file itself,
+  and the registry is rewritten in place, not by tmp+rename**: long-lived
+  processes lock its inode, and a rename would orphan their writes. The archive
+  is written first and atomically, so a crash leaves an entry in both files,
+  never in neither.
+- **Every change is journaled and every good write snapshotted**
+  (`<registry>.journal`, `<registry>.lastgood`): `python3 registry_store.py
+  journal` shows which process removed an entry, `verify` checks both files
+  parse, `repair` restores the snapshot.
+- **Readers never write.** `tpu check` only reads; the check daemon's status
+  pass patches fields by compare-and-set, so a field another writer changed
+  meanwhile is skipped, not overwritten.
+- **Long-lived writers (check daemon, reroute loop, budget enforcer) load the
+  module at start**, so a change to it reaches them only after they restart, and
+  an interactive shell only after it re-sources the wrapper.
 - **A terminal row is polling load, not just clutter.** infra_check issues one
   serial RPC per tracked job, so hundreds of never-migrating rows
   (`TERMINAL_RECONCILED`, `CANCELLED`) inflate the round for jobs whose state
@@ -142,20 +161,22 @@ distinctions matter:
 - **Clear archives rather than deletes**, moving entries to a legacy file. Keep
   it: an entry is the only mapping from an experiment id back to its checkpoint
   bucket, staging directory, and launch log once the job and work unit are gone.
-- **Cancel is not clear.** Canceling stops the experiment and pins the registry
-  entry so the daemon's auto-retry can never resubmit an explicitly killed job;
-  the entry stays on the board until archived.
+- **Cancel is not clear, and CANCELLED is final.** Canceling stops the
+  experiment and marks the entry CANCELLED; no status pass may overwrite it, so
+  an explicitly killed job never reads as failed. The entry stays on the board
+  until archived.
 
-### Error Classification And Auto-Retry
+### Error Classification
 
-**The daemon parses launch logs and classifies failures into defragmentation
-preemption, resource exhaustion, allocator rejection (the fallback for a failure
-with no stated reason), and unknown.** Auto-retry is narrow on purpose: only a
-guaranteed-tier job rejected by the allocator is retried, a few times, minutes
-apart. That is the client resubmitting a new experiment — a different mechanism
-from the in-job restart budget in `../jobs.md` — and it does not cover preempted
-jobs. The daemon runs compiled binaries, so a source edit here does nothing
-until you rebuild.
+**The daemon parses launch logs and labels failures (defragmentation
+preemption, resource exhaustion, unknown); it never resubmits a job.**
+Resubmission and warm resume belong to the local-queue router (`router.md`),
+which owns the job's row; do not add a resubmit path to the daemon, since it
+would create experiments and swap registry keys behind the router's back. The
+board renders a failure with no stated reason as `Rejected by Allocator/Borg`,
+a placeholder rather than a diagnosis; `why_probe` reads the real cause from
+XManager and Borg. The daemon runs compiled binaries, so a source edit here does
+nothing until you rebuild.
 
 ### Preflight Internals
 
