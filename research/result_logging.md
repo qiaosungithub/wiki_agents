@@ -21,15 +21,16 @@ skill, never by scraping the URL.
 6. Write the smallest range: terse text, `logdir` / `stagedir` filled, inherited
    formatting cleared.
 7. Read values, formulas and colors back; render if the change was structural.
-8. Report the changed row, run id, missing diagnostics and any caveat.
+8. Confirm the run reached W&B and fill its link (§The W&B Link Column).
+9. Report the changed row, run id, missing diagnostics and any caveat.
 
 Log only a run that reaches a conclusion; one that exposed a code bug or a
 packaging failure belongs in the commit message. Preemption is not such a
 failure: a job preempted but still hitting its step budget produced a real
 result. Harvest and log its final metrics, train loss included, instead of "see
 chart (log rotated)". Rotation means look harder (§Every Row Carries Its Train
-Metrics), not leave columns blank. Every row also carries the chart link plus the
-`logdir` / `stagedir` pointers. Those recover the exact code, command and
+Metrics), not leave columns blank. Every row also carries the chart link, its
+W&B link (§The W&B Link Column) and the `logdir` / `stagedir` pointers. Those recover the exact code, command and
 resolved config, which keeps cells short. Without a chart every reader rebuilds
 the URL by hand (§Chart Links).
 
@@ -97,7 +98,7 @@ comparison.
 | A published number | A reference and a run of ours are different rows. Give each dataset an `official baseline` row; restating its numbers in a run's cells guarantees the copies drift apart. |
 | A train run and its eval | Two paired rows, eval directly under, titled `  ↳ eval of the row above`. Different job ids, configs and failure modes, so collapsing them loses which half went wrong. A train row without an eval row has no conclusion: mark it, and never quote its in-training numbers as results. |
 | A run past the block's budget | Two rows, same job id: metric columns compare only if every row stopped at the same step. Put the block-budget value in the run's own row, and pair the longer result beneath as `  ↳ @<steps>, same run`, `Details` naming each segment. Still rising at the budget: that point is also its peak; otherwise record the pre-budget peak. Never widen the tab with a second set of metric columns: empty on every normal-budget row, they read as a missing measurement, not an inapplicable one. |
-| A run that was resumed under new job ids | ONE row. The XID column lists EVERY id that wrote training steps into the run's checkpoint dir, oldest first, each with its step range (`285906137 (0-113700) → 286366489 (115000-128300) → 286551193 (128000-…, LIVE)`), and the chart column carries one link per id: a flatboard page shows only its own id's segment, so the full curve is the union of those pages. Never overwrite the old id with the live one (operator, 2026-09-05: "一个 run 多段的 xid 都放着, 我要看完整 curve"). Read the segment set off the tfevents file names in the checkpoint dir (`qiaos_group_<xid>`), not off the job board: cancelled ids that ran for an hour are still segments, and a 78-byte tfevents is an attempt that never ran a step. |
+| A run that was resumed under new job ids | ONE row. The XID column lists EVERY id that wrote training steps into the run's checkpoint dir, oldest first, each with its step range (`285906137 (0-113700) → 286366489 (115000-128300) → 286551193 (128000-…, LIVE)`). The **Flatboard chart** column carries one link per segment id (`http://flatboard/xid/<XID>`), whereas the **W&B** column carries ONE link to the full stitched `step 0 .. end` curve across all segments (§The W&B Link Column). Never overwrite the old XID with the live one. Read the segment set off the tfevents file names in the checkpoint dir (`qiaos_group_<xid>`) or the lineage chain, not off the live job board alone. |
 
 ## A Row That Is Already Filled Can Still Be Wrong
 
@@ -323,6 +324,32 @@ Two checks settle a disputed correction: it must agree exactly with an
 independent metric of the same thing, and multiplying by the population must give
 a whole count. Project semantics: `../projects/eqr_jax.md`,
 `../projects/vlm_metrics.md`.
+
+## The W&B Link Column
+
+**A finished `tpu` run auto-uploads its full ancestor chain (`step 0 .. end`) to
+a single W&B run, so each row carries one stitched W&B link, but only after you
+confirm the upload landed with a complete curve.** The upload is unattended only
+for a job whose chain carries a `config.wandb` identity and that finished after
+the daemon's baseline tick; every other job is skipped without error. How to
+check completeness, and how to force a chain-stitched repair on the final XID,
+is owned by `../jobs/wandb_upload.md` (§Check the daemon, §Upload or repair one
+job now). A repair moves the run to a new id, so write the link it prints on its
+`UPLOADED` line and fix every cell that linked the old one.
+
+- **One single W&B link per row**: the URL the daemon's `state/tpu_uploaded.json`
+  records for the final XID (its id family: `../jobs/wandb_upload.md` §A
+  re-upload replaces the run under a new id). A row may list several resumed or
+  standalone eval XIDs and one Flatboard chart link per segment. Its W&B column
+  still holds ONE run URL, which merges the entire `step 0 .. end` curve across
+  all segments.
+- The same run may appear in SEVERAL rows -- its own result row and, in another
+  block, a base/reference row for a later experiment -- and each carries the
+  link, as it already carries that run's chart link. Find every row by its
+  `Train XID` cell, not a remembered row number (the tab is reordered often), or
+  filling only the obvious result row leaves the reference row blank.
+- The link does not replace the chart link or the `logdir` / `stagedir`
+  pointers -- it is another handle on the same run, filled alongside them.
 
 ## Chart Links
 
