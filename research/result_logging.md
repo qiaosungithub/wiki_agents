@@ -5,9 +5,10 @@ a job's chart, and reading a job's curves back from the workstation (§Reading
 The Curves From The Workstation). Per-tab column semantics: `../projects/vlm_metrics.md`,
 `../projects/eqr_jax.md`. "A number is meaningless without its protocol":
 `../engineering.md` §Communicating a result. **Read this every time you log**: a
-wrong row or column looks like a right one and nothing errors. Write via the
-`gsheets` CLI (`/google/bin/releases/gemini-agents-gsheets/gsheets`) and its
-skill, never by scraping the URL.
+wrong row or column looks like a right one and nothing errors. Write via the `gsheets` CLI (`/google/bin/releases/gemini-agents-gsheets/gsheets`:
+`gsheets readonly read` for batch range reads, `gsheets mutate write` for writes;
+always read full ranges rather than per-cell loops to avoid the 3,000 reads/min
+HTTP 429 quota) and its skill, never by scraping the URL.
 
 ## The Transaction
 
@@ -156,6 +157,8 @@ need true indices.
 **`Wrote 1 rows.` absent, with rc=0, means the write did not happen.** Read the
 cell back every time; rc is not evidence.
 
+**A `raw-batch` `updateCells` value must be wrapped `{"userEnteredValue": {…}}`; a bare `{"numberValue": …}` or `{"stringValue": …}` prints `Raw batch request executed successfully` and writes nothing.** With `fields: "userEnteredValue"` the API finds no `userEnteredValue` in the malformed cell and clears that field — invisible when the target was already empty, so the whole batch looks like it applied. `{"userEnteredValue": {"numberValue": 8.19}}` is the cell; the per-cell read-back is what catches the silent no-op.
+
 **Pass cell values after a `--` separator.** A value containing `/` or a leading
 dash is otherwise parsed as a flag: `gsheets mutate write` prints its help text,
 returns rc=0 and writes nothing. A header row reading
@@ -263,6 +266,27 @@ train columns blank discards half of every lr×wd comparison.
 - Report a train metric as a tail-window mean over the logged curve, not the
   single last row. See §Stop If It Is Not Comparable ("Converged value or single
   sample") and `../projects/eqr_jax.md` §Divisors and cadence.
+- Exception, when the log line is ALREADY a mean: a column literally named
+  `Final train loss` (the `looped nanogpt` / parcae-torch tab) takes the plot's
+  last point, not a tail-window average. That logger prints every row as a
+  trailing mean (`loss X (mean of N steps)`), so the cell is the LAST such line
+  verbatim; averaging those rows again pulls in the still-descending tail and
+  reads ~0.04-0.06 high at full length, which flipped an lr-sweep ranking. Take
+  it from the last NON-EMPTY `rank_0_attempt<k>.log` (a resumed run's endpoint is
+  in a later attempt; earlier attempts stop mid-descent), and sanity-check
+  train <= eval -- train > eval means a mid-run point, or a multi-depth /
+  aux-inclusive objective, was grabbed. Specifically, Col D (`Final train loss`)
+  in `looped nanogpt` MUST report the **pure `loop=8` (T=8) CE loss**:
+  - **Parcae**: `train/loss` (already pure T=8 CE).
+  - **Loopformer**: `train/loss_long` (pure T=8 LM CE; do NOT use `train/loss`
+    which adds `0.1*short + 0.1*consistency` — record the total objective in
+    `Status`).
+  - **Ouro**: `train/ce_D8` (equivalently `train/final_ce`, pure T=8 LM CE; do
+    NOT use `train/loss` or `train/task_loss`, which in post-`e23e147` non-halting
+    runs is the equal-weight mean across all depths `D1..D8` `(ce_D1+...+ce_D8)/8`
+    ~0.06 higher than `ce_D8`, and in pre-`e23e147` halting-ON runs is the
+    halting-weighted expected CE minus `entropy_beta * H` — record those in
+    `Status`).
 - Match the block's format per column. These tabs are inconsistent: `token_acc`
   is a percent in one section, a fraction in another. The wrong convention reads
   as a 100x error, so read the neighbors, not your memory. On `maze64-clean` the accuracy columns (ss20 /

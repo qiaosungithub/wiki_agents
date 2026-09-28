@@ -46,7 +46,7 @@ and each has a `README.md` index.
 | **Resume a job / write anything that passes a checkpoint to a job** | `jobs/resume.md` §The `LOAD_FROM` Contract |
 | **Resume a TRAINING run that keeps checkpointing** (never `LOAD_FROM`) | `jobs/resume.md` §The `restart_from` Contract |
 | **Write / port a training package** (checkpoint layout, resume flags, boot banner, `main.py` fail-closed) | `jobs/resume.md` Chapter 2 — New Training Package Startup Contract |
-| Submit a job or a batch (default `tpu enqueue` + serial `tpu build-worker`; auto cell / `--metro`) | `jobs/submit.md` Chapter 2 — Submitting A Job, Step By Step |
+| Submit a job or a batch (default `tpu enqueue`; the always-on dispatch-worker is the sole builder and drains it — never start a `tpu build-worker`; auto cell / `--metro`) | `jobs/submit.md` Chapter 2 — Submitting A Job, Step By Step |
 | A CPU-only batch job will not schedule | `jobs/submit.md` Chapter 3 §Tiers and CPU-only |
 | Choose a cell (now auto-picked); preflight before packaging | `jobs/submit.md` Chapter 2 — Submitting A Job, Step By Step |
 | A job will not schedule; capping spend | `infra/market.md`, `tools/limit_order.sh` |
@@ -124,9 +124,12 @@ offline eval) on CPU with the repo's `local_debug` config and
 is slow, and most of what dies on the accelerator dies on a workstation too
 (`engineering.md` §Local debug, then remote, before a real run).
 
-**Jobs.** On this SHARED workstation, submit through `tpu enqueue` plus one
-serial `tpu build-worker`; that is the default that dodges the concurrent-build
-zombie XID. Use `tpu queue` one-shot only when no other build is in flight.
+**Jobs.** On this SHARED workstation, submit through `tpu enqueue`; the
+always-running TPU dispatch-worker (kept alive by the `*/2` ops watchdog) is the
+SOLE builder and drains the queue by itself — do NOT start a `tpu build-worker`,
+a second builder only spins refusing the per-queue singleton lock. That single
+serial builder is what dodges the concurrent-build zombie XID. Use `tpu queue`
+one-shot only when no other build is in flight.
 Never call `xm launch` / `xmanager launch` directly (`jobs/submit.md`
 Chapter 1 §The launcher, config, and packaging).
 

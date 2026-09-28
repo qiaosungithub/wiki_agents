@@ -186,6 +186,24 @@ cancel/cool-down side effects are in `route_check.run_reroute`. Do not let a
 sweep cancel on an absence — an absence is the weakest possible reading
 (`../AGENTS.md` §Evidence Order).
 
+### A Reroute Requeue Warm-Restarts From The Lineage Checkpoint
+
+**Every reroute cancel path re-queues the job WARM through one shared helper; a
+cancel that calls `mark_reroute` directly cold-starts the job and discards its
+checkpoint.** `route_check.run_reroute`'s three cancel sites — in-place
+preemption thrash, double-confirmed PENDING, and nominally-RUNNING — all funnel
+through `_reroute_requeue_after_cancel`, which runs the SAME checkpoint-evidence
+and verdict path as reconcile (`CnsRestartEvidence` → `plan_pruned_restart`) and,
+when a complete checkpoint survives, wires the resume pointer into the row IN
+PLACE. In place, not a fresh row: `build_warm_restart_entry` does not carry the
+cell cooldown or eviction strike forward, so a substituted row re-lands on the
+very cell it was just evicted from. A job killed before its first save has no
+checkpoint and still cold-starts, which is correct. The resume channel is
+layout-specific and choosing wrong silently destroys checkpoints, so it is
+decided in one place; the contract is owned by `../jobs/resume.md` (ELT
+`restart_from`+`restart_step`, `load_from` for every other family). Add a fourth
+cancel path and route it through the same helper.
+
 ### A flock Wedged In FUSE-D Is The One Case That Does Not Self-Heal
 
 **The CLI's own locks degrade after their `-w` window, so a wedged holder costs

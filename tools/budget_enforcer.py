@@ -30,7 +30,9 @@ SAFETY:
     a bad price spike cannot mass-cancel the whole fleet in one tick.
 """
 import argparse
+import contextlib
 import datetime
+import fcntl
 import json
 import os
 import re
@@ -339,48 +341,331 @@ def _find_run_dir_by_xid(xid, jobs_file):
     return ''
 
 
-def _has_checkpoint_on_disk(r, jobs_file=None):
-    """物理校验 CNS 上真有 checkpoint。查不到 -> 不该 pause(砍了就回不来)。
-    返回 (verdict, detail);verdict: True=有 / False=确定没有 / None=查不了。
+# ---------------------------------------------------------------------------
+# PAUSE = put the job's OWN local-queue row back to QUEUED (operator 2026-09-23)
+# ---------------------------------------------------------------------------
+# A budget pause used to cancel the XID and then either (a) enqueue a NEW row
+# carrying only `resume_xid` -- no config, so xm_launcher fell back to its
+# default recipe (remote_run) and wrote over the checkpoint -- or (b), the
+# default since that was found, record a "NEEDS MANUAL RESUME" note in a file
+# nobody on the tpu side reads. Either way the paused job did not come back.
+#
+# The row the router already holds for the job IS a faithful resume spec: same
+# config, same frozen code snapshot, same archs/metros/pin. So a pause now
+# rewrites THAT row in place: supersede the cancelled submission, wire the
+# newest complete checkpoint in as the layout-correct resume pointer (the one
+# shared core route_lib._apply_resume_pointer, which owns the ELT
+# restart_from+restart_step vs torch load_from trap), and set it QUEUED. The
+# dispatch worker then relaunches it when the budget gate admits it again.
+#
+# auto_resumes is deliberately NOT incremented: that budget exists to stop a
+# run that keeps CRASHING from looping; a budget pause is not a crash, and
+# spending it here is how inv_n reached 5/3 and was left for dead.
 
-    ★台账缺 bucket_cp_path 不再等于"没有 checkpoint"。行里没有路径时(未回填),
-    先用 XID 在已知 CNS 根目录里兜底找 run 目录,再校验 —— 而不是直接判 False
-    把每个作业都当成不可 pause(那正是 enforcer 从不真正 pause 的旧 bug)。"""
+_ROUTER_SRC = os.path.expanduser('~/work/tpu_cmd/google3_tpu_utils')
+
+_LEDGER_TO_LEGACY = {
+    os.path.abspath(os.path.expanduser('~/.tpu_jobs.json')):
+        os.path.expanduser('~/.tpu_jobs_legacy.json'),
+    os.path.abspath(os.path.expanduser('~/lyy-work/.npu_jobs.json')):
+        os.path.expanduser('~/lyy-work/.npu_jobs_legacy.json'),
+}
+
+# fileutil's wording for "there is nothing there": a missing path, a missing
+# parent, or an existing-but-empty directory (the glob matches nothing).
+_CNS_ABSENT_MARKERS = ('not_found', 'No parent directory', 'No files matched')
+
+
+def _route_lib():
+    """route_lib from the router's source-of-truth repo, or None.
+
+    Pure stdlib module (its google3 imports are lazy and inside functions this
+    file never calls), so a plain python3 daemon can import it. None means the
+    in-place path is unavailable and the caller must fall back, never guess."""
+    try:
+        if _ROUTER_SRC not in sys.path:
+            sys.path.insert(0, _ROUTER_SRC)
+        import route_lib  # pylint: disable=import-outside-toplevel
+        return route_lib
+    except Exception as e:  # pylint: disable=broad-except
+        print(f"[enforcer] {_ts()} WARN: cannot import route_lib from "
+              f"{_ROUTER_SRC} ({type(e).__name__}: {e}); in-place re-queue "
+              f"unavailable this pass.", file=sys.stderr)
+        return None
+
+
+def _fileutil_ls(path, timeout_s=120):
+    """('ok', [paths]) | ('absent', []) | ('unknown', [detail]).
+
+    'absent' is a positive answer from CNS that nothing is there; 'unknown' is
+    anything else (timeout, auth, unreachable) and must never be read as absent.
+    """
+    try:
+        p = subprocess.run(['timeout', str(int(timeout_s)), 'fileutil', 'ls', path],
+                           capture_output=True, text=True, timeout=timeout_s + 30)
+    except Exception as e:  # pylint: disable=broad-except
+        return 'unknown', [f'fileutil failed to run on {path}: {type(e).__name__}']
+    if p.returncode == 0:
+        return 'ok', [ln.strip() for ln in (p.stdout or '').splitlines()
+                      if ln.strip().startswith('/')]
+    err = (p.stderr or '') + (p.stdout or '')
+    if any(m in err for m in _CNS_ABSENT_MARKERS):
+        return 'absent', []
+    return 'unknown', [f'fileutil rc={p.returncode} on {path} (CNS unreachable?)']
+
+
+def _latest_complete_checkpoint(run_dir, R, ls_fn=None):
+    """(True, leaf_path) | (False, detail) | (None, detail) for one run dir.
+
+    ★A RUN DIRECTORY IS NOT A CHECKPOINT. The old gate passed any existing run
+    dir, so a job 3 minutes into a cold start (config.json + an empty
+    checkpoints/) read as pausable and was cut with nothing to resume from.
+    This looks for a COMPLETE leaf in either fleet layout:
+      * ELT/EqR-jax `<run>/checkpoints/<N>`: orbax writes
+        `<N>.orbax-checkpoint-tmp-*` and renames to the bare int on commit, so a
+        bare-int leaf is complete by construction;
+      * torch `<run>/steps/step_<N>.pt` FILES: the saver writes a dot-prefixed
+        tmp and renames, so only a real `step_<N>.pt` counts.
+    The leaf comes back verbatim (never normalised; four shapes coexist).
+    """
+    ls_fn = ls_fn or _fileutil_ls
+    base = (run_dir or '').rstrip('/')
+    if not base:
+        return False, 'no run dir'
+    best_step, best, unknown = -1, None, []
+    st, lines = ls_fn(base + '/checkpoints')
+    if st == 'unknown':
+        unknown += lines
+    for p in (lines if st == 'ok' else []):
+        name = p.rstrip('/').rsplit('/', 1)[-1]
+        s = R.elt_checkpoint_leaf_step(name)
+        if s > best_step:
+            best_step, best = s, f'{base}/checkpoints/{name}'
+    st, lines = ls_fn(base + '/steps')
+    if st == 'unknown':
+        unknown += lines
+    for p in (lines if st == 'ok' else []):
+        name = p.rstrip('/').rsplit('/', 1)[-1]
+        if not (name.startswith('step_') and name.endswith('.pt')):
+            continue
+        s = R.checkpoint_step(name)
+        if s > best_step:
+            best_step, best = s, f'{base}/steps/{name}'
+    if best is not None:
+        return True, best
+    if unknown:
+        return None, '; '.join(unknown)
+    return False, f'no complete checkpoint under {base}/checkpoints or {base}/steps'
+
+
+def _row_resume_pointer(entry):
+    """The checkpoint this row is ALREADY set to resume from ('' if none)."""
+    lk = entry.launch_kwargs or {}
+    lf = str(lk.get('load_from') or '').strip()
+    if lf:
+        return lf
+    rf = str(lk.get('restart_from') or '').strip()
+    rs = str(lk.get('restart_step') or '').strip()
+    if rf and rs.isdigit():
+        return f"{rf.rstrip('/')}/checkpoints/{rs}"
+    return ''
+
+
+def _resume_checkpoint(r, entry, R, jobs_file=None, ls_fn=None):
+    """(True, ckpt) | (False/None, detail): where a paused job would resume.
+
+    Newest complete checkpoint of the CURRENT run first. A freshly resumed run
+    has not saved yet, so fall back to the pointer the row already resumes from
+    (verified to exist): pausing it then costs only the steps since that save,
+    not the run. No checkpoint anywhere -> refuse; a cut would be permanent."""
+    ls_fn = ls_fn or _fileutil_ls
     b = (r.get('bucket_cp_path') or '').strip()
     if not b:
-        b = _find_run_dir_by_xid(
-            r.get('xid', ''), jobs_file or os.path.expanduser('~/.tpu_jobs.json'))
-        if not b:
-            return False, 'no bucket_cp_path in ledger and none found on CNS by xid'
+        b = _find_run_dir_by_xid(r.get('xid', ''),
+                                 jobs_file or os.path.expanduser('~/.tpu_jobs.json'))
+    verdict, detail = (_latest_complete_checkpoint(b, R, ls_fn) if b
+                       else (False, 'no run dir in ledger or on CNS'))
+    if verdict is True:
+        return True, detail
+    ptr = _row_resume_pointer(entry) if entry is not None else ''
+    if ptr:
+        st, _ = ls_fn(ptr)
+        if st == 'ok':
+            return True, ptr
+        if st == 'unknown':
+            return None, f'{detail}; row pointer {ptr} unverifiable'
+        return False, f'{detail}; row pointer {ptr} is gone'
+    return verdict, detail
+
+
+@contextlib.contextmanager
+def _queue_lock(queue_file):
+    """The router's cross-process queue lock: flock on the SIDECAR '<q>.lock'
+    (route_check.with_queue_lock). Never the queue file itself -- saves swap it
+    in with os.replace, which would drop a lock held on the old inode."""
+    with open(queue_file + '.lock', 'w') as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lk, fcntl.LOCK_UN)
+
+
+def _rows_holding(entries_raw, xid, R):
+    """[(index, QueueEntry)] whose CURRENT submission is `xid`."""
+    out = []
+    for i, d in enumerate(entries_raw):
+        try:
+            e = R.QueueEntry.from_dict(d)
+        except Exception:  # pylint: disable=broad-except
+            continue
+        if str(e.xid or '') == str(xid):
+            out.append((i, e))
+    return out
+
+
+def _live_successors(entries_raw, job_id, xid, R):
+    """job_ids of OTHER unfinished rows that already carry `xid` in their
+    history, i.e. somebody (reconcile's auto-resume) already restarted it."""
+    out = []
+    for d in entries_raw:
+        if d.get('job_id') == job_id:
+            continue
+        try:
+            e = R.QueueEntry.from_dict(d)
+        except Exception:  # pylint: disable=broad-except
+            continue
+        if e.state not in R.FINISHED_STATES and str(xid) in (e.prior_xids or []):
+            out.append(e.job_id)
+    return out
+
+
+def find_queue_row(queue_file, xid, R):
+    """(QueueEntry, '') for the one row holding `xid`, else (None, why)."""
     try:
-        p = subprocess.run(['timeout', '120', 'fileutil', 'ls', b],
-                           capture_output=True, text=True, timeout=150)
-    except Exception as e:
-        return None, f'fileutil failed to run: {type(e).__name__}'
-    if p.returncode != 0:
-        err = ((p.stderr or '') + (p.stdout or ''))
-        if 'not_found' in err or 'No parent directory' in err:
-            return False, f'CNS says not found: {b}'
-        return None, f'fileutil rc={p.returncode} (CNS unreachable?)'
-    return True, b
+        with open(queue_file) as f:
+            raw = json.load(f)
+    except Exception as e:  # pylint: disable=broad-except
+        return None, f'cannot read {queue_file}: {type(e).__name__}'
+    ents = raw.get('entries', []) if isinstance(raw, dict) else []
+    rows = _rows_holding(ents, xid, R)
+    if not rows:
+        return None, f'no local-queue row holds xid {xid}'
+    if len(rows) > 1:
+        return None, f'{len(rows)} rows hold xid {xid} (ambiguous)'
+    e = rows[0][1]
+    succ = _live_successors(ents, e.job_id, xid, R)
+    if succ:
+        return None, f'xid {xid} already resumed by row(s) {succ}'
+    return e, ''
+
+
+def requeue_row_in_place(R, entry, xid, checkpoint, why):
+    """Pure: turn `entry` (holding `xid`) into a QUEUED resume. Mutates and
+    returns `entry`. No I/O.
+
+    checkpoint = a path -> WARM: the layout-correct pointer (ELT restart_from +
+    restart_step, torch load_from) via route_lib's one shared core.
+    checkpoint = None   -> COLD (operator 2026-09-23: "没checkpoint就从头开始"):
+    every resume pointer is stripped so the rerun starts at step 0 in its own
+    fresh run dir (a new xid -> a new xid_<N>_... dir; nothing is overwritten).
+    """
+    lk = dict(entry.launch_kwargs or {})
+    if checkpoint:
+        R._apply_resume_pointer(lk, checkpoint)  # pylint: disable=protected-access
+    else:
+        for k in ('load_from', 'restart_from', 'restart_step'):
+            lk.pop(k, None)
+    base = lk.get('exp_name') or entry.name or entry.job_id
+    m = re.search(r'-r(\d+)$', base)
+    lk['exp_name'] = R._resume_exp_name(base, (int(m.group(1)) + 1) if m else 1)  # pylint: disable=protected-access
+    entry.launch_kwargs = lk
+    cur = entry.current_submission
+    if cur is not None and str(cur.xid or '') == str(xid):
+        cur.state = 'SUPERSEDED'   # history keeps the xid; the row holds none now
+        cur.ended_reason = 'budget pause (budget_enforcer)'
+    entry.state = R.JobState.QUEUED
+    entry.cell = None
+    entry.arch = None
+    entry.chips = None
+    entry.submitted_at = None
+    entry.build_started_at = None
+    entry.worker_id = None
+    entry.last_reason = why
+    return entry
+
+
+def requeue_in_place(queue_file, job_id, xid, checkpoint, why, R):
+    """Locked read-modify-write of ONE row. (ok, detail). Re-verifies under the
+    lock that the row still holds `xid` and nobody resumed it meanwhile; any
+    doubt leaves the queue untouched."""
+    with _queue_lock(queue_file):
+        with open(queue_file) as f:
+            raw = json.load(f)
+        if not isinstance(raw, dict) or raw.get('schema_version') != R.QUEUE_SCHEMA_VERSION:
+            return False, (f"queue schema {raw.get('schema_version') if isinstance(raw, dict) else '?'}"
+                           f" != route_lib {R.QUEUE_SCHEMA_VERSION}; not touching it")
+        ents = raw.get('entries') or []
+        idx = [i for i, d in enumerate(ents) if d.get('job_id') == job_id]
+        if len(idx) != 1:
+            return False, f'row {job_id} vanished or is duplicated ({len(idx)})'
+        e = R.QueueEntry.from_dict(ents[idx[0]])
+        if str(e.xid or '') != str(xid):
+            return False, f'row {job_id} now holds xid {e.xid}, not {xid}; left as-is'
+        succ = _live_successors(ents, job_id, xid, R)
+        if succ:
+            return False, f'xid {xid} already resumed by {succ}; left as-is'
+        requeue_row_in_place(R, e, xid, checkpoint, why)
+        ents[idx[0]] = e.to_dict()
+        raw['entries'] = ents
+        raw['updated'] = time.time()
+        tmp = f'{queue_file}.tmp.{os.getpid()}'
+        with open(tmp, 'w') as f:
+            json.dump(raw, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, queue_file)
+    return True, e.launch_kwargs.get('exp_name', '')
+
+
+def _archive_board_xid(xid, jobs_file):
+    """Move the paused XID's registry row to the legacy file so `tpu check` does
+    not show a CANCELLED ghost next to a job that is in fact queued again.
+    Same lock discipline and move-not-delete semantics as the reroute path's
+    archive (route_check). Best-effort: returns a short note, never raises."""
+    legacy_file = _LEDGER_TO_LEGACY.get(os.path.abspath(os.path.expanduser(jobs_file)))
+    if not legacy_file:
+        return 'board archive skipped (unknown ledger)'
+    try:
+        # The registry's one write path (lock across the move, archive first,
+        # strict reads): see registry_store's docstring.
+        if _ROUTER_SRC not in sys.path:
+            sys.path.insert(0, _ROUTER_SRC)
+        import registry_store  # pylint: disable=import-outside-toplevel
+        out = registry_store.archive(
+            [str(xid)], who='budget_enforcer',
+            archived_by='budget_enforcer (paused, re-queued in place)',
+            path=jobs_file, legacy=legacy_file)
+        if not out['moved']:
+            return 'board archive: already off the board'
+        return 'board: xid archived'
+    except Exception as e:  # pylint: disable=broad-except
+        return f'board archive FAILED (non-fatal): {type(e).__name__}: {e}'
 
 
 def pause_and_requeue(r, jobs_file, dry_run, local_queue_file=None,
                       unsafe_blind_resume=False):
-    """PAUSE a job instead of killing it: cancel the XID (frees chips, stops
-    billing) then re-enqueue it as a QUEUED resume (launch=resume_xid=<xid>),
-    so the reroute daemon re-launches it FROM ITS CHECKPOINT once the price
-    drops enough to fit under income/10 again (budget_check gates the launch).
-    A QUEUED job costs nothing (PENDING is free), so the pause itself never
-    violates the cap. Returns (ok, output).
+    """PAUSE a job: cancel the XID (frees chips, stops billing) and put the
+    job's own local-queue row back to QUEUED, so the dispatch worker relaunches
+    it once the budget gate admits it again: warm from its newest complete
+    checkpoint if there is one, otherwise COLD from step 0 (a missing checkpoint
+    no longer blocks the pause -- operator 2026-09-23). A QUEUED row costs
+    nothing, so the pause never violates the cap. Returns (ok, output).
 
-    Requires the job to have a recorded stagedir (code snapshot) so the resume
-    can re-use the ORIGINAL source; bucket_cp_path (checkpoint) lets it continue
-    rather than restart. If stagedir is missing we fall back to a plain cancel
-    (nothing to resume from) and say so.
+    A job with no local-queue row (launched outside `tpu enqueue`) has no
+    faithful resume spec; it keeps the old path (cancel + pending-resume note).
     """
     xid = r['xid']
-
     # 闸 1:台账与队列必须配对。未传就按表自动补(修好而不是拒绝);
     # 传了但不配对 = 唯一还能真出事的情形,拒绝;未知台账,拒绝。
     _jf = os.path.abspath(os.path.expanduser(jobs_file))
@@ -396,53 +681,72 @@ def pause_and_requeue(r, jobs_file, dry_run, local_queue_file=None,
                        f"{_want_q},当前 --local-queue-file={local_queue_file}。"
                        f"错配会让排那条队列的 worker 用错台账查 stagedir,必然 HELD。")
 
-    # 闸 2:pause 的前提是"以后能从 checkpoint 接着跑"。CNS 上没有 checkpoint 就
-    # 不是 pause,是永久丢进度 —— 方向必须是"查不到就不砍"。
-    if not dry_run:
-        _ck, _ckdetail = _has_checkpoint_on_disk(r, jobs_file)
-        if _ck is not True:
-            return False, (f"REFUSED to pause {xid}: checkpoint 未确认 "
-                           f"({_ckdetail})。砍了就回不到 {r.get('name')} 的进度,"
-                           f"不动它;预算这一轮少停一个作业。")
+    R = _route_lib()
+    row, row_why = (find_queue_row(local_queue_file, xid, R) if R is not None
+                    else (None, 'route_lib unavailable'))
 
+    # 没有 checkpoint 不再拒绝暂停(operator 2026-09-23:"这个限制去掉。如果没
+    # checkpoint就从头开始")。有完整 checkpoint -> 热启动;确定没有 -> 从头跑。
+    # CNS 查不了(unknown)时不猜"没有":沿用行里已有的 resume 指针(它在这次
+    # 启动时就是有效的),行里也没有才从头跑。(read-only, so dry-run runs it too)
+    ckpt, how = None, 'route_lib unavailable'
+    if R is not None:
+        _ck, detail = _resume_checkpoint(r, row, R, jobs_file)
+        if _ck is True:
+            ckpt, how = detail, f'warm from {detail}'
+        elif _ck is None and row is not None and _row_resume_pointer(row):
+            ckpt = _row_resume_pointer(row)
+            how = f'warm from the row\'s existing pointer {ckpt} (CNS unverifiable: {detail})'
+        else:
+            how = f'COLD from step 0 (no checkpoint: {detail})'
+
+    if row is not None:
+        why = (f"budget pause {_ts()}: budget_enforcer cancelled xid {xid} "
+               f"(cost {r.get('cost', 0):.0f}/hr over the income/10 cap); re-queued "
+               f"in place, {how}; relaunches when the budget gate admits it")
+        if dry_run:
+            return True, (f"[dry-run] would: tpu cancel {xid}; then re-queue row "
+                          f"{row.name or row.job_id} ({row.job_id}) IN PLACE, {how}")
+        ok, cout = cancel_job(xid, jobs_file, dry_run=False)
+        if not ok:
+            return False, f"cancel failed, NOT re-queued (job left as-is): {_tail(cout)}"
+        ok2, detail = requeue_in_place(local_queue_file, row.job_id, xid, ckpt, why, R)
+        if ok2:
+            note = _archive_board_xid(xid, jobs_file)
+            return True, (f"cancelled + re-queued IN PLACE: {row.name or row.job_id} "
+                          f"({row.job_id}) -> QUEUED as {detail}, {how}; {note}")
+        okn, where = _record_pending_resume(r, jobs_file)
+        return True, (f"cancelled, but in-place re-queue FAILED ({detail}) -- NEEDS MANUAL "
+                      f"RESUME ({how}); " + (f"recorded in {where}" if okn
+                                                 else f"and FAILED to record it ({where})"))
+
+    # --- no local-queue row: the old path -----------------------------------
     if not r.get('has_stagedir'):
+        if dry_run:
+            return True, f"[dry-run] would: plain tpu cancel {xid} ({row_why}; no stagedir)"
         ok, out = cancel_job(xid, jobs_file, dry_run)
-        return ok, f"[no stagedir -> plain cancel, cannot auto-resume] {out}"
+        return ok, f"[{row_why}; no stagedir -> plain cancel, cannot auto-resume] {_tail(out)}"
     power = r['tpu_type']
     archs = ','.join(_archs_for(power))
     tier = r.get('tier', 'PROD')
-    # priority -1: a resumed pause goes BEHIND fresh work, so the enforcer's own
-    # re-queue never jumps the line ahead of what the operator newly enqueues.
-    # TPU_LOCAL_QUEUE_FILE must match the AGENT's own local queue, or the resume
-    # leaks into the default (tpu) queue and the wrong build-worker tries it.
     lq = local_queue_file or ''
     lq_prefix = f'export TPU_LOCAL_QUEUE_FILE={json.dumps(lq)}; ' if lq else ''
     if dry_run:
-        return True, (f"[dry-run] would: tpu cancel {xid}; then "
-                      + (f"TPU_LOCAL_QUEUE_FILE={lq} " if lq else "")
-                      + f"tpu enqueue "
-                      f"--power={power} --archs={archs} --tier={tier} "
-                      f"--priority=-1 --launch=resume_xid={xid}"
-                      + ("" if r.get('has_ckpt') else "  (no checkpoint: restarts from step 0)"))
-    # 1) cancel the running XID
+        return True, (f"[dry-run] would: tpu cancel {xid} ({row_why}); then "
+                      + ("blind resume_xid enqueue" if unsafe_blind_resume
+                         else f"record a pending-resume note ({how})"))
     ok, cout = cancel_job(xid, jobs_file, dry_run=False)
     if not ok:
-        return False, f"cancel failed, NOT re-queued (job left as-is): {cout}"
-    # 2) 本来这里 re-enqueue 成 resume。**默认不再这么做。**
-    # 原因:enforcer 造的队列条目 launch_kwargs 只有 {resume_xid},没有 config。
-    # 而 xm_launcher.py:25-26 是 _CONFIG = DEFINE_string('config', 'remote_run', ...)
-    # —— 空壳 resume 会用 **remote_run** 这个默认配方跑,落在原 XID 的 checkpoint
-    # 前缀上。台账里没有 config 字段,launch_log 里也没有,今天没有任何代码路径
-    # 能补上它。所以这样的 resume 一旦真跑起来就是拿错配方覆盖真 checkpoint,
-    # 比卡在 HELD 更糟。改为:记一条待办,让人拿正确的 config 重投。
+        return False, f"cancel failed, NOT re-queued (job left as-is): {_tail(cout)}"
+    # 空壳 resume(只有 resume_xid、没有 config)会让 xm_launcher 用默认配方
+    # remote_run 覆盖原 checkpoint,所以默认只记待办,让人拿正确的 config 重投。
     if not unsafe_blind_resume:
         ok2, where = _record_pending_resume(r, jobs_file)
         if ok2:
-            return True, (f"cancelled; auto-resume WITHHELD (blind resume would run "
-                          f"config=remote_run over this checkpoint). NEEDS MANUAL RESUME "
-                          f"-> recorded in {where}")
-        return True, (f"cancelled; auto-resume WITHHELD, and FAILED to record the "
-                      f"pending-resume note ({where}) -- NEEDS MANUAL RESUME, xid={xid}")
+            return True, (f"cancelled ({row_why}); auto-resume WITHHELD (no queue row to "
+                          f"re-queue). NEEDS MANUAL RESUME ({how}) -> recorded in {where}")
+        return True, (f"cancelled ({row_why}); auto-resume WITHHELD, and FAILED to record "
+                      f"the pending-resume note ({where}) -- NEEDS MANUAL RESUME, xid={xid}")
     enq = (f'export TPU_JOBS_FILE={json.dumps(jobs_file)}; '
            f'{lq_prefix}'
            f'source {json.dumps(WRAPPER)} >/dev/null 2>&1; '

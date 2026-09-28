@@ -6,27 +6,37 @@ the hub is `../jobs.md`. Siblings: `resume.md`, `liveness.md`, `diagnose.md`,
 `report.md`.
 
 The default: `cd` into the code directory, `tpu enqueue` with all usable
-`--archs` (among v4, v5p, v6e, v6p, v7) and several data `--metros`, and keep one
-serial `tpu build-worker` draining the queue.
+`--archs` (among v4, v5p, v6e, v6p, v7) and several data `--metros`. That is the
+whole submit step — the always-on TPU dispatch-worker (kept alive by the `*/2`
+ops watchdog) is the sole builder and drains the queue on its own. You do NOT
+start a `tpu build-worker`; there is no separate TPU build-worker on this host.
 
 ---
 
 ## Chapter 1 — How Submission Works
 
-### The two queues and the serial build-worker
+### The two queues and the single serial builder
 
-**Every job goes through a local queue that a single serial `tpu build-worker`
-drains into the XManager queue, one build at a time.** `tpu enqueue` appends a
-run to a durable local list (`~/.tpu_local_queue.json`) — instant, free, no bill
-while it waits; the worker then claims one QUEUED entry, builds it, records its
-XID, and repeats. States: QUEUED → BUILDING → SUBMITTED → RUNNING
-(`tpu queue-status`, `tpu check`).
+**Every job goes through a local queue that a single serial builder drains into
+the XManager queue, one build at a time.** On this host that builder is the
+always-on TPU **dispatch-worker** (`route_check --dispatch_worker`, kept alive
+by the `*/2` ops watchdog) — it does routing AND building, so nothing extra has
+to be started. `tpu enqueue` appends a run to a durable local list
+(`~/.tpu_local_queue.json`) — instant, free, no bill while it waits; the
+dispatch-worker then claims one QUEUED entry, builds it, records its XID, and
+repeats. States: QUEUED → BUILDING → SUBMITTED → RUNNING (`tpu queue-status`,
+`tpu check`).
 
-Serial is the default because builds are always in flight on this shared
-workstation: two concurrent builds race on blaze's `output_base` (keyed per
-checkout root, not per copy dir) and ship a zombie XID with zero work units.
-`tpu queue` is the one-shot synchronous fallback — only when you KNOW no other
-build is running.
+A SINGLE serial builder is enforced, not merely conventional: `route_check`
+holds a per-queue-file singleton lock (`{queue_file}.builder.lock`, taken with
+`flock(LOCK_EX|LOCK_NB)` for the process lifetime), so at most one builder ever
+runs per queue — one for tpu (`~/.tpu_local_queue.json`), one for npu
+(`~/lyy-work/.npu_local_queue.json`). This matters because builds are always in
+flight on this shared workstation: two concurrent builds race on blaze's
+`output_base` (keyed per checkout root, not per copy dir) and ship a zombie XID
+with zero work units. So do NOT run `tpu build-worker` to "add" a builder — the
+legacy `--worker` just loses the lock and exits every 5s. `tpu queue` is the
+one-shot synchronous fallback — only when you KNOW no other build is running.
 
 ### The smart router picks the cell and the group
 

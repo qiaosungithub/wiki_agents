@@ -31,7 +31,7 @@ ssh all need it. `gcloud auth list` shows the copied accounts; keep passing
 |---|---|---|
 | Amply: `amply-localdb.service` + `amply-ux.service` | running; gateway URL in `~/.amply/dashboard_url` (port 44127 on 2026-09-08; it picks its own) | stopped |
 | crontab (19 active lines after the 2026-09-10 monitor retirement; was 44) | installed | removed (copies under `~/migrate_backup_20260907_175207/system/`) |
-| tmux `npu-daemon`, `tpu-dispatch`, `tpu-reroute`, `tpu-build-worker`, `npu-build-worker` | running, one `route_check` per role | killed |
+| tmux `npu-daemon`, `tpu-dispatch`, `tpu-reroute`, `npu-build-worker` | running, one `route_check` per role. NB: there is NO `tpu-build-worker` (retired 2026-09-16) — the tpu dispatch-worker is the sole tpu builder; `npu-build-worker` is npu's separate builder | killed |
 | `tpu_utils` binaries | `/usr/local/google/_blaze_qiaos/c99224759024385897e236938d1772c2_buildrabbit/...` (+ compat symlink `bb5e05891304127daf0b480f4298d971_buildrabbit` for `tpu_reroute_loop_v17.sh`, which hardcodes that root) | old roots, no longer used |
 | `jetski-hub.service` | **kept inactive on purpose** (see below) | running |
 | agent web (`~/work/agent-web-gemini/run.sh`, node, cloudflared tunnel, `jetski-ls` / `webchat-tunnel` tmux) | not yet | running, hosts every web chat session |
@@ -65,7 +65,7 @@ missing one.
 
 **`~/bootstrap_daemons.sh` owns the ten daemons that previously had no reboot
 path at all**: `npu-daemon`, `npu-reroute`, `npu-build-worker`,
-`tpu-build-worker`, `tpu-scheduler`, `survival-poller`, `remote-control-poller`,
+`tpu-scheduler`, `tpu-tail-cache`, `survival-poller`, `remote-control-poller`,
 `wandb-upload`, `wandb-upload-tpu`, `google-job-info`. Before 2026-09-15 they had
 no `@reboot` line and no unit, so the 2026-09-14 reboot left them down until they
 were hand-started 36 minutes later. Each has a launcher in
@@ -87,8 +87,19 @@ Three things it gets right that a naive rewrite breaks:
 - **It deliberately does NOT cover tpu-check-daemon, the TPU dispatch-worker, or
   `budget_enforcer`** — the `*/2` ops watchdog already keeps those alive, and a
   second copy is two daemons on one cache, which is a failure mode, not
-  redundancy (`tpu_cmd`). The two build-WORKERS are separate from the
-  dispatch-worker and are the bootstrap's job.
+  redundancy (`tpu_cmd`). `npu-build-worker` is separate from the TPU
+  dispatch-worker and is the bootstrap's job; there is no TPU build-worker here —
+  the dispatch-worker is the sole TPU builder, so do not re-add one.
+
+**A daemon that uses `systemd-run --user` needs `XDG_RUNTIME_DIR` and
+`DBUS_SESSION_BUS_ADDRESS`, and only a real login session sets them** — cron, a
+re-launched tmux server, and an agent or ssh shell that never logged in all lack
+them, and no rc file supplies them. This bites the `tpu-scheduler` chain
+(`tpu_reroute_loop_v17.sh` → `systemd-run --user --scope`): without the user bus
+every tick fails with "Failed to connect to user scope bus", the worker never
+starts, and reconcile goes silent while the interlock still sees the lock held
+and calls the loop healthy. The loop now self-heals by deriving both from
+`id -u`; any manual bringup must export them too.
 
 The LLM monitor line was retired on 2026-09-10; its persistent host,
 `swap-oom-agent.service`, is **stopped and disabled** (2026-09-15). It had been

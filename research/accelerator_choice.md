@@ -95,7 +95,7 @@ Cheap, and worth it before any long run on a preemptible tier:
 ```bash
 tpu enqueue --power=<type> --metros=<data-metro[,metro2]> \
   --launch=group=<g>,tier=PROD,bucket=<co-located CNS path>,exp_name=<probe-name>
-tpu build-worker start   # serial worker drains it (the default path — ../jobs.md)
+# the always-on tpu dispatch-worker drains the queue on its own — no build-worker to start (../jobs.md)
 ```
 
 - **Data-locality is `--metros`, not a hand-pinned `cell=`.** `--power` picks the
