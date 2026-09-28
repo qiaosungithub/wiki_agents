@@ -41,11 +41,11 @@ the URL by hand (§Chart Links).
 | VLM (PaliGemma / JAX LLaVA) | `1FlcygQbGBTqHLJeiKdwxS0nP41SPMJrtX-kCJq8d7SQ` | the cleaned PaliGemma/JAX LLaVA tab |
 | `EqR` / `EqR-jax` | `17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0` | `EqR-refactored`. `EqR-reproduction` is pre-refactor, read-only history |
 | char-LM / torch-rnn | `17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0` | `charlm-torchrnn (qiaos)`. Every metric cell is `mean +- sd` over 4 seeds; one cell = one wandb group. Headline columns are the HELD-OUT split; the selection split has its own trailing column. Row format and the `gsheets --` trap: `../projects/charlm_torchrnn.md` |
-| looped nanoGPT (the idea line) | `1zVNvnD8CshpT-gUzEmHZCKnAcmkf6wZHdDUu69LFPEo` (its own workbook) | `looped nanogpt` — the curated research tab for parcae / loopformer / ouro (`../research/looped_nanogpt_per_site.md`). The same-titled tab in `17pvrMbOKOKFiIa-…` and `Parcae unroll-optim (qiaos)` there are read-only history. |
+| looped nanoGPT (the idea line) | `1chHYhhEnTfgkKmLnZiC7jjoFCE-ywsDCxPLXFdSTl20` (its own workbook) | `looped nanogpt` — the curated research tab for parcae / loopformer / ouro (`../research/looped_nanogpt_per_site.md`). The same-titled tab in `17pvrMbOKOKFiIa-…` and `Parcae unroll-optim (qiaos)` there are read-only history. |
 
 **Every parcae / loopformer / ouro run, and any new nanoGPT-setting run, logs to
 the `looped nanogpt` tab of workbook
-`1zVNvnD8CshpT-gUzEmHZCKnAcmkf6wZHdDUu69LFPEo` by default.** It is a pruned copy
+`1chHYhhEnTfgkKmLnZiC7jjoFCE-ywsDCxPLXFdSTl20` by default.** It is a pruned copy
 that keeps only the rows worth comparing against. The EqR workbook still holds a
 tab with the SAME title, `looped nanogpt`: that one is the unpruned history and
 is read-only, so resolving the title inside the wrong workbook writes into a

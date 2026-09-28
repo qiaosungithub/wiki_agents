@@ -43,7 +43,7 @@ those per-method differences.
 ## Results tab
 
 **Log every parcae / loopformer / ouro run from this line to the `looped nanogpt`
-tab of its own workbook, `1zVNvnD8CshpT-gUzEmHZCKnAcmkf6wZHdDUu69LFPEo`.** That
+tab of its own workbook, `1chHYhhEnTfgkKmLnZiC7jjoFCE-ywsDCxPLXFdSTl20`.** That
 workbook is a curated copy: superseded runs and non-best sweep points were
 pruned, so it holds the rows worth comparing against. The same-titled
 `looped nanogpt` tab in the EqR workbook

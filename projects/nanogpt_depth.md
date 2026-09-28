@@ -70,7 +70,7 @@ W&B entity `zhh24-massachusetts-institute-of-technology`, project
 `nanoGPT (qiaos)` tab (call/loss diagonal), which is NOT being replaced. The
 separate looped-methods program (parcae / loopformer / ouro), and new
 nanoGPT-setting work generally, default to the `looped nanogpt` tab of a
-DIFFERENT workbook, `1zVNvnD8CshpT-gUzEmHZCKnAcmkf6wZHdDUu69LFPEo`
+DIFFERENT workbook, `1chHYhhEnTfgkKmLnZiC7jjoFCE-ywsDCxPLXFdSTl20`
 (`../research/result_logging.md` §Which Tab, which owns the routing rule and
 governs the writes). Resolve any tab by title and
 re-read its live header.
