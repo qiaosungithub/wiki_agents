@@ -16,7 +16,7 @@ higher layer wins a conflict, and changes flow downward.
 |---|---|---|---|
 | `hie1/` | Direction: story, claims, scope, benchmark decisions | User | Read only. Raise problems with the user or in `hie2/open-questions.md` |
 | `hie2/` | Blueprint: what each section says, its evidence, figures, terminology | User and agent; the user decides | Write, marking its own additions `[proposed]`; never add a claim or widen the scope beyond hie1 |
-| `hie3/` | The paper: LaTeX in the CVPR template, plus the compiled `main.pdf` | Agent | Everything, as long as every claim traces to hie2 and every number to a real run |
+| `hie3/` | The paper: LaTeX in the ICML template, plus the compiled `main.pdf` | Agent | Everything, as long as every claim traces to hie2 and every number to a real run |
 
 ## Starting A Session
 
@@ -31,21 +31,25 @@ higher layer wins a conflict, and changes flow downward.
 **Build with plain `pdflatex` and `bibtex`; `latexmk` is not installed on the
 workstation.**
 
-- Template: the official CVPR author kit,
-  `https://github.com/cvpr-org/author-kit`. Use the newest `CVPR<year>-v*(latex)`
-  tag (`git ls-remote --tags` on that URL lists them) and clone it with
-  `git clone --depth 1 --branch '<tag>' <url>`. The kit compiles here unmodified.
-  Do not edit `cvpr.sty` or the `.bst`.
+- Template: the official ICML style kit,
+  `https://media.icml.cc/Conferences/ICML<year>/Styles/icml<year>.zip`. A year
+  that is not yet published returns HTTP 404, so probe with
+  `curl -s -o /dev/null -w '%{http_code}' <url>`, use the newest year that
+  answers 200, and switch once the target year appears. The kit compiles here
+  unmodified. Do not edit `icml<year>.sty` or the `.bst`.
 - Build from `hie3/`:
   `pdflatex -interaction=nonstopmode main && bibtex main && pdflatex -interaction=nonstopmode main && pdflatex -interaction=nonstopmode main`.
   Then grep `main.log` for lines starting with `!` and for `undefined`
   references or citations. A PDF being written does not mean it is clean.
-- Page limit: 8 pages excluding references, per the kit's own instructions.
-  `pdfinfo main.pdf` gives the total count, which includes the references, so
-  check the page where the references begin.
-- `\usepackage[review]{cvpr}` is an anonymous submission. Keep author names,
-  acknowledgements, and links to the GitHub repo, W&B or the results workbook
-  out of the paper text.
+- Page limit: the main body must fit in 8 pages; references, the Impact
+  Statement, and appendices do not count, per the kit's own instructions.
+  `pdfinfo main.pdf` counts everything, so check the page where the main body
+  ends instead. ICML requires an unnumbered Impact Statement before the
+  references, and appendices go in the same PDF.
+- `\usepackage{icml<year>}` with no option is the anonymous submission mode;
+  the style file strips the author block itself. `[accepted]` and `[preprint]`
+  both show the authors. Keep acknowledgements, and links to the GitHub repo,
+  W&B or the results workbook, out of the paper text.
 
 ## Numbers, Citations, Figures
 

@@ -70,7 +70,7 @@ and each has a `README.md` index.
 | Resume skips work, or a 0-byte file counts as done | `storage.md` §Existence Is Not Completeness |
 | Reclaim local disk, or prune checkpoints | `storage.md` §Local Disk Cleanup, §Checkpoints Are The Default Reason A Cell Fills Up |
 | **The core research idea / the "idea page"** — per-site (untied) gradients for weight-shared models and the looped-nanoGPT benchmark; points at the user's `hie1/` files in the paper repo | `research/looped_nanogpt_per_site.md` |
-| **Write the paper** (`~/work/paper-with-agent`): the hie1 / hie2 / hie3 layers, hie1 is user-only, CVPR LaTeX build | `projects/paper_with_agent.md` |
+| **Write the paper** (`~/work/paper-with-agent`): the hie1 / hie2 / hie3 layers, hie1 is user-only, ICML LaTeX build | `projects/paper_with_agent.md` |
 | Manage a long experiment; tracker evidence | `research/README.md` |
 | Build or verify a multi-GB artifact on distributed storage | `storage.md` §Building A Multi-Gigabyte Artifact |
 | A big write is silently truncated or keeps restarting | `storage.md` §Two Writers On One Output Path |
