@@ -42,15 +42,15 @@ the URL by hand (§Chart Links).
 | VLM (PaliGemma / JAX LLaVA) | `1FlcygQbGBTqHLJeiKdwxS0nP41SPMJrtX-kCJq8d7SQ` | the cleaned PaliGemma/JAX LLaVA tab |
 | `EqR` / `EqR-jax` | `17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0` | `EqR-refactored`. `EqR-reproduction` is pre-refactor, read-only history |
 | char-LM / torch-rnn | `17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0` | `charlm-torchrnn (qiaos)`. Every metric cell is `mean +- sd` over 4 seeds; one cell = one wandb group. Headline columns are the HELD-OUT split; the selection split has its own trailing column. Row format and the `gsheets --` trap: `../projects/charlm_torchrnn.md` |
-| looped nanoGPT (the idea line) | `1chHYhhEnTfgkKmLnZiC7jjoFCE-ywsDCxPLXFdSTl20` (its own workbook) | `looped nanogpt` — the curated research tab for parcae / loopformer / ouro (`../research/looped_nanogpt_per_site.md`). The same-titled tab in `17pvrMbOKOKFiIa-…` and `Parcae unroll-optim (qiaos)` there are read-only history. |
+| looped nanoGPT (the idea line) | `1chHYhhEnTfgkKmLnZiC7jjoFCE-ywsDCxPLXFdSTl20` (its own workbook) | `looped nanogpt (cleaned)` — the curated research tab for parcae / loopformer / ouro (`../research/looped_nanogpt_per_site.md`). The older `looped nanogpt` tab in the same workbook, plus the same-titled tab in `17pvrMbOKOKFiIa-…` and `Parcae unroll-optim (qiaos)` there, are read-only history. |
 
 **Every parcae / loopformer / ouro run, and any new nanoGPT-setting run, logs to
-the `looped nanogpt` tab of workbook
+the `looped nanogpt (cleaned)` tab (`sheetId = 1779859670`) of workbook
 `1chHYhhEnTfgkKmLnZiC7jjoFCE-ywsDCxPLXFdSTl20` by default.** It is a pruned copy
-that keeps only the rows worth comparing against. The EqR workbook still holds a
-tab with the SAME title, `looped nanogpt`: that one is the unpruned history and
-is read-only, so resolving the title inside the wrong workbook writes into a
-frozen tab and nothing errors. Pick the workbook by ID, then the tab by title.
+that keeps only the new-weight-recipe blocks and reference baselines worth comparing against. Both the older `looped nanogpt` tab (`sheetId = 642888791`) in the same workbook and the
+tab with the title `looped nanogpt` in the EqR workbook are unpruned history and
+are read-only, so resolving the old title or the wrong workbook writes into a
+frozen tab and nothing errors. Pick the workbook by ID, then the tab by title (`looped nanogpt (cleaned)`).
 Inside the tab, put a new row next to its comparison target (§Where The Row
 Goes); a new line of work opens a titled block below the method it belongs to.
 The call/loss-diagonal line's own `nanoGPT (qiaos)` tab is a separate line and
@@ -267,7 +267,7 @@ train columns blank discards half of every lr×wd comparison.
   single last row. See §Stop If It Is Not Comparable ("Converged value or single
   sample") and `../projects/eqr_jax.md` §Divisors and cadence.
 - Exception, when the log line is ALREADY a mean: a column literally named
-  `Final train loss` (the `looped nanogpt` / parcae-torch tab) takes the plot's
+  `Final train loss` (the `looped nanogpt (cleaned)` / parcae-torch tab) takes the plot's
   last point, not a tail-window average. That logger prints every row as a
   trailing mean (`loss X (mean of N steps)`), so the cell is the LAST such line
   verbatim; averaging those rows again pulls in the still-descending tail and
@@ -276,7 +276,7 @@ train columns blank discards half of every lr×wd comparison.
   in a later attempt; earlier attempts stop mid-descent), and sanity-check
   train <= eval -- train > eval means a mid-run point, or a multi-depth /
   aux-inclusive objective, was grabbed. Specifically, Col D (`Final train loss`)
-  in `looped nanogpt` MUST report the **pure `loop=8` (T=8) CE loss**:
+  in `looped nanogpt (cleaned)` MUST report the **pure `loop=8` (T=8) CE loss**:
   - **Parcae**: `train/loss` (already pure T=8 CE).
   - **Loopformer**: `train/loss_long` (pure T=8 LM CE; do NOT use `train/loss`
     which adds `0.1*short + 0.1*consistency` — record the total objective in

@@ -67,9 +67,8 @@ the group / chart / stagedir / logdir.
 W&B entity `zhh24-massachusetts-institute-of-technology`, project
 `nanogpt-depth`. The shared workbook is
 `17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0`. This line logs to its own
-`nanoGPT (qiaos)` tab (call/loss diagonal), which is NOT being replaced. The
-separate looped-methods program (parcae / loopformer / ouro), and new
-nanoGPT-setting work generally, default to the `looped nanogpt` tab of a
+`nanoGPT (qiaos)` tab (call/loss diagonal), which is NOT being replaced. The separate looped-methods program (parcae / loopformer / ouro), and new
+nanoGPT-setting work generally, default to the `looped nanogpt (cleaned)` tab of a
 DIFFERENT workbook, `1chHYhhEnTfgkKmLnZiC7jjoFCE-ywsDCxPLXFdSTl20`
 (`../research/result_logging.md` §Which Tab, which owns the routing rule and
 governs the writes). Resolve any tab by title and
