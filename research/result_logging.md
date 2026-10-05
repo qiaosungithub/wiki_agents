@@ -44,6 +44,7 @@ the URL by hand (§Chart Links).
 | char-LM / torch-rnn | `17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0` | `charlm-torchrnn (qiaos)`. Every metric cell is `mean +- sd` over 4 seeds; one cell = one wandb group. Headline columns are the HELD-OUT split; the selection split has its own trailing column. Row format and the `gsheets --` trap: `../projects/charlm_torchrnn.md` |
 | looped nanoGPT (the idea line) | `1chHYhhEnTfgkKmLnZiC7jjoFCE-ywsDCxPLXFdSTl20` (its own workbook) | `looped nanogpt (cleaned 2)` — the curated research tab for parcae / loopformer / ouro (`../research/looped_nanogpt_per_site.md`). The superseded `looped nanogpt (cleaned)` tab and the older `looped nanogpt` tab in the same workbook, plus the same-titled tab in `17pvrMbOKOKFiIa-…` and `Parcae unroll-optim (qiaos)` there, are read-only history. |
 | MoR (Mixture-of-Recursions recipe on SmolLM-360M, parcae-torch port) | `1chHYhhEnTfgkKmLnZiC7jjoFCE-ywsDCxPLXFdSTl20` (same workbook as looped nanoGPT) | `MoR SmolLM-360M` (`sheetId = 905260049`, created 2026-10-04) — every MoR-recipe run (configs `mor-smollm-360m-*.yml`, repo MoR-sqa): vanilla, recursive N_r = 2 / 3 / 4, and their per-site (f, w) variants. Row 3 holds the shared recipe once; rows 4–8 are the orange `official baseline` block (MoR paper Table 3, 20B-token rows). E / F are NLL / ppl at the trained depth T = N_r (F = exp(E)); I is the depth sweep D1-D(N_r)-D(2N_r); K is the per-site stepsize f / w (mean over core matrices), blank for plain AdamW rows. Same `[3 seed]` fold rule as below. |
+| RR (Retrofitted Recurrence, TinyLlama (4,8,4) train-recurrence-4, etd-rr port) | `1chHYhhEnTfgkKmLnZiC7jjoFCE-ywsDCxPLXFdSTl20` (same workbook as looped nanoGPT) | `RR TinyLlama-484` (`sheetId = 1406021947`, created 2026-10-05, a format clone of the MoR tab) — every RR run in repo etd-rr (branch retrofit-rr): training runs `rr-tinyllama-484-rec4{,-rhofro-ema,-rhofro-raw}.yml` and downstream eval jobs `rr-eval-*.yml`. Row 3 holds the shared recipe once; rows 4–5 are the orange `official baseline` block (RR paper Appendix Table 3, GSM8K / MATH at test R = 1 / 4 / 32); rows 7–8 are the calibration block (the released rec4 checkpoint through our eval_rr harness, XID 296193527). E / F are the fixed-set val loss / bpb at R = 4 (the train mean recurrence); G / H are GSM8K flexible-extract % and MATH math_verify % at R = 1 / 4 / 32; I is the val depth sweep D1-D4-D32; J / K are the per-site rho_fro / f means, `n/a` for the baseline optimizer. An eval job of one of our trained checkpoints goes directly under its training row as `  ↳ eval of the row above`. Same `[3 seed]` fold rule as below. |
 
 **Every parcae / loopformer / ouro run, and any new nanoGPT-setting run, logs to
 the `looped nanogpt (cleaned 2)` tab (`sheetId = 117747425`) of workbook
@@ -59,10 +60,12 @@ wrong workbook writes into a frozen tab and nothing errors, and
 `looped nanogpt (cleaned)` is a prefix of the live title, so match the FULL
 title exactly. Pick the workbook by ID, then the tab by exact title
 (`looped nanogpt (cleaned 2)`).
-The one exception is a MoR-recipe run (SmolLM-360M, `mor-smollm-360m-*` configs),
-which logs to the `MoR SmolLM-360M` tab of the same workbook, never to
-`looped nanogpt (cleaned 2)`: its model, data, budget and eval set share nothing
-with the nanoGPT rows, so its numbers are not comparable to them.
+Two exceptions log to their own tab of the same workbook, never to
+`looped nanogpt (cleaned 2)`: a MoR-recipe run (SmolLM-360M, `mor-smollm-360m-*`
+configs) goes to `MoR SmolLM-360M`, and an RR run (etd-rr, `rr-tinyllama-484-*` /
+`rr-eval-*` configs, exp names `rr-*`) goes to `RR TinyLlama-484`. Their model,
+data, budget and eval set share nothing with the nanoGPT rows, so their numbers
+are not comparable to them.
 Inside the tab, put a new row next to its comparison target (§Where The Row
 Goes); a new line of work opens a titled block below the method it belongs to.
 The call/loss-diagonal line's own `nanoGPT (qiaos)` tab is a separate line and
