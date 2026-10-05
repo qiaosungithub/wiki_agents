@@ -194,6 +194,15 @@ A whole `tmux-spawn-*.scope` dies at once, so every background job from that tmu
 dies together silently — their simultaneous death is the tell. `/tmp` is tmpfs
 and counts against RAM (`df -h /tmp`); never `rm -rf /tmp/*` blindly.
 
+**Pair `ManagedOOMPreference=avoid` with `OOMPolicy=continue` on any service
+whose cgroup also holds child jobs (`amply-ux.service`, `amply-localdb.service`,
+`jetski-hub.service`).** `ManagedOOMPreference=avoid` only steers `systemd-oomd`;
+when RAM and swap fill completely, the kernel OOM killer ignores it and kills
+the single largest process in the cgroup, and systemd's default `OOMPolicy=stop`
+then terminates the entire unit (`Failed with result 'oom-kill'`,
+`KillMode=control-group`), tearing down the gateway and every worker along with
+the one runaway child.
+
 ## How Slow Is A Build Too Slow
 
 **A per-run TPU build floors near ~40s and scales with the PACKAGE, so 50-55s

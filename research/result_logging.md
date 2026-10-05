@@ -42,15 +42,27 @@ the URL by hand (§Chart Links).
 | VLM (PaliGemma / JAX LLaVA) | `1FlcygQbGBTqHLJeiKdwxS0nP41SPMJrtX-kCJq8d7SQ` | the cleaned PaliGemma/JAX LLaVA tab |
 | `EqR` / `EqR-jax` | `17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0` | `EqR-refactored`. `EqR-reproduction` is pre-refactor, read-only history |
 | char-LM / torch-rnn | `17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0` | `charlm-torchrnn (qiaos)`. Every metric cell is `mean +- sd` over 4 seeds; one cell = one wandb group. Headline columns are the HELD-OUT split; the selection split has its own trailing column. Row format and the `gsheets --` trap: `../projects/charlm_torchrnn.md` |
-| looped nanoGPT (the idea line) | `1chHYhhEnTfgkKmLnZiC7jjoFCE-ywsDCxPLXFdSTl20` (its own workbook) | `looped nanogpt (cleaned)` — the curated research tab for parcae / loopformer / ouro (`../research/looped_nanogpt_per_site.md`). The older `looped nanogpt` tab in the same workbook, plus the same-titled tab in `17pvrMbOKOKFiIa-…` and `Parcae unroll-optim (qiaos)` there, are read-only history. |
+| looped nanoGPT (the idea line) | `1chHYhhEnTfgkKmLnZiC7jjoFCE-ywsDCxPLXFdSTl20` (its own workbook) | `looped nanogpt (cleaned 2)` — the curated research tab for parcae / loopformer / ouro (`../research/looped_nanogpt_per_site.md`). The superseded `looped nanogpt (cleaned)` tab and the older `looped nanogpt` tab in the same workbook, plus the same-titled tab in `17pvrMbOKOKFiIa-…` and `Parcae unroll-optim (qiaos)` there, are read-only history. |
+| MoR (Mixture-of-Recursions recipe on SmolLM-360M, parcae-torch port) | `1chHYhhEnTfgkKmLnZiC7jjoFCE-ywsDCxPLXFdSTl20` (same workbook as looped nanoGPT) | `MoR SmolLM-360M` (`sheetId = 905260049`, created 2026-10-04) — every MoR-recipe run (configs `mor-smollm-360m-*.yml`, repo MoR-sqa): vanilla, recursive N_r = 2 / 3 / 4, and their per-site (f, w) variants. Row 3 holds the shared recipe once; rows 4–8 are the orange `official baseline` block (MoR paper Table 3, 20B-token rows). E / F are NLL / ppl at the trained depth T = N_r (F = exp(E)); I is the depth sweep D1-D(N_r)-D(2N_r); K is the per-site stepsize f / w (mean over core matrices), blank for plain AdamW rows. Same `[3 seed]` fold rule as below. |
 
 **Every parcae / loopformer / ouro run, and any new nanoGPT-setting run, logs to
-the `looped nanogpt (cleaned)` tab (`sheetId = 1779859670`) of workbook
-`1chHYhhEnTfgkKmLnZiC7jjoFCE-ywsDCxPLXFdSTl20` by default.** It is a pruned copy
-that keeps only the new-weight-recipe blocks and reference baselines worth comparing against. Both the older `looped nanogpt` tab (`sheetId = 642888791`) in the same workbook and the
-tab with the title `looped nanogpt` in the EqR workbook are unpruned history and
-are read-only, so resolving the old title or the wrong workbook writes into a
-frozen tab and nothing errors. Pick the workbook by ID, then the tab by title (`looped nanogpt (cleaned)`).
+the `looped nanogpt (cleaned 2)` tab (`sheetId = 117747425`) of workbook
+`1chHYhhEnTfgkKmLnZiC7jjoFCE-ywsDCxPLXFdSTl20` by default.** It is the operator's
+re-cleaned copy (2026-10-01) of the previous `looped nanogpt (cleaned)` tab and
+keeps only the new-weight-recipe blocks and reference baselines worth comparing
+against. The superseded `looped nanogpt (cleaned)` tab (`sheetId = 1779859670`)
+is retired as of 2026-10-01: do not write to it, and do not take row numbers
+from it. The older `looped nanogpt` tab (`sheetId = 642888791`) in the same
+workbook and the tab with the title `looped nanogpt` in the EqR workbook are
+unpruned history. All of these are read-only. Resolving an old title or the
+wrong workbook writes into a frozen tab and nothing errors, and
+`looped nanogpt (cleaned)` is a prefix of the live title, so match the FULL
+title exactly. Pick the workbook by ID, then the tab by exact title
+(`looped nanogpt (cleaned 2)`).
+The one exception is a MoR-recipe run (SmolLM-360M, `mor-smollm-360m-*` configs),
+which logs to the `MoR SmolLM-360M` tab of the same workbook, never to
+`looped nanogpt (cleaned 2)`: its model, data, budget and eval set share nothing
+with the nanoGPT rows, so its numbers are not comparable to them.
 Inside the tab, put a new row next to its comparison target (§Where The Row
 Goes); a new line of work opens a titled block below the method it belongs to.
 The call/loss-diagonal line's own `nanoGPT (qiaos)` tab is a separate line and
@@ -100,6 +112,7 @@ comparison.
 | A train run and its eval | Two paired rows, eval directly under, titled `  ↳ eval of the row above`. Different job ids, configs and failure modes, so collapsing them loses which half went wrong. A train row without an eval row has no conclusion: mark it, and never quote its in-training numbers as results. |
 | A run past the block's budget | Two rows, same job id: metric columns compare only if every row stopped at the same step. Put the block-budget value in the run's own row, and pair the longer result beneath as `  ↳ @<steps>, same run`, `Details` naming each segment. Still rising at the budget: that point is also its peak; otherwise record the pre-budget peak. Never widen the tab with a second set of metric columns: empty on every normal-budget row, they read as a missing measurement, not an inapplicable one. |
 | A run that was resumed under new job ids | ONE row. The XID column lists EVERY id that wrote training steps into the run's checkpoint dir, oldest first, each with its step range (`285906137 (0-113700) → 286366489 (115000-128300) → 286551193 (128000-…, LIVE)`). The **Flatboard chart** column carries one link per segment id (`http://flatboard/xid/<XID>`), whereas the **W&B** column carries ONE link to the full stitched `step 0 .. end` curve across all segments (§The W&B Link Column). Never overwrite the old XID with the live one. Read the segment set off the tfevents file names in the checkpoint dir (`qiaos_group_<xid>`) or the lineage chain, not off the live job board alone. |
+| A multi-seed run (e.g., 3 seeds `s42`/`s43`/`s44`) | ONE row, never separate `[s43]` / `[s44]` child rows. Append `[3 seed]` (or `[n seed]`) to the parent run label in `Col A`, write `mean ± std` (sample std, `ddof=1`) in all metric columns (`D`, `E`, `F`, `G`, and `D8=mean±std` in `I`), average update-geometry in `Col J`, list all seed XIDs and per-seed numbers in `Status` (`Col L`), and join the Flatboard / W&B links with ` , ` in `Col M` and `Col N`. |
 
 ## A Row That Is Already Filled Can Still Be Wrong
 
@@ -267,7 +280,7 @@ train columns blank discards half of every lr×wd comparison.
   single last row. See §Stop If It Is Not Comparable ("Converged value or single
   sample") and `../projects/eqr_jax.md` §Divisors and cadence.
 - Exception, when the log line is ALREADY a mean: a column literally named
-  `Final train loss` (the `looped nanogpt (cleaned)` / parcae-torch tab) takes the plot's
+  `Final train loss` (the `looped nanogpt (cleaned 2)` / parcae-torch tab) takes the plot's
   last point, not a tail-window average. That logger prints every row as a
   trailing mean (`loss X (mean of N steps)`), so the cell is the LAST such line
   verbatim; averaging those rows again pulls in the still-descending tail and
@@ -276,7 +289,7 @@ train columns blank discards half of every lr×wd comparison.
   in a later attempt; earlier attempts stop mid-descent), and sanity-check
   train <= eval -- train > eval means a mid-run point, or a multi-depth /
   aux-inclusive objective, was grabbed. Specifically, Col D (`Final train loss`)
-  in `looped nanogpt (cleaned)` MUST report the **pure `loop=8` (T=8) CE loss**:
+  in `looped nanogpt (cleaned 2)` MUST report the **pure `loop=8` (T=8) CE loss**:
   - **Parcae**: `train/loss` (already pure T=8 CE).
   - **Loopformer**: `train/loss_long` (pure T=8 LM CE; do NOT use `train/loss`
     which adds `0.1*short + 0.1*consistency` — record the total objective in
