@@ -5,9 +5,14 @@ NVIDIA GPU training on the internal cluster uses the same `tpu enqueue` + serial
 only what differs for GPU. This is Borg/XManager GPU, not the hand-run GCE A100
 VMs (`gcp_gpu_ssh.md` owns those; the two share nothing but the word "GPU").
 
-**A GPU job is a normal `tpu enqueue` with an explicit `--tpu_type=<gpu>-<n>`
-(e.g. `h100-8`) and `--archs=<gpu>`; the launcher recognizes the GPU arch and
-builds a CUDA binary.** Everything below is where GPU and TPU diverge. Get one
+**A GPU job is a normal `tpu enqueue` with a GPU board spec `--power=<gpu>-<n>`
+(e.g. `h100-8`) and `--archs=<gpu>[,<gpu>...]`; the launcher recognizes the GPU
+arch and builds a CUDA binary.** A GPU board spec keeps the chip count verbatim
+and only emits the listed GPU archs at that width (`route_lib.candidate_shapes`
+GPU special case, 2026-09-11): `--power=h100-8 --archs=h100,b200` lands on a
+full h100-8 or b200-8, never b200-4 or a TPU. Do not use a bare-number
+`--power` (TPU power math: `17` gives b200-4) or `--topology_locked` (a GPU job
+is then never placed). Everything below is where GPU and TPU diverge. Get one
 wrong and the failure is usually a silent pre-`main()` death behind the Borg log
 wall, classified in §The Startup Contract.
 
@@ -17,7 +22,7 @@ wall, classified in §The Startup Contract.
 cd <the checkout whose config.sh + BUILD + main.py you want packaged>
 source ~/work/tpu_cmd/tpu_wrapper.sh
 tpu enqueue \
-  --power=h100-8 --archs=h100 \        # h100-only: NO --power router substitution
+  --power=h100-8 --archs=h100 \        # or --archs=h100,b200 (b200-8 tried first)
   --tier=BATCH \                        # or PROD (see Tiers below)
   --launch=group=9,config=<mode>,app.<flag>,exp_name=<name>
 # a running `tpu build-worker` drains it; watch `tpu queue-status`.
@@ -67,16 +72,6 @@ Scope and limits:
 - Staging is checked at enqueue, consumed minutes to hours later when the build
   lock releases. Re-verify then: `config.sh` present and non-empty, checked
   twice a few seconds apart. One check misses a write that lives a few seconds.
-
-## Rule 1 — Explicit `--tpu_type`, NEVER `--power` Router For The Arch
-
-**Give a GPU job an explicit `--tpu_type=<gpu>-<n>` and pin `--archs=<gpu>` to
-that ONE gpu.** The local-queue router's `--power` machinery is TPU
-power-equivalence (v5p-normalized chip math with arch substitution); left to
-substitute, it can swap a GPU request for a TPU or the reverse. `--archs=h100`
-makes the candidate set h100-only, so the router can only emit
-`--tpu_type=h100-8`. `--power=h100-8` is fine as the SIZE spec (it parses to
-arch=h100, chips=8 via `route_lib.LEGAL_SIZES`); `--archs` supplies the safety.
 
 ## Rule 2 — A GPU Bazel Binary Needs `--config=cuda` (The Launcher Adds It)
 
@@ -676,7 +671,7 @@ may have any. "In stock" and "out of budget" are true at the same time, routinel
 | SIGABRT / exit 134, empty app log, "InitGoogle has not finished" | file/RPC at import time (Rule 4) |
 | `ImportError: config_flags` pre-main | missing `ml_collections/config_flags` dep (Rule 3) |
 | anything that dies before the job's own first CNS line | a startup-phase failure, not the hardware; §The Startup Contract |
-| job silently a TPU when you asked GPU (or vice versa) | used `--power` without pinning `--archs` (Rule 1) |
+| job silently a TPU, or half a board (b200-4), when you asked a GPU board | bare-number `--power` (TPU power math); give a GPU board spec like `--power=h100-8` |
 | reached RUNNING then died `guarantee reclaim` | BATCH preemption (Rule 6); resubmit PROD |
 | `analog` / `borg tasklog` = `PERMISSION_DENIED` (restricted-LOAS) | expected here; the log wall means the app MUST self-write evidence to CNS (Rule 4). Read state via `tpu check`, not the Borg log |
 | enqueued PROD, placeable, but never builds; `BUDGET_DEFERRED` | budget gate: `new_cost > headroom` (Rule 7); wait for a window / size down |

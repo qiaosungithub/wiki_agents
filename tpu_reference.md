@@ -144,8 +144,9 @@ of chips`. Check against the slice you requested, not the one you meant to.
 
 Running a GPU job on Borg is `gpu_on_borg.md`. This section is the naming,
 shape, and capability reference, the GPU analogue of the tables above. GPUs use
-the same `tpu enqueue` path but with an explicit `--tpu_type=<gpu>-<n>` and
-`--archs=<gpu>`, never the `--power` router (`gpu_on_borg.md` Rule 1).
+the same `tpu enqueue` path with a GPU board spec `--power=<gpu>-<n>` and
+`--archs` listing one or more GPU archs; the chip count is kept verbatim
+(`gpu_on_borg.md` intro).
 
 ### Name Mapping
 
