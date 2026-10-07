@@ -12,7 +12,7 @@ job.** The two follow different storage rules; `../storage.md` has the detail.
 | Category | Members | Rule |
 |---|---|---|
 | Type 1: Kaiming Group code | `jax_llava`, `PaliGemma-baseline`, `beifen-Paligemma`, `beifen` | Data, checkpoints, and compute stay in one region. Never move a payload across regions by default. |
-| Type 2: Google internal research code | `project_one_ssl`, `one-benchmark-suite`, `nnflow_jax`, `EqR`, `EqR-jax` | The Type 1 cross-region ban does not apply, but runtime storage must be reachable from every cell the scheduler may pick. |
+| Type 2: Google internal research code | `project_one_ssl`, `one-benchmark-suite`, `nnflow_jax`, `EqR`, `EqR-jax`, `nanochat` | The Type 1 cross-region ban does not apply, but runtime storage must be reachable from every cell the scheduler may pick. |
 
 ## Checkout To Guide
 
@@ -37,6 +37,7 @@ job.** The two follow different storage rules; `../storage.md` has the detail.
 | `rnn_unroll/` | 2 | RNN unroll-optimizer science line: gradient propagation / adding problem (vanilla RNN). Two remote 4×A100 boxes, not Borg. | `rnn_unroll_adding.md` |
 | `charlm/` | 2 | Character-level LM on tiny-shakespeare, reproducing `jcjohnson/torch-rnn`. Dense-supervision counterpart to the adding-problem line. Same 4×A100 boxes. | `charlm_torchrnn.md` |
 | `nanogpt_depth/` | 2 | FineWeb-Edu nanoGPT pretraining; exact same-position call/loss gradient and two-band Adam, copied from lyy. | `nanogpt_depth.md` |
+| `nanochat/` | 2 | Full-pipeline LLM testbed (`Base Pretrain` → `Chat SFT` → `Chat RL` → `Maj@k` scaling, `d12` / `d24`) for studying whether and when recurrent looping is useful. | `nanochat.md` |
 | `paper-with-agent/` | n/a | The paper on the per-site optimizer idea, co-written with the user in three layers; `hie1/` is user-only. | `paper_with_agent.md` |
 | `raft/` | 2 | RAFT-small optical flow (C+T) reproduction and the per-relative-distance optimizer on its 12 tied update calls. Data + runs on `qiaos-4a100` only. | `raft_repro.md` |
 | `remote-control/`, `remote-control-pipeline/`, `google-job-info/`, `google-job-info-daemon/` | n/a | The git-driven remote job interface for lyy: push a commit to launch a run, read status back as a git repo. Four checkouts, one system. | `remote_control.md` |

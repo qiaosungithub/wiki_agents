@@ -88,6 +88,7 @@ and each has a `README.md` index.
 | RNN unroll optimizer / adding problem / gradient propagation science line | `projects/rnn_unroll_adding.md` |
 | **char-LM / torch-rnn reproduction**; which "char-RNN" repo; the 4-seed cell -> wandb group -> spreadsheet row pipeline | `projects/charlm_torchrnn.md` |
 | **RAFT optical flow reproduction / per-site optimizer on RAFT**; FlyingChairs / FlyingThings3D data on the GPU box | `projects/raft_repro.md` |
+| **`nanochat` full-pipeline testbed (`Base` → `SFT` → `RL`, when is looping useful)**; `d12` / `d24` metrics, SFT forgetting, SFT-to-RL inversion, `Maj@k` scaling | `projects/nanochat.md` |
 | VLM training, data, benchmark reporting | `projects/vlm_training.md`, `projects/vlm_data.md`, `projects/vlm_metrics.md` |
 | **The amply gateway is down**; `amp new` worker dies at `os.getcwd()`; `amply-launch` prints nothing | `projects/local_agent_cli.md` §Restarting The Amply UX Server |
 | **Amply's database, snapshots, the local Spanner universe**; `/span/tmp` is dead; restart localdb / gateway order; migrate old runs | `projects/local_agent_cli.md` §The Amply Database Is A Local Spanner Test Universe |
