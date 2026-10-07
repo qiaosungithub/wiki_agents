@@ -1,354 +1,122 @@
-# Workspace Memory
+# Workspace Agent Bootstrap
 
 Durable rules for working under `/usr/local/google/home/qiaos/work`. Current
-code, live state, and the user's request always outrank this folder.
+code, live state, and the user's request always outrank this folder. The wiki
+separates the agent harness (how to work) from knowledge about the user's
+systems and research.
 
 ## Start Here
 
-1. This file, then `engineering.md` — the working discipline, for any task.
-2. `projects/README.md` — identify the checkout, its category, and its guide.
-3. Only the guides the router below names.
+1. Read [harness/policy.md](harness/policy.md) (the rules for every task, including the language rule), [harness/engineering.md](harness/engineering.md) (the working method), and [harness/evidence.md](harness/evidence.md) (the evidence rules). These are required for every task.
+2. For repository work, identify the checkout, its category, and its page in [knowledge/codebases/projects.md](knowledge/codebases/projects.md), then read that checkout's own `AGENTS.md` or `CLAUDE.md`.
+3. Pick the task skill and only the knowledge the router below names. Do not load the whole wiki.
 4. Then the actual code, git state, and live system.
 
-## Layout
-
-Files in this directory apply to every task; subdirectories are read on demand
-and each has a `README.md` index.
+## Ownership
 
 | Path | Owns |
 |---|---|
-| `engineering.md` | Method: the principles (Ch.1); adapting and running new code (Ch.2). |
-| `memory.md` | How this wiki is organized and how to write into it. |
-| `jobs.md` | Hub: routes to `jobs/` — submit, resume, liveness, diagnose, report a cluster job. |
-| `storage.md` | Where data lives, reading it fast, cleaning up safely. |
-| `tpu_reference.md` | Accelerator names, memory, legal shapes, ratios. |
-| `gpu_on_borg.md` | Run an NVIDIA GPU job on Borg via `tpu enqueue` (CUDA build, NCCL, tiers, traps). |
-| `gcp_gpu_ssh.md` | SSH to the GCP GPU VMs (viscam-cloud); OS Login vs metadata keys. |
-| `workstation.md` | The Cloudtop itself: `sqa-large` (migrated from `sqa` 2026-09-08), ssh, what runs where, re-sync, jetski-hub owns the web app. |
-| `machine_health.md` | Diagnose a slow/overloaded box: load, memory, swap, idle blaze heaps, `srcfsd`, orphaned FUSE `find`s, reaping idle amply sessions. |
-| `projects/` | Per-checkout semantics and boundaries. |
-| `research/` | Running experiments; logging results. |
-| `reports/` | Writing and rendering paper reports. |
-| `infra/` | Allocator, market, and CLI internals, when `jobs.md` falls short. |
-| `tools/` | Executable helpers (price caps); prose elsewhere. |
-| `archive/` | History. Never routed to by default. |
+| `AGENTS.md` | This bootstrap and the task router |
+| `harness/policy.md`, `harness/engineering.md`, `harness/evidence.md` | Rules for every task, the working method, the evidence rules |
+| `harness/skills/<name>/SKILL.md` | One task workflow each, with `references/` where a skill needs long supporting detail ([index](harness/README.md)) |
+| `knowledge/codebases/` | Each checkout's semantics, invariants, metrics, and findings, plus the checkout map |
+| `knowledge/infrastructure/` | How the cluster, scheduler, market, budget, storage, and `tpu` tooling work; reference tables |
+| `knowledge/environment/` | The workstation, the GCP GPU VMs, the results workbooks |
+| `knowledge/research/` | The research idea page ([knowledge index](knowledge/README.md)) |
+| `tools/` | Executable helpers; prose lives elsewhere ([tools/README.md](tools/README.md)) |
+| `archive/` | History. Never routed to by default |
 
-## Topic Router
+A skill explains how to do the work and links to the knowledge it needs.
+Knowledge describes the user's systems and research; a codebase or infra
+invariant stays knowledge even when it is phrased as a constraint. Where a new
+note belongs is [maintain-wiki](harness/skills/maintain-wiki/SKILL.md).
 
-| Task | Read |
-|---|---|
-| Anything, before you start | `engineering.md` |
-| **Add to or reorganize this wiki**; where a note belongs; how to shape a page | `memory.md`, then `AGENTS.md` §Maintaining Memory |
-| **After a large code change, before submitting a job** | `engineering.md` §Local debug, then remote, before a real run |
-| Find a checkout or its boundaries | `projects/README.md` |
-| Queue, inspect, resume, debug a job | `jobs.md`, then the project guide |
-| **Report job status to the operator** (the minimal live-jobs list; `tpu check` only, never npu) | `jobs/report.md` |
-| **Resume a job / write anything that passes a checkpoint to a job** | `jobs/resume.md` §The `LOAD_FROM` Contract |
-| **Resume a TRAINING run that keeps checkpointing** (never `LOAD_FROM`) | `jobs/resume.md` §The `restart_from` Contract |
-| **Write / port a training package** (checkpoint layout, resume flags, boot banner, `main.py` fail-closed) | `jobs/resume.md` Chapter 2 — New Training Package Startup Contract |
-| Submit a job or a batch (default `tpu enqueue`; the always-on dispatch-worker is the sole builder and drains it — never start a `tpu build-worker`; auto cell / `--metro`) | `jobs/submit.md` Chapter 2 — Submitting A Job, Step By Step |
-| A CPU-only batch job will not schedule | `jobs/submit.md` Chapter 3 §Tiers and CPU-only |
-| Choose a cell (now auto-picked); preflight before packaging | `jobs/submit.md` Chapter 2 — Submitting A Job, Step By Step |
-| A job will not schedule; capping spend | `infra/market.md`, `tools/limit_order.sh` |
-| **A job is `BUDGET_DEFERRED`, or a running job was paused/cancelled and you suspect the income/10 cap** | `infra/budget.md` |
-| Change the `tpu` CLI or its daemon | `infra/tpu_cli.md` |
-| Change the smart cell-picker, the local queue and auto-reroute, or the serial build-worker | `infra/router.md` |
-| TPU codename, HBM, legal shape, equivalence | `tpu_reference.md` |
-| GPU arch token, NVLink domain, legal shape, card code | `tpu_reference.md` §NVIDIA GPUs |
-| **Run a GPU job on Borg** (`tpu enqueue --tpu_type=h100-8`); CUDA build, NCCL, device_count==0, GPU preemption | `gpu_on_borg.md` |
-| **A GPU job trains far slower than the bench**; `samples_per_second` 10-30x under; is it the data path or the GPU/NCCL? | `gpu_on_borg.md` §Measure The Container's Input Path Before Blaming It; Co-Located CNS Is Fast |
-| SSH to a GCP GPU VM; `Permission denied`; OS Login vs metadata keys | `gcp_gpu_ssh.md` |
-| **Which machine am I on / ssh to the workstation**; `sqa` vs `sqa-large`; where amply, the crontab and the tpu workers run; re-sync home; jetski-hub and the web app | `workstation.md` |
-| **Choose an accelerator family**; a preemptible slice will not hold | `research/accelerator_choice.md` |
-| Place data or checkpoints; copy or upload | `storage.md`, then the project guide |
-| Pick a cell/metro for a v7 run | `research/v7_storage_placement.md` |
-| **Map a cell to its metro or its CNS bucket**; add a cell to any such table | `storage.md` §Never Hand-Maintain A Cell -> Metro -> Bucket Table |
-| **Copy, move, or hand off a checkpoint**; resume across metros | `storage.md` §A Checkpoint Path Is An Opaque String |
-| Read a distributed path interactively | `storage.md` §Distributed Reads |
-| **CitC/srcfs is dropping writes**; `CreateSnapshot failure`; a staging rsync that never converges | `storage.md` §Before Blaming CitC For Dropping Writes |
-| A write fails, or a job produced 0-byte logs | `storage.md` §An Over-Quota Cell Looks Like A Broken Program |
-| Resume skips work, or a 0-byte file counts as done | `storage.md` §Existence Is Not Completeness |
-| Reclaim local disk, or prune checkpoints | `storage.md` §Local Disk Cleanup, §Checkpoints Are The Default Reason A Cell Fills Up |
-| **The core research idea / the "idea page"** — per-site (untied) gradients for weight-shared models and the looped-nanoGPT benchmark; points at the user's `hie1/` files in the paper repo | `research/looped_nanogpt_per_site.md` |
-| **Write the paper** (`~/work/paper-with-agent`): the hie1 / hie2 / hie3 layers, hie1 is user-only, ICML LaTeX build | `projects/paper_with_agent.md` |
-| Manage a long experiment; tracker evidence | `research/README.md` |
-| Build or verify a multi-GB artifact on distributed storage | `storage.md` §Building A Multi-Gigabyte Artifact |
-| A big write is silently truncated or keeps restarting | `storage.md` §Two Writers On One Output Path |
-| A data-movement job: workstation or cluster? | `jobs/liveness.md` §Where The Storage CLI Exists |
-| A job says `RUN` but produces nothing | `jobs/liveness.md` §`state: RUN` Is Not Evidence |
-| Write a checker, or a verification keeps saying OK | `engineering.md` §A test that cannot fail proves nothing |
-| **An edit reported success but the change is missing**; deleting a file breaks an unrelated build | `engineering.md` §Trust artifacts, not success returns, §Make edits atomic |
-| Fault-inject safely; a killed script left a broken shared file | `engineering.md` §A test that cannot fail proves nothing |
-| **Two measurements disagree**; a cached green build; a retracted number | `engineering.md` §When a reading is wrong, fix the predicate, not the command, §Trust artifacts, not success returns |
-| **Log a result to the spreadsheet**; find a chart | `research/result_logging.md` |
-| **Read a job's curves / harvest `train/*` from the workstation**; the urge to write "the workstation cannot read the datatable" | `research/result_logging.md` §Reading The Curves From The Workstation |
-| Write or render a paper report | `reports/README.md` |
-| **The box is slow / high load / swapping / VSCode-SSH keeps disconnecting**; builds crawling; **is a build too slow** (the ~40s floor; >60s never normal); reclaim idle blaze heaps or memory; a recursive `find` on `/google/src`; reap idle amply sessions | `machine_health.md` |
-| `EqR` / `EqR-jax` | `projects/eqr_jax.md` |
-| RNN unroll optimizer / adding problem / gradient propagation science line | `projects/rnn_unroll_adding.md` |
-| **char-LM / torch-rnn reproduction**; which "char-RNN" repo; the 4-seed cell -> wandb group -> spreadsheet row pipeline | `projects/charlm_torchrnn.md` |
-| **RAFT optical flow reproduction / per-site optimizer on RAFT**; FlyingChairs / FlyingThings3D data on the GPU box | `projects/raft_repro.md` |
-| **`nanochat` full-pipeline testbed (`Base` → `SFT` → `RL`, when is looping useful)**; `d12` / `d24` metrics, SFT forgetting, SFT-to-RL inversion, `Maj@k` scaling | `projects/nanochat.md` |
-| VLM training, data, benchmark reporting | `projects/vlm_training.md`, `projects/vlm_data.md`, `projects/vlm_metrics.md` |
-| **The amply gateway is down**; `amp new` worker dies at `os.getcwd()`; `amply-launch` prints nothing | `projects/local_agent_cli.md` §Restarting The Amply UX Server |
-| **Amply's database, snapshots, the local Spanner universe**; `/span/tmp` is dead; restart localdb / gateway order; migrate old runs | `projects/local_agent_cli.md` §The Amply Database Is A Local Spanner Test Universe |
-| Agent web app, or a local agent CLI | `projects/agent_web.md`, `projects/local_agent_cli.md` |
-| **The remote-control job interface** (lyy launches runs by `git push`; status mirrored back as a git repo); the poller / status daemon; `run_config.yml` schema | `projects/remote_control.md` |
-| **Survival game / the sqa-remote run pipeline** (collaborator's stay-alive multi-agent sim; each `sqa-remote` commit == one LOCAL amply run; codex→amply adaptation; results pushed to many-agent-result) | `projects/survival_sqa_remote.md` |
+## Task Router
 
-## Global Rules
-
-Each rule below is enforced in full by the guide named beside it. These are the
-ones expensive enough to state twice.
-
-**With the user — write plain language, not agent jargon.** Converse in Chinese;
-write artifacts in English, except paper reports (`reports/README.md`). Lead
-with the outcome, and say it the way you would to a colleague who does not read
-your logs. Name the thing that happened rather than the internal token for it:
-"the job never started" beats "BUILD_REQUESTED never transitioned". Spell out an
-identifier the first time it appears, keep literal names (`PROD`, an XID, a cell)
-because they are what the user greps for, and cut the rest. §Maintaining Memory
-carries the same rule for what you write into these files.
-
-**Never destroy the user's work.** Do not revert, overwrite, or clean a dirty
-worktree as collateral. Before deleting anything shared, identify the
-filesystem, owner, active references, and recovery path; use a manifest for bulk
-deletion (`engineering.md` §External writes are transactions).
-
-**Committing.** git push is your friend. You can push regularly, but need to be
-careful which branch to push.
-
-**Debug locally on CPU first.** After any large code change, run the whole path
-(training step, logging, visualization, checkpoint save/restore, online and
-offline eval) on CPU with the repo's `local_debug` config and
-`scripts/local_debug.sh` before spending a remote round trip. Remote debugging
-is slow, and most of what dies on the accelerator dies on a workstation too
-(`engineering.md` §Local debug, then remote, before a real run).
-
-**Jobs.** On this SHARED workstation, submit through `tpu enqueue`; the
-always-running TPU dispatch-worker (kept alive by the `*/2` ops watchdog) is the
-SOLE builder and drains the queue by itself — do NOT start a `tpu build-worker`,
-a second builder only spins refusing the per-queue singleton lock. That single
-serial builder is what dodges the concurrent-build zombie XID. Use `tpu queue`
-one-shot only when no other build is in flight.
-Never call `xm launch` / `xmanager launch` directly (`jobs/submit.md`
-Chapter 1 §The launcher, config, and packaging).
-
-**Never train on BATCH.** Every TRAINING job passes `--tier=PROD` explicitly.
-`BATCH` is a paying best-effort tier: it bills the group, it is not the free
-option, and any PROD demand preempts it the instant a slot is contested. A
-training run on BATCH is silently starved and still costs.
-
-**The converse is NOT a rule: an eval may run on either tier.** `BATCH` is the
-polite default for evals because it leaves the PROD budget bar to training, but
-an eval that must actually finish belongs on PROD. This file and `jobs.md` used
-to carry "BATCH is EVAL-ONLY" / "Run evals only on BATCH"; the operator states
-plainly (2026-09-07) that they never asked for that — their rule is and always
-was **train on PROD only**. The invented half cost real time: the FID 50k evals
-(50,000 generated images each) were preempted repeatedly on BATCH before being
-moved (`jobs/submit.md` §Tiers: train on PROD, evals either way).
-
-**A chip count is not a size.** Per chip, `v7 = v6p ≈ 2.17x v6e ≈ 4.34x v5p ≈
-7.23x v4 ≈ 10.09x v5e`, so matching a `v6p-16` needs a `v6e-32`. Asking for
-`v6e-16` silently buys HALF the compute, and the run is then compared as if the
-hardware were equal. Do not round these ratios: rounding is the same mistake as
-matching on chip count, one order of magnitude smaller. `tpu route --power=`
-does the arithmetic, and `tpu_reference.md` owns the table (both are generated
-from `router.py::_V5P_MULTIPLIER`; never hand-copy a third version).
-
-**Storage.** Keep compute and storage co-located; a job far from its data is
-killed by the pruner, not merely slowed. Never move Type 1 payloads across
-regions (`storage.md`, `projects/README.md` for the category).
-
-**Cell -> metro -> bucket comes from one measured table**, `cell_locality.py`
-(seeded from `mach_locality`, regenerable via `remeasure_cell_locality.py`).
-Never hand-write another copy and never guess. A fallback that returned the cell
-name as its own metro made `--metro` silently drop valid cells (it reads as "no
-capacity"), and a `_DEFAULT_BUCKET` fallback put a job's writes a continent away
-until the pruner deleted it. Resolve buckets by metro, not by cell, and make an
-unknown cell fail closed (`storage.md` §Never Hand-Maintain A Cell -> Metro ->
-Bucket Table).
-
-**A checkpoint path is opaque; four shapes coexist**, including a torch
-`step_<N>.pt` that is a FILE, not a directory. Replay the producer's own string
-byte for byte; appending or stripping `/state` breaks a family. Read a
-checkpoint from anywhere, but write only to local storage: a training loop
-writing cross-metro is ~94x slower, drops duty cycle under the 0.20 floor, and
-the pruner deletes the job mid-run (`storage.md` §A Checkpoint Path Is An Opaque
-String).
-
-**Resuming: pass the checkpoint in the env var `LOAD_FROM`, verbatim.** Never
-via a config key, because which key it lands in differs per family, so writing
-the key keeps working on most lines and silently cold-starts the rest. Never
-normalize the path either, because four incompatible shapes coexist, including a
-torch `step_<N>.pt` that is a FILE, not a directory. Point it at the leaf, and
-clear it once the job writes its own first checkpoint; a pinned `LOAD_FROM`
-overrides auto-resume forever and reads as training instability. Leave
-`CHECKPOINT_BUCKET`, where the job writes, alone. Reading a checkpoint across a
-metro is survivable; writing across one gets the job deleted by the pruner
-(`jobs/resume.md` §The `LOAD_FROM` Contract).
-
-**Logging results.** Re-read the tab's header and neighboring rows every time;
-layout drifts and a stale column map mis-files a number without erroring. Place
-the row before filling it, keep cells short, and treat formatting as part of the
-result (`research/result_logging.md`).
-
-**Project-local instructions.** A repository's own `AGENTS.md` / `CLAUDE.md` is
-authoritative for its code semantics. The shared infra, storage, and
-external-write rules here supersede stale operational sections in old project
-notes; surface a conflict rather than guessing.
-
-## Evidence Order
-
-The user's request, then current code and native docs, then live infra state and
-logs, then these guides, then `archive/` (history only).
-
-**To assert that X has permission / fits / will be received, perform X once. Do
-not query a status that describes X.** A status query almost always measures the
-adjacent thing, and it fails in the most expensive direction: it looks like
-supporting evidence. The hard part is not finding evidence, it is stating what
-the claim actually asks.
-
-| The claim | The status query that looks right | What it actually measures |
+| Task | Skill or shared method | Knowledge |
 |---|---|---|
-| This slice will fit the model | total HBM across the slice | per-chip HBM, when weights are replicated (`model_size=1`); totals bind only under model parallelism |
-| I lack membership in a group | `aclcheck` returns `PERMISSION_DENIED` | whether you may read the ACL; a sandbox that cannot reach the ACL proxy denies identically |
-| This capacity is usable | the router shows the shape `PLACEABLE` | that an availability RPC answered; not the budget gate, the authorization, or preemption |
-| That agent still exists | a writer holds its log, or a dashboard says `ongoing` | that some process writes a file; dashboards go stale and are not authoritative |
-| My alert reached the on-call | the notify call returned `rc=0` | that *a* worker accepted it, possibly a retired session nobody reads |
-| This will never finish / never be released | it is making no progress now, and the ways it could finish are all ruled out | that it is stuck at this instant; a very slow counterpart can still return, and ruling out the exits you thought of is not ruling out the ones you did not |
-| Nobody will pick up this queued job | the serial build worker is idle and has not claimed it | a different process's state; `BUILD_REQUESTED` is claimed by the dispatch worker, so the serial worker's idleness says nothing about it |
-| This flag did not take effect | the job's log never printed the override line | output emitted before the log sink was started; a value announced ahead of `_start_telemetry` exists only in a Borg stderr that is GC'd in minutes |
-| This job hung | its log stopped growing | one attempt's log; a retried job writes `..._attempt2.log`, and the frozen file belongs to the attempt that died |
-| My watcher would have told me | the watcher process is alive and silent | that a process is running; not that it watches the right id, nor that its probe can express the failure you fear |
-| These repeated numbers disagree, so something is being sampled | the spread across runs | dispersion you never compared to the noise floor; at n=1319, p≈4.5%, binomial sd is 0.571 pt and a 0.531 pt spread is expected |
-| This stale row will be cleaned up automatically | the reconcile FUNCTION, called by hand, returns the right verdict | that the logic is correct, not that anything calls it: the daemon logged `reroute pass SKIPPED (standalone owner)` for a standalone process nobody had started, and 63 of 84 queue rows were zombies, the oldest 179 h stale |
+| Anything, before you start | [policy](harness/policy.md), [engineering](harness/engineering.md), [evidence](harness/evidence.md) | |
+| **Add to or reorganize this wiki**; where a note belongs; how to shape a page | [maintain-wiki](harness/skills/maintain-wiki/SKILL.md) | [knowledge index](knowledge/README.md) |
+| **After a large code change, before submitting a job** | [local-debug](harness/skills/local-debug/SKILL.md#local-debug-then-remote-before-a-real-run) | |
+| Find a checkout or its boundaries | | [projects.md](knowledge/codebases/projects.md) |
+| Queue, inspect, resume, debug a job | [job-submit](harness/skills/job-submit/SKILL.md), [job-diagnose](harness/skills/job-diagnose/SKILL.md) | [cluster-jobs.md](knowledge/infrastructure/cluster-jobs.md), [resume-contracts.md](knowledge/infrastructure/resume-contracts.md), then the project page |
+| **Report job status to the operator** (the minimal live-jobs list; `tpu check` only, never npu) | [job-report](harness/skills/job-report/SKILL.md) | |
+| **Resume a job / write anything that passes a checkpoint to a job** | | [resume-contracts.md §The `LOAD_FROM` Contract](knowledge/infrastructure/resume-contracts.md#the-load_from-contract) |
+| **Resume a TRAINING run that keeps checkpointing** (never `LOAD_FROM`) | | [resume-contracts.md §The `restart_from` Contract](knowledge/infrastructure/resume-contracts.md#the-restart_from-contract) |
+| **Write / port a training package** (checkpoint layout, resume flags, boot banner, `main.py` fail-closed) | [local-debug §Adapt new code to the fleet's infra](harness/skills/local-debug/SKILL.md#adapt-new-code-to-the-fleets-infra) | [resume-contracts.md Chapter 2 — New Training Package Startup Contract](knowledge/infrastructure/resume-contracts.md#chapter-2--new-training-package-startup-contract) |
+| Submit a job or a batch (default `tpu enqueue`; the always-on dispatch-worker is the sole builder and drains it — never start a `tpu build-worker`; auto cell / `--metro`) | [job-submit §Submitting A Job, Step By Step](harness/skills/job-submit/SKILL.md#submitting-a-job-step-by-step) | [cluster-jobs.md Chapter 1](knowledge/infrastructure/cluster-jobs.md#chapter-1--how-submission-works) |
+| A CPU-only batch job will not schedule | [job-submit §Tiers and CPU-only](harness/skills/job-submit/SKILL.md#tiers-and-cpu-only) | [cluster-jobs.md §Groups](knowledge/infrastructure/cluster-jobs.md#groups) |
+| Choose a cell (now auto-picked); preflight before packaging | [job-submit §Submitting A Job, Step By Step](harness/skills/job-submit/SKILL.md#submitting-a-job-step-by-step) | [cluster-jobs.md §The smart router](knowledge/infrastructure/cluster-jobs.md#the-smart-router-picks-the-cell-and-the-group) |
+| Survive preemption; restart budget; worker identity, paths, local disk | | [cluster-jobs.md Chapter 2](knowledge/infrastructure/cluster-jobs.md#chapter-2--preemption-and-the-worker-environment) |
+| A job failed or went silent: diagnosis order, is one XID alive, no-log debugging, launcher-side failures, metrics and curves | [job-diagnose](harness/skills/job-diagnose/SKILL.md) | |
+| A job says `RUN` but produces nothing | [job-diagnose §`state: RUN` Is Not Evidence](harness/skills/job-diagnose/SKILL.md#state-run-is-not-evidence-that-anything-runs) | |
+| **Clean up a job / 清理 job** (`tpu clear`); a refused `tpu dequeue` | [job-diagnose](harness/skills/job-diagnose/SKILL.md) | |
+| A data-movement job: workstation or cluster? | | [cluster-jobs.md §Where The Storage CLI Exists](knowledge/infrastructure/cluster-jobs.md#where-the-storage-cli-exists-and-where-it-does-not) |
+| A finished tpu job should auto-upload to W&B; multi-XID chain stitching (`step 0..end`); the `wandb-upload-tpu` daemon | [wandb-upload](harness/skills/wandb-upload/SKILL.md) | [wandb-upload.md](knowledge/infrastructure/wandb-upload.md) |
+| A job will not schedule; capping spend (`tools/limit_order.sh`) | [unschedulable-job](harness/skills/unschedulable-job/SKILL.md) | [market.md](knowledge/infrastructure/market.md) |
+| **A job is `BUDGET_DEFERRED`, or a running job was paused/cancelled and you suspect the income/10 cap** | [unschedulable-job](harness/skills/unschedulable-job/SKILL.md) | [budget.md](knowledge/infrastructure/budget.md) |
+| Change the `tpu` CLI or its daemon | [tpu-tooling](harness/skills/tpu-tooling/SKILL.md) | [tpu-cli.md](knowledge/infrastructure/tpu-cli.md) |
+| Change the smart cell-picker, the local queue and auto-reroute, or the serial build-worker | [tpu-tooling](harness/skills/tpu-tooling/SKILL.md) | [router.md](knowledge/infrastructure/router.md) |
+| Touch `budget_check.py` or the `budget_enforcer` daemon | [tpu-tooling](harness/skills/tpu-tooling/SKILL.md) | [budget.md](knowledge/infrastructure/budget.md) |
+| TPU codename, HBM, legal shape, equivalence | | [tpu-reference.md](knowledge/infrastructure/tpu-reference.md) |
+| GPU arch token, NVLink domain, legal shape, card code | | [tpu-reference.md §NVIDIA GPUs](knowledge/infrastructure/tpu-reference.md#nvidia-gpus) |
+| **Run a GPU job on Borg** (`tpu enqueue --tpu_type=h100-8`); CUDA build, NCCL, device_count==0, GPU preemption | [gpu-on-borg](harness/skills/gpu-on-borg/SKILL.md) | [gpu-on-borg.md](knowledge/infrastructure/gpu-on-borg.md) |
+| **A GPU job trains far slower than the bench**; `samples_per_second` 10-30x under; is it the data path or the GPU/NCCL? | [gpu-on-borg §Measure The Container's Input Path Before Blaming It](harness/skills/gpu-on-borg/SKILL.md#measure-the-containers-input-path-before-blaming-it-co-located-cns-is-fast) | |
+| SSH to a GCP GPU VM; `Permission denied`; OS Login vs metadata keys | [gcp-gpu-ssh](harness/skills/gcp-gpu-ssh/SKILL.md) | [gcp-gpu-vms.md](knowledge/environment/gcp-gpu-vms.md) |
+| **Which machine am I on / ssh to the workstation**; `sqa` vs `sqa-large`; where amply, the crontab and the tpu workers run; re-sync home; jetski-hub and the web app | | [workstation.md](knowledge/environment/workstation.md) |
+| **The box is slow / high load / swapping / VSCode-SSH keeps disconnecting**; builds crawling; **is a build too slow** (the ~40s floor; >60s never normal); reclaim idle blaze heaps or memory; a recursive `find` on `/google/src`; reap idle amply sessions | [machine-health](harness/skills/machine-health/SKILL.md) | [workstation.md](knowledge/environment/workstation.md) |
+| **Choose an accelerator family**; a preemptible slice will not hold | [unschedulable-job Chapter 2](harness/skills/unschedulable-job/SKILL.md#chapter-2--choose-and-probe-an-accelerator-before-committing) | [accelerator-choice.md](knowledge/infrastructure/accelerator-choice.md) |
+| Pick a cell/metro for a v7 run | [unschedulable-job §How To Regenerate The v7 Placement Survey](harness/skills/unschedulable-job/SKILL.md#how-to-regenerate-the-v7-placement-survey) | [v7-storage-placement.md](knowledge/infrastructure/v7-storage-placement.md) |
+| Place data or checkpoints; copy or upload | [storage-operations §Before Touching A Payload](harness/skills/storage-operations/SKILL.md#before-touching-a-payload) | [storage.md](knowledge/infrastructure/storage.md), then the project page |
+| **Map a cell to its metro or its CNS bucket**; add a cell to any such table | | [storage.md §Never Hand-Maintain A Cell -> Metro -> Bucket Table](knowledge/infrastructure/storage.md#never-hand-maintain-a-cell---metro---bucket-table) |
+| **Copy, move, or hand off a checkpoint**; resume across metros | [storage-operations §Before Touching A Payload](harness/skills/storage-operations/SKILL.md#before-touching-a-payload) | [storage.md §A Checkpoint Path Is An Opaque String](knowledge/infrastructure/storage.md#a-checkpoint-path-is-an-opaque-string-and-four-shapes-coexist) |
+| Read a distributed path interactively | [storage-operations §Distributed Reads](harness/skills/storage-operations/SKILL.md#distributed-reads-on-an-interactive-path) | |
+| **CitC/srcfs is dropping writes**; `CreateSnapshot failure`; a staging rsync that never converges | [storage-operations: citc-write-failures.md](harness/skills/storage-operations/references/citc-write-failures.md#before-blaming-citc-for-dropping-writes-find-out-who-is-writing) | |
+| A write fails, or a job produced 0-byte logs | [storage-operations §An Over-Quota Cell Looks Like A Broken Program](harness/skills/storage-operations/SKILL.md#an-over-quota-cell-looks-like-a-broken-program) | [storage.md §Charge The Group](knowledge/infrastructure/storage.md#charge-the-group-not-your-500-gib-personal-ceiling) |
+| Resume skips work, or a 0-byte file counts as done | [storage-operations §Existence Is Not Completeness](harness/skills/storage-operations/SKILL.md#existence-is-not-completeness) | |
+| Reclaim local disk, or prune checkpoints | [storage-operations §Local Disk Cleanup](harness/skills/storage-operations/SKILL.md#local-disk-cleanup) | [storage.md §Checkpoints Are The Default Reason A Cell Fills Up](knowledge/infrastructure/storage.md#checkpoints-are-the-default-reason-a-cell-fills-up) |
+| Build or verify a multi-GB artifact on distributed storage | [storage-operations: large-artifacts.md](harness/skills/storage-operations/references/large-artifacts.md#building-a-multi-gigabyte-artifact-on-distributed-storage) | [storage.md §Size A Copy In Disk Bytes](knowledge/infrastructure/storage.md#size-a-copy-in-disk-bytes-not-payload-bytes) |
+| A big write is silently truncated or keeps restarting | [storage-operations: §Two Writers On One Output Path](harness/skills/storage-operations/references/large-artifacts.md#two-writers-on-one-output-path) | |
+| Write a checker, or a verification keeps saying OK | [engineering §A test that cannot fail proves nothing](harness/engineering.md#a-test-that-cannot-fail-proves-nothing) | |
+| **An edit reported success but the change is missing**; deleting a file breaks an unrelated build | [engineering §Trust artifacts, not success returns](harness/engineering.md#trust-artifacts-not-success-returns), [§Make edits atomic](harness/engineering.md#make-edits-atomic) | |
+| Fault-inject safely; a killed script left a broken shared file | [engineering §A test that cannot fail proves nothing](harness/engineering.md#a-test-that-cannot-fail-proves-nothing) | |
+| **Two measurements disagree**; a cached green build; a retracted number | [engineering §When a reading is wrong, fix the predicate, not the command](harness/engineering.md#when-a-reading-is-wrong-fix-the-predicate-not-the-command), [§Trust artifacts, not success returns](harness/engineering.md#trust-artifacts-not-success-returns) | |
+| **The core research idea / the "idea page"** — per-site (untied) gradients for weight-shared models and the looped-nanoGPT benchmark; points at the user's `hie1/` files in the paper repo | | [looped_nanogpt_per_site.md](knowledge/research/looped_nanogpt_per_site.md) |
+| Manage a long experiment; tracker evidence | [experiment-loop](harness/skills/experiment-loop/SKILL.md) | [research index](knowledge/research/README.md) |
+| **Log a result to the spreadsheet**; find a chart | [result-logging](harness/skills/result-logging/SKILL.md) | [result-workbooks.md](knowledge/environment/result-workbooks.md) |
+| **Read a job's curves / harvest `train/*` from the workstation**; the urge to write "the workstation cannot read the datatable" | [result-logging: §Reading The Curves From The Workstation](harness/skills/result-logging/references/chart-links.md#reading-the-curves-from-the-workstation) | |
+| **Write the paper** (`~/work/paper-with-agent`): the hie1 / hie2 / hie3 layers, hie1 is user-only, ICML LaTeX build | [paper-writing](harness/skills/paper-writing/SKILL.md) | [paper-with-agent.md](knowledge/codebases/paper-with-agent.md) |
+| Write or render a paper report | [paper-reading](harness/skills/paper-reading/SKILL.md), its [rendering reference](harness/skills/paper-reading/references/rendering.md) | |
+| `EqR` / `EqR-jax` | [eqr-jax-runs](harness/skills/eqr-jax-runs/SKILL.md) | [eqr-jax.md](knowledge/codebases/eqr-jax.md) |
+| RNN unroll optimizer / adding problem / gradient propagation science line | [rnn-unroll-runs](harness/skills/rnn-unroll-runs/SKILL.md) | [rnn-unroll.md](knowledge/codebases/rnn-unroll.md) |
+| **char-LM / torch-rnn reproduction**; which "char-RNN" repo; the 4-seed cell -> wandb group -> spreadsheet row pipeline | [charlm-runs](harness/skills/charlm-runs/SKILL.md) | [charlm.md](knowledge/codebases/charlm.md) |
+| **nanoGPT call/loss diagonal** (`~/work/nanogpt_depth`, two-band Adam); the four-seed configuration -> W&B group -> row pipeline | [nanogpt-depth-runs](harness/skills/nanogpt-depth-runs/SKILL.md) | [nanogpt-depth.md](knowledge/codebases/nanogpt-depth.md) |
+| **RAFT optical flow reproduction / per-site optimizer on RAFT**; FlyingChairs / FlyingThings3D data on the GPU box | [raft-runs](harness/skills/raft-runs/SKILL.md) | [raft.md](knowledge/codebases/raft.md) |
+| **`nanochat` full-pipeline testbed (`Base` → `SFT` → `RL`, when is looping useful)**; `d12` / `d24` metrics, SFT forgetting, SFT-to-RL inversion, `Maj@k` scaling | [nanochat-runs](harness/skills/nanochat-runs/SKILL.md) | [nanochat.md](knowledge/codebases/nanochat.md) |
+| VLM training, data, benchmark reporting | [vlm-debug](harness/skills/vlm-debug/SKILL.md), [vlm-data-operations](harness/skills/vlm-data-operations/SKILL.md) | [vlm-training.md](knowledge/codebases/vlm-training.md), [vlm-data.md](knowledge/codebases/vlm-data.md), [vlm-metrics.md](knowledge/codebases/vlm-metrics.md) |
+| **The amply gateway is down**; `amp new` worker dies at `os.getcwd()`; `amply-launch` prints nothing | [amply-operations §Restarting The Amply UX Server](harness/skills/amply-operations/SKILL.md#restarting-the-amply-ux-server) | |
+| **Amply's database, snapshots, the local Spanner universe**; `/span/tmp` is dead; restart localdb / gateway order; migrate old runs | [amply-operations §Checking And Repairing The Amply Database](harness/skills/amply-operations/SKILL.md#checking-and-repairing-the-amply-database) | [local-agent-cli.md §The Amply Database Is A Local Spanner Test Universe](knowledge/codebases/local-agent-cli.md#the-amply-database-is-a-local-spanner-test-universe) |
+| Agent web app, or a local agent CLI; a dead-looking `amp` session | [agent-web-operations](harness/skills/agent-web-operations/SKILL.md), [amply-operations](harness/skills/amply-operations/SKILL.md) | [agent-web.md](knowledge/codebases/agent-web.md), [local-agent-cli.md](knowledge/codebases/local-agent-cli.md) |
+| **The remote-control job interface** (lyy launches runs by `git push`; status mirrored back as a git repo); the poller / status daemon; `run_config.yml` schema | [remote-control-operations](harness/skills/remote-control-operations/SKILL.md) | [remote-control.md](knowledge/codebases/remote-control.md) |
+| **Survival game / the sqa-remote run pipeline** (collaborator's stay-alive multi-agent sim; each `sqa-remote` commit == one LOCAL amply run; codex→amply adaptation; results pushed to many-agent-result) | [survival-operations](harness/skills/survival-operations/SKILL.md) | [survival.md](knowledge/codebases/survival.md) |
 
-The "will never finish" row is the one that reads as a verdict. The reading is
-correct, but it describes now and the question is about later. Say "I do not
-know when it will be released", never "it will not be released"; when a fix or a
-fresh sample proves it wrong, the observation was never wrong, only its tense.
-In every other row the query measured the neighbouring thing.
+## Paths And Compatibility
 
-**Before a negative reading becomes a conclusion, name the five coordinates the
-instrument is pointed at: which PROCESS, which ATTEMPT, which TIME WINDOW, which
-OUTPUT PATH, and whether the code you verified is ever INVOKED.** One line of
-work missed a different one of these on five consecutive occasions in a single
-shift, every time with a reading that was perfectly true. Wrong process: the
-serial worker was idle, but the dispatch worker owned that queue state. Wrong
-attempt: the log froze because it belonged to a dead retry while `attempt2` ran
-fine. Wrong window: a spread was called a sampling bug without computing the
-binomial sd it had to beat. Wrong path: the override line was printed before the
-CNS mirror existed. The fifth is the one no checklist catches: the data was real
-but described two different objects. A baseline file stitched a resumed run onto
-a run that never resumed, and the merged history "proved" a spike pattern
-neither arm had. Whenever a file, a variable, or a chart carries a name you gave
-it earlier, re-derive which artefact it holds before you reason from it. The
-name is your old belief, not evidence.
+**The old paths (`engineering.md`, `storage.md`, `jobs/`, `infra/`, `projects/`,
+`research/`, `reports/`, and the other former top-level pages) are now redirect
+stubs; edit the canonical page they name, never the stub.** Code comments and
+notes in other checkouts cite those paths and their `§` headings, so each stub
+keeps every old heading and points it at its new home. New links use canonical
+paths. Markdown links are relative to their containing file; literal runtime
+paths such as `~/work/wiki_agents/tools/budget_check.py` keep their original
+meaning.
 
-**The INVOKED coordinate is the one that survives careful review, because
-testing a pure function proves capability and says nothing about occurrence.** A
-reconcile routine was exercised directly, returned exactly the right verdict,
-and was cited as proof that stale rows self-clean, while no process on the
-machine ever called it, so a status table sat 179 hours out of date and read as
-live. "It would handle this correctly" and "it is handling this" are different
-claims, and only the second is evidence. Check the caller, the service, the cron
-entry, not just the callee.
+The sections this file used to carry moved as follows; a reference such as
+"`AGENTS.md` §Evidence Order" means the page on the right.
 
-**An absence is the weakest possible reading, so treat "X did not appear" as a
-question about the instrument first and the world second.** A missing log line,
-an unclaimed job, a silent watcher and a stalled file all have two readings: the
-thing did not happen, or you cannot see it from here. The second is usually
-cheaper to check. A watcher that has never fired is indistinguishable from a
-watcher pointed at the wrong id, so every probe needs a case in which it is
-known to speak.
-
-The `rc=0` row is the general case: **a silent success is more dangerous than a
-clean failure**, because failure leaves a trace and `rc=0` makes every check look
-green. Close the loop at the far end. Confirm the message arrived in the
-recipient's stream, and confirm the job reached `RUNNING` and wrote its own
-verdict.
-
-**Then check that the value you read came from the command you ran.** A shell
-pipeline reports the exit status of its last stage, so `cmd | head` reads
-`head`'s success and hides `cmd`'s failure. Capture with
-`out=$(cmd 2>&1); rc=$?`, or redirect to a file. `${PIPESTATUS[0]}` is itself a
-trap: any intervening statement, including the `rc=$?` assignment meant to save
-it, resets the array. Having performed X is not enough if the reading instrument measures
-something else, and that mistake survives review because the number is real and
-reproducible.
-
-**A pipe truncates the answer as well as the status.** `| head -N` drops content
-invisibly: the output still looks complete, because it was always meant to be
-several lines. An item that vanishes from a windowed listing has not necessarily
-vanished; it may have been pushed out by a new one. A disappearance is only
-evidence once you know the total, so count first or read it whole.
-
-**A failed reproduction only refutes when it reproduces the conditions.**
-Running the check somewhere else, or on a shorter timescale than the effect,
-turns a refutation into an unrelated success: the same probe against a different
-workspace, or a 3-second window against a 30-minute one, cannot see the thing it
-claims to rule out. State what the negative result covers, not what it feels
-like.
-
-**When someone corrects you, verify the method their correction rests on, not
-just its conclusion.** Once a claim has passed through two people who each only
-checked the other's downstream reasoning, the faulty premise is what nobody
-re-examines. A self-correcting process beats an infallible one, but only while
-each round re-checks premises rather than conclusions.
-
-**Hedging a number does not make it right; a second, independent route to the
-same answer does.** "Rough estimate, timestamped, not claiming precision" is a
-statement about your confidence, not about the value, and it can sit in front of
-a figure that is wrong by a factor of five while making it read as measured. The
-same holds for a well-formed method list in front of a false conclusion. Before
-quoting a number that someone will plan against, derive it a second way: a
-different instrument, a different window, a different artifact. If you only have
-the one, hedge the range rather than your posture. "About two hours, from a
-single six-minute window, so possibly several times that" invites the reader to
-check, where "about 2.1 hours (rough)" does not. Beware a slope measured across
-a transient: a rate taken during startup, catch-up or backlog drain is not the
-steady state, and a window is long enough only when it does not consist of a
-single phase.
-
-**When you act on something you were told rather than something you saw, go back
-to the source first.** Hedges do not survive relay: whoever passes a finding
-along copies the conclusion and drops the "(unverified)", so a claim gets more
-confident the further it travels from the person who knows how weak it is. One
-round trip to the original, asking whether they marked this unproven, costs
-seconds. It is worth it whenever the next step is hard to walk back: editing
-shared docs, changing a config, killing something. Agreement is not corroboration
-when it is the same evidence arriving twice, nor when several people ran the same
-incomplete checklist. Count distinct methods, not distinct agreers.
-
-## Maintaining Memory
-
-**Record a rule only when a future agent cannot cheaply infer it from the code,
-or when violating it has a real cost.** Everything else dilutes what matters.
-
-- **Write the rule, not the incident.** Keep the one clause of evidence that
-  makes it credible; forensics go to `archive/`, or to git history.
-- **Prefer the abstract statement.** A note that only makes sense for one paper
-  or one job id belongs in a project guide or the archive.
-- **One canonical owner per rule**; everyone else points at it by file name.
-- **Replace stale facts; never append a diary.** No "fixed on <date>", no live
-  state, no source line numbers, no job ids. Record how to verify instead.
-- **Lead a section with its rule in bold.** A reader who stops after the first
-  sentence must not be misled.
-- **Put the caveat inside the sentence it qualifies, never in the paragraph
-  after it.** People quote and act on the bold claim alone, so a qualifier
-  parked downstream — "but it may also be X", "(unverified)" — is reliably lost
-  in the first retelling, and what survives is more confident than what you
-  wrote. When a finding has two branches, name both in one clause so that
-  whichever half is copied still carries the other.
-- **Prefer a table to five parallel bullets.** Delete audit snapshots once they
-  are too old to be evidence.
-- **Write plain sentences, not the house dialect.** No literary metaphor, no
-  aphorism, no bolding a whole paragraph, no em-dash chains, no 40-word
-  sentences. One bold phrase per section, for the rule. This is the same
-  standard as the user-facing one above, and it is why the guides read the way
-  they do.
-- **When a fact stops being true, delete it; do not append a correction.** A
-  note that says "X, but actually now Y" makes the reader hold both, and the
-  wrong half travels just as far. Cut what is dead: git history is the archive
-  (`archive/README.md`).
+| Former `AGENTS.md` section | Now |
+|---|---|
+| Global Rules | [harness/policy.md §Global Rules](harness/policy.md#global-rules) |
+| Evidence Order | [harness/evidence.md](harness/evidence.md) |
+| Maintaining Memory | [maintain-wiki §Maintaining Memory](harness/skills/maintain-wiki/SKILL.md#maintaining-memory) |
+| Layout, Topic Router | §Ownership and §Task Router above |

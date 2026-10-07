@@ -1,0 +1,70 @@
+# VLM Benchmark Reporting
+
+Read this before a VLM result reaches the shared spreadsheet, or when a
+benchmark number looks wrong. This page owns *which number* each benchmark name
+means, and what each background colour means on the VLM tab.
+[result-logging skill](../../harness/skills/result-logging/SKILL.md) owns the write mechanics, the "settle the
+protocol first" rule ([result-logging skill §Stop If It Is Not Comparable](../../harness/skills/result-logging/SKILL.md#stop-if-it-is-not-comparable)),
+and every column map — rebuild that map from the live header each time.
+Benchmark data, splits, and scorers are [knowledge/codebases/vlm-data.md](vlm-data.md).
+
+Chapter 1 is what each score means and its floor; Chapter 2 is what each
+background colour means when you report one on the VLM tab.
+
+---
+
+## Chapter 1 — What Each Score Means
+
+### The number that counts, per benchmark
+
+**Report the variant named here; the alternatives are different numbers, not
+rounding.** Pretraining rows take stage-1 final metrics, SFT rows stage-2 final
+metrics: two adjacent rows even when one run covers both stages.
+
+| Benchmark | The number that counts | Trivial floor |
+|---|---|---|
+| POPE | adversarial F1, not macro F1 | — |
+| MMVP | official 150-pair both-correct accuracy, not 300-item | `25%` |
+| CVBench | official source-balanced score | `42.4889%` protocol-aligned, displayed `42.49` |
+| VLMs Are Blind | official eight-task mean | `24.00%` published uniform-random |
+| ImageNet KNN | raw and PCA-whitened are separate protocols | — |
+| VStar / VisWiz | greedy and beam-search are separate protocols | — |
+| DocVQA | ANLS per [vlm-data](vlm-data.md#the-two-final-eval-benchmarks). Stage-3 training already includes DocVQA-train through the OV1.5 grouped stream, so this is in-domain supervised evaluation, never zero-shot document generalization | — |
+| RefCOCOg valid answers | a diagnostic: note it when already logged, else `n/a`; never open result data solely to compute it | — |
+
+### Floors are protocol-specific
+
+**Each floor is protocol-specific, so one borrowed from a neighbour raises false
+alarms.** A result under a superseded protocol is marked protocol-invalid, never
+scored against a floor.
+
+---
+
+## Chapter 2 — What Each Colour Means On The VLM Tab
+
+**This page is the canonical owner of what a background colour means on the VLM
+tab.** [result-logging skill](../../harness/skills/result-logging/SKILL.md) owns the write mechanics and the
+"clear inherited formatting first" rule
+([result-logging skill §Short Cells; Formatting Is Part Of The Result](../../harness/skills/result-logging/SKILL.md#short-cells-formatting-is-part-of-the-result)).
+Read this table before applying any colour, and never take a free one without
+adding it here. A loosely applied colour destroys it for every row that used it
+correctly.
+
+| Colour | Scope | Meaning |
+|---|---|---|
+| `#F4CCCC` light red | one metric cell | value strictly below that benchmark's own trivial floor |
+| `#F4CCCC` light red | a label cell | verified encoder misconfiguration |
+| `#D9D2E9` purple | one metric cell | a different protocol for the same benchmark (e.g. MMVP scored on the 300-item variant instead of the official 150-pair) |
+| `#CCEFCC` green | the `Note` cell | freeze configuration matches original LLaVA stage-2 ("FREEZE OK") |
+| `#FFE2A5` amber | the `Note` cell | freeze ablation: deliberately not the reference freeze config |
+| `#D0E2F3` light blue | the `WandB / run` cell only | the job was run through xm/XManager |
+| `#C6DBF9` blue, `#E0EAF4` pale blue, `#FFF2BF` yellow | whole row | structure: header row, block header, and the trivial-floor reference row |
+
+Scope job-level signals to the identity column and value-level signals to the
+metric cell, so two true statements never contend for one background. Red is
+about a number, blue is about the run that produced it, and `WandB / run` already
+identifies the run. Inserting a row inherits both the metric and label
+backgrounds; clear them before reapplying either. Verify a colour by reading it
+back: export the workbook to xlsx and resolve each cell's `fillId` against
+`styles.xml`. That shows every colour in use, and whether one is free before you
+claim it.

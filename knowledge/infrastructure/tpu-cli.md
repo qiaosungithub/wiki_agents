@@ -1,0 +1,332 @@
+# The `tpu` Tooling Itself
+
+The `tpu` CLI, its checkers, cache daemon, job registry, and preflight
+internals. Read this only when changing, rebuilding, or debugging the tool;
+launching and inspecting jobs is [knowledge/infrastructure/cluster-jobs.md](cluster-jobs.md), and the smart cell-picker and
+serial build-worker are [knowledge/infrastructure/router.md](router.md). Native code and `~/work/tpu_cmd/README.md`
+outrank this file for flags and workflows. Rebuilding the checkers, invoking
+`npu`, and the debugging drill for a frozen board are
+the [tpu-tooling](../../harness/skills/tpu-tooling/SKILL.md) skill.
+
+Chapter 1 is the principle; Chapter 2 is the helpers, locks, and tables you
+drive it with; Chapter 3 is what breaks and the fix.
+
+---
+
+## Chapter 1 — Principle
+
+### Two Halves, Two Repositories
+
+**The tool is split across two repos because the build system forces it.** The
+checker half imports google3 packages, depends on internal build targets, and
+the daemon loops over its compiled binaries.
+
+| Half | Location | Contents |
+|---|---|---|
+| Shell + launcher | `~/work/tpu_cmd/` | wrapper script, launcher, README |
+| Built checkers | a google3 CitC path under `experimental/users/<user>/tpu_utils/` | money/quota/infra checkers, shared utilities, preflight (topology, capacity, market, router), probes |
+
+**The google3 half cannot be symlinked out.** All three variants fail: an
+absolute directory symlink is rejected, a relative one escapes the source root,
+per-file symlinks fail at action execution. Only the reverse works, for
+navigation: real files in google3, a symlink in `~/work` pointing at them.
+
+Both halves are versioned, the google3 half through a separate git directory, so
+the worktree stays put, the build is unaffected, and only a tiny pointer file
+sits in the source tree. Do not unify them with one repo plus a symlink: git
+records a symlink as the link itself, so committing it backs up none of the
+files behind it. A checkout is also not a backup; until the checker half submits
+to the depot, the git repo is the only recovery path. Verify with `g4 files
+//depot/google3/experimental/users/<user>/tpu_utils/...`: "no such file(s)"
+means the git repo is still the only copy.
+
+### Every Source File Belongs In The Repo, Not Just A Checkout
+
+**Every file the build needs lives in the git repo as its one canonical copy; a checkout is a build target you sync into, never a place to edit or to keep a spare.** A file that exists only in a CitC checkout is outside version control, so each checkout that touches it keeps a private copy and they drift apart unnoticed. Then the daemons build from one checkout while an edit lands in another, and the change never ships.
+
+- Track every file blaze compiles, the router (`route_check.py`, `route_lib.py`) and their tests included, not only the checkers. A file the build reads that `git ls-files` does not show is the next silent divergence.
+- Edit in the repo, then run `sync_router_to_workspace.sh` to push into the build checkout before `blaze build`. Do not edit the checkout copy in place.
+- Do not keep a second "backup" or "recovered" checkout as a parallel copy: two copies drift, and git history is the archive already.
+- You cannot enforce this by freezing the stale copies. On CitC `chmod` does not stick and a marker file dropped in a checkout may not persist, so the enforcement is simply that one repo is the only thing anyone edits.
+
+### One Tool, Two Operators
+
+**`npu` is `tpu` with a different registry, not a fork.** A collaborator (lyy)
+works on this workstation under the same Unix account, so environment variables
+express ownership. Every consumer reads them, defaulting to the old hardcoded
+path: `TPU_JOBS_FILE`, `TPU_JOBS_LEGACY_FILE`, `TPU_CHECK_CACHE_FILE`,
+`TPU_JOB_NAME_PREFIX`, and for the local-queue router `TPU_LOCAL_QUEUE_FILE`
+(lyy's own queue) and `TPU_BUILD_WORKER_SESSION` (lyy's own `npu-build-worker`
+tmux session). Unset, the tool behaves as before they existed.
+
+**This is bookkeeping, not a boundary: same Unix user, same XManager account,
+same quota.** The `lyy-` experiment-title prefix exists because the XM UI is the
+one view that cannot see the registry split. Splitting the registry splits what
+each operator *writes*, not what they *see* or can *touch*, so every consumer
+reaching past the registry needs scoping by hand — and each of these shipped
+broken because the split looked like it had covered them:
+
+- **The board unions two sources with different scopes.** `check` merges the
+  per-operator registry with the `infra_check` cache, which is per-account: it
+  lists every experiment the Unix user owns, whoever launched it. Unioned blind,
+  the guest's board showed all of the owner's runs. A scoped board keeps a job
+  only if the operator's own registry records it or its name carries their
+  prefix (the prefix survives the cache's name truncation because it sits at the
+  front).
+- `cancel` is destructive and was unguarded — it passed any XID straight to
+  `xmanager stop`, so one mistyped digit stopped the other operator's job. A
+  scoped operator may cancel exactly what their own board shows, and a mixed
+  batch is refused whole.
+- Auto-recovery managed the other operator's process. A stale shared cache plus
+  one `npu quota` ran `tmux kill-session -t tpu-daemon` and killed it. The
+  quota/money cache is legitimately shared, but the daemon writing it belongs to
+  the account owner.
+
+**The owner stays unscoped on purpose**: whoever pays for the quota needs to see
+and stop everything running on it; the partial view belongs to the guest. Scope
+every new per-operator resource here too (the queue file and worker session each
+shipped a collision until added). `scripts/test_operator_scope.sh` pins all of
+it, with `xmanager` and `tmux` shadowed by shell functions so it touches nothing
+real.
+
+### The Cache Daemon
+
+**Status commands read a cache file, so they are instant; the background daemon
+refreshing it carries all the latency, and the commands warn when the cache is
+stale — so a full daemon round must finish well inside the staleness
+threshold.** Two structural rules follow:
+
+- **Split the round into a fast lane and a slow lane.** Commands warn per cache,
+  so a slow checker must not hold a fast one past the alarm. Cheap money and
+  quota finish in ~40 s; infra_check scales with registry size (one serial RPC
+  per tracked job), takes minutes, and runs detached behind a `kill -0` guard
+  that skips a second pass while one is in flight. One `wait` barrier over all
+  three once aged `money.txt` past its threshold during a long infra pass, with
+  money's own data ready for seconds.
+- **Run the checkers in parallel, not a serial chain.** Every checker
+  cold-starts once, paying a substantial interpreter cost while its RPCs cost
+  under a second; chaining pays that tax repeatedly. They share no state and
+  write to disjoint outputs.
+
+**At most one daemon may write a given cache file, and the guard belongs inside
+the daemon script, not the launcher that starts it.** A lock wrapped around one
+launch path (the watchdog's `flock`) leaves every other start path free to spawn
+a second writer on the same `$TPU_CHECK_CACHE_FILE`: a hand-run script or a
+second `tmux` session bypasses it, and two daemons publishing one cache is how
+the board goes stale and incoherent. Put the lock in `tpu_check_daemon.sh`
+itself, where every launch path must pass through it; chasing the restarter
+through the process tree does not work, because each candidate is a `bash -c`
+under the shared `tmux` server and a setsid'd child loses the link. Key the lock
+by the canonical cache path, so the TPU and NPU daemons never exclude each other
+(different caches) while two on one cache do. Re-exec under `flock -n -o`: `-n`
+makes a duplicate exit at once instead of queueing, and `-o` closes the lock fd
+before the daemon runs so a long-lived child (the blaze server) cannot inherit
+the lock and hold it past the daemon's own death. `TPU_DAEMON_NO_SINGLETON=1` is
+the escape hatch for a deliberate second instance.
+
+### The Log-Tail Sidecar
+
+**A per-round board process reopens a cold Colossus channel to every cell each round, and opening a far cell's channel dominates the tail phase; a long-lived sidecar that keeps the channels warm is what makes distant jobs' tails render.** The board renders each running job's last log lines by reading the largest `rank_*` file under its checkpoint bucket. This host is treated as different-metro from every cell, so the cost is latency, not bytes: opening a far cell's channel (e.g. si-d, measured from this workstation) costs far more than the ~16 KB read, and the board is spawned fresh each round so it pays that open every time. A single round's reads already share one warm channel per cell; the waste is across rounds.
+
+- **`infra_check --tail_cache_daemon` is a resident process that opens each channel once and reuses it for its whole life**, refreshing the tail of every registered bucket into `~/.tpu_tail_cache.json` (env-scoped by `TPU_TAIL_CACHE_FILE`, like the registry). Warm reads are several times faster than the cold first pass. It holds an flock on the cache's `.lock` for its whole life, so a second copy exits rather than racing the file. Boot-persistence is `bootstrap_daemons.sh` (tmux `tpu-tail-cache`), not `tpu_ops_watchdog.sh`: it writes a DIFFERENT file from `tpu_check_daemon`'s `~/.tpu_check_cache.txt`, so the "two daemons on one cache" rule does not apply.
+- **The board consults the sidecar first and direct-reads only what it misses, so the design is strictly additive.** Only `ok`/`nolog` results are ever written (never a failed read), and the board trusts an entry only while fresh (a bounded age well under the staleness alarm). A dead, missing, stale, or corrupt sidecar therefore makes every bucket fall back to a direct read — byte-for-byte the pre-sidecar behaviour — so the daemon can never make the board worse, only faster.
+
+### Job Bookkeeping
+
+**The live registry (`~/.tpu_jobs.json`, scoped by `TPU_JOBS_FILE`) is the file
+`tpu check` renders from, and every write to it or to its archive goes through
+`registry_store.py` in the checker half; nothing else opens either file for
+writing.** Writers that each truncated, parsed and rewrote the whole table on
+their own silently dropped entries, so the module owns the whole protocol and
+its docstring is canonical:
+
+- **Unreadable is not empty.** An empty or unparsable registry is retried and
+  then raises; it is never treated as `{}` and written back, which is how one
+  writer's truncation window erased every entry. A launch that cannot be
+  registered is stashed in `<registry>.unwritten.jsonl`, never dropped.
+- **The lock is held across the whole read-modify-write, on the file itself,
+  and the registry is rewritten in place, not by tmp+rename**: long-lived
+  processes lock its inode, and a rename would orphan their writes. The archive
+  is written first and atomically, so a crash leaves an entry in both files,
+  never in neither.
+- **Every change is journaled and every good write snapshotted**
+  (`<registry>.journal`, `<registry>.lastgood`): `python3 registry_store.py
+  journal` shows which process removed an entry, `verify` checks both files
+  parse, `repair` restores the snapshot.
+- **Readers never write.** `tpu check` only reads; the check daemon's status
+  pass patches fields by compare-and-set, so a field another writer changed
+  meanwhile is skipped, not overwritten.
+- **Long-lived writers (check daemon, reroute loop, budget enforcer) load the
+  module at start**, so a change to it reaches them only after they restart, and
+  an interactive shell only after it re-sources the wrapper.
+- **A terminal row is polling load, not just clutter.** infra_check issues one
+  serial RPC per tracked job, so hundreds of never-migrating rows
+  (`TERMINAL_RECONCILED`, `CANCELLED`) inflate the round for jobs whose state
+  can never change again. The daemon filters terminal status out of its poll
+  set, and archiving them keeps the live registry small; do both, since a fresh
+  registry accretes them continuously.
+- **Clear archives rather than deletes**, moving entries to a legacy file. Keep
+  it: an entry is the only mapping from an experiment id back to its checkpoint
+  bucket, staging directory, and launch log once the job and work unit are gone.
+- **Cancel is not clear, and CANCELLED is final.** Canceling stops the
+  experiment and marks the entry CANCELLED; no status pass may overwrite it, so
+  an explicitly killed job never reads as failed. The entry stays on the board
+  until archived.
+
+### Error Classification
+
+**The daemon parses launch logs and labels failures (defragmentation
+preemption, resource exhaustion, unknown); it never resubmits a job.**
+Resubmission and warm resume belong to the local-queue router ([knowledge/infrastructure/router.md](router.md)),
+which owns the job's row; do not add a resubmit path to the daemon, since it
+would create experiments and swap registry keys behind the router's back. The
+board renders a failure with no stated reason as `Rejected by Allocator/Borg`,
+a placeholder rather than a diagnosis; `why_probe` reads the real cause from
+XManager and Borg. The daemon runs compiled binaries, so a source edit here does
+nothing until you rebuild.
+
+### Preflight Internals
+
+**Preflight verdicts are layered cheapest-first:** an in-process topology
+whitelist plus per-allocation minimum-slice rules; one availability RPC asking
+whether any cell in this allocation and tier has enough obtainable chips; and a
+headroom heuristic warning when remaining quota is thin (near-permanent and
+low-signal on dynamic pools).
+
+The router ranks surviving candidates by cap-blocked status (a blocked
+combination is kept and explained, not silently dropped), verdict, group
+preference, headroom, cost, and accelerator preference. **Group preference
+(`_GROUP_PREF`) puts g3/g5 ahead of g9 at PROD**: g3/g5 are small dynamic pools
+with their own credit balance, exempt from the G9 income/10 budget cap
+([knowledge/infrastructure/budget.md](budget.md)), so spending them first preserves the regulated G9 budget. It sits
+above the economics (headroom/cost) but below blocked+verdict, so it never
+promotes a non-runnable or lower-confidence placement to save budget, and it is
+neutral at BATCH (one free pool). Headroom differs by tier on purpose: the
+guaranteed tier uses remaining quota, the batch tier obtainable chips, because
+the batch pass never consults a floor. A `--metros` allow-list is a hard
+data-locality filter applied before ranking. Market data comes from the money
+checker's cache each daemon round; when that cache is missing or stale it says
+so and falls back to price-blind ranking rather than failing.
+
+**Per-allocation minimum-slice rules are pool policy, not physical law.** A
+slice below the minimum is a valid hardware topology, disallowed by the
+admission config and rejected instantly; the batch tier typically allows down to
+the architecture's own minimum. These rules live in a table in the preflight
+code ([knowledge/infrastructure/tpu-reference.md](tpu-reference.md)), updated when an allocation behaves differently.
+
+---
+
+## Chapter 2 — Usage
+
+### Recovering A Past Run's Config
+
+**A shell helper reconstructs any past run's config from its immutable staging
+snapshot.** It reads the staging directory from the registry (falling back to
+the legacy file, so archived ids still resolve) and copies the exact config out
+of that snapshot, learning which file by grepping the launch log. That answers
+"which config produced this run", and is why deleting a finished experiment's
+config from the checkout is safe.
+
+### Serializing Heavy Verbs: Separate Blaze And Hg Locks
+
+**Keep Blaze serialization separate from Hg status.** The PATH shims delegate to
+`~/.tpu_bin/serialize_heavy.sh`. Only Blaze takes `/tmp/host_heavy.<uid>.lock`;
+Hg goes through `hg_status_guard.py` and its own `/tmp/hg_status.<uid>.lock`.
+Sharing one lock let a single `hg status` block builds for 23 minutes. Neither
+gate may reuse `/tmp/tpu_build.host.lock`, which covers an entire launch
+including upload. Children do not inherit either lock; `TPU_SERIAL_HEAVY=0` opts
+out. Status preserves native arguments, stdout, stderr and exit codes; rejects a
+concurrent status query with exit 75; times out at 120 s with exit 124; and
+imposes a per-workspace five-minute cooldown after a timeout. Do not read any
+nonzero status result as a clean tree, and resolve the real executable from a
+cached absolute path, since a PATH walk may itself stall on CitC.
+
+### Metrics Tables
+
+**Metrics tables expire after a long window measured from last access, renewing
+on every read or write; pin one explicitly if it must outlive that.** The table
+CLI does not work from this workstation — a restricted credential blocks the
+service and every local binary hits the same wall. This is a workstation
+limitation only; a job writes fine. Use the browser URLs in
+[result-logging skill](../../harness/skills/result-logging/SKILL.md).
+
+---
+
+## Chapter 3 — Errors
+
+### The Heavy-Verb Shim Must Not Swallow stderr
+
+**`exec 210>"$LOCK" 2>/dev/null` reads as "quiet the fd-210 open", but `exec`
+with no command applies EVERY redirection to the shell permanently, and to
+whatever it execs** — so blaze's progress stream, its "another command is
+running" notice, and the dbip link vanish, and a build stalled on a CitC
+snapshot is indistinguishable from a frozen terminal. Brace-group it: `{ exec
+210>"$LOCK"; } 2>/dev/null`. Test each gate with a command guaranteed to fail on
+stderr (for Hg, status outside a repo); a shim that prints nothing there is
+swallowing.
+
+### Fig status Is Not Necessarily Read-Only
+
+**Fig's native auto-widen step scans the entire CitC manifest before applying
+the file filter and may write tracking metadata** (one failing workspace
+repeatedly tried to add 1,813 directories, most from historical build staging).
+Adding `.` or ignoring untracked files does not bypass it. Keep generated
+staging in a separate non-Fig workspace (the launcher defaults to `clip_probe`);
+do not delete Fig metadata or restart shared srcfs to make status fast.
+
+### Cache Daemon Failure Modes
+
+**Every one of these makes a correctly-built binary look broken, or a healthy
+daemon look stuck.**
+
+- **Never `readlink -f` the build output symlink.** Its two hops have opposite
+  lifetimes: the first is stable and worth pinning against a concurrent build,
+  the second is republished per build with only that build's targets behind it.
+  Collapsing both freezes the daemon in one build's namespace no later rebuild
+  can reach, so binaries sit correctly built in `blaze-bin` while the daemon
+  insists they do not exist. Pin one hop, re-resolve the rest at each use, and
+  fall back to the live path.
+- **Serialize every self-heal rebuild behind one shared `flock`.** A checker
+  binary is objfs-GC'd after a while, and three paths rebuild it (the daemon's
+  self-heal, a wrapper's on-demand rebuild, a periodic keep-warm). Fired
+  together they race on the single blaze output_base and republish each other's
+  namespace, so none publishes a clean binary and the checker stays frozen while
+  `blaze build` appears to run non-stop. A non-blocking `flock` shared by all
+  rebuild paths collapses the storm to one build; the losers skip. (This is the
+  checker-rebuild instance of the output_base race that [knowledge/infrastructure/router.md](router.md) cures for job
+  builds with the serial build-worker.)
+- **A keep-warm rebuilds only when the binary is missing.** A built binary
+  survives a long time, so an unconditional periodic `blaze build` is overhead,
+  and not free: blaze's `--shutdown_on_low_sys_mem` evicts the idle server under
+  memory pressure, so each "up-to-date check" cold-respawns a multi-GB JVM heap
+  that deepens the dip that evicted it. Steady state is a cheap liveness exec
+  (the binary's own `--help`). A timed-out or killed probe is UNKNOWN, never
+  proof the binary is missing; if the build mtime never moves across many
+  keep-warm cycles, investigate whether those "rebuilds" were wasted work.
+- **When the staleness alarm fires, check the round duration the daemon logs
+  before believing its "credentials expired" hint**, which is a guess and
+  usually wrong. A hint printed into a detached tmux pane is not a fix, and the
+  auto-recovery restarts the session, never the problem.
+- **The command re-renders the cache; it does not print it.** `tpu check` parses
+  the daemon's cached table and rebuilds its own, so a column the daemon computes
+  and writes stays invisible if the command's parser drops it. The per-cell
+  `REGION` column lived in the cache for a long time while the command showed
+  only `XID|STATUS|NAME|…|WHY`; the fix was in the parser, not the daemon. Before
+  concluding "the tool does not collect X", run the daemon binary directly and
+  diff its columns against the command's. Section layouts differ, so a parser
+  must gate per-section on the column count, not a fixed index.
+- **`AGE` is derived in the wrapper, not the daemon.** It is submit-age (queue +
+  run) parsed from the timestamp baked into each entry's `logdir`/`bucket_cp_path`
+  in `~/.tpu_jobs.json`, not Borg run-uptime; "how long has it actually been
+  training" still comes from `STEP × sec/step`. Add a wrapper column by editing
+  the per-section `*_headers`/`*_caps` lists and the matching `*_rows.append(...)`;
+  no daemon rebuild needed.
+- **A rank-log tail read seeks from the file's end, and CNS raises its own `SeekError` — not `OSError` — when the file is shorter than the window.** The tail reader does `seek(-N, SEEK_END)` to grab the last N bytes; a log smaller than N (the torch ports write only a few KB) makes that seek run off the front. On a local POSIX file that is `OSError`, but CNS/`epath` raises a `SeekError` that is not an `OSError`, so an `except OSError` lets it escape and the whole read is misreported as an unreadable failure — no tail, and for torch jobs STEP falls back to 0 since STEP is parsed from that tail. Catch broadly and recover by reading the whole (small) file. General rule: a CNS/`epath` I/O guard must not assume the local-filesystem exception type.
+
+### A Preempted Job Is Dead, Not Pending
+
+**A preempted job is dead, not pending** ([knowledge/infrastructure/cluster-jobs.md](cluster-jobs.md) owns why: no restart
+budget means the torn-down gang counts as a task failure). Rendering any work
+unit whose message merely contained "preempt" as pending made dead experiments
+look like they were queuing for hours. Terminal state must win over a substring
+match, while a genuinely queued job preempted earlier is labeled as such.
