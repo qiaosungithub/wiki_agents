@@ -1,482 +1,71 @@
-# Spreadsheet Result Logging
+# Moved
 
-Owns writing a result into a project's shared experiment spreadsheet, finding
-a job's chart, and reading a job's curves back from the workstation (§Reading
-The Curves From The Workstation). Per-tab column semantics: `../projects/vlm_metrics.md`,
-`../projects/eqr_jax.md`. "A number is meaningless without its protocol":
-`../engineering.md` §Communicating a result. **Read this every time you log**: a
-wrong row or column looks like a right one and nothing errors. Write via the `gsheets` CLI (`/google/bin/releases/gemini-agents-gsheets/gsheets`:
-`gsheets readonly read` for batch range reads, `gsheets mutate write` for writes;
-always read full ranges rather than per-cell loops to avoid the 3,000 reads/min
-HTTP 429 quota) and its skill, never by scraping the URL.
+This compatibility entry preserves existing links. Edit the canonical pages below.
 
-## The Transaction
+- [result-logging skill](../harness/skills/result-logging/SKILL.md)
+- [knowledge/environment/result-workbooks.md](../knowledge/environment/result-workbooks.md)
+- [harness/skills/result-logging/references/chart-links.md](../harness/skills/result-logging/references/chart-links.md)
 
-1. Resolve the input to an exact run, and where relevant an exact job attempt.
-2. Resolve the tab **by title**; rebuild the column map from the live header.
-3. Choose the row (§Where The Row Goes). Never append by default.
-4. Pull identity, config, final metrics and step/loss continuity from tracker and
-   logs. Never scan benchmark datasets to fill a diagnostic.
-5. Normalize only metrics with known semantics, then run the hard stop (§Stop If
-   It Is Not Comparable).
-6. Write the smallest range: terse text, `logdir` / `stagedir` filled, inherited
-   formatting cleared.
-7. Read values, formulas and colors back; render if the change was structural.
-8. Confirm the run reached W&B and fill its link (§The W&B Link Column).
-9. Report the changed row, run id, missing diagnostics and any caveat.
+### The Transaction
 
-Log only a run that reaches a conclusion; one that exposed a code bug or a
-packaging failure belongs in the commit message. Preemption is not such a
-failure: a job preempted but still hitting its step budget produced a real
-result. Harvest and log its final metrics, train loss included, instead of "see
-chart (log rotated)". Rotation means look harder (§Every Row Carries Its Train
-Metrics), not leave columns blank. Every row also carries the chart link, its
-W&B link (§The W&B Link Column) and the `logdir` / `stagedir` pointers. Those recover the exact code, command and
-resolved config, which keeps cells short. Without a chart every reader rebuilds
-the URL by hand (§Chart Links).
+See [result-logging skill §The Transaction](../harness/skills/result-logging/SKILL.md#the-transaction).
 
-## Which Tab
+### Which Tab
 
-| Project | Spreadsheet | Tab |
-|---|---|---|
-| VLM (PaliGemma / JAX LLaVA) | `1FlcygQbGBTqHLJeiKdwxS0nP41SPMJrtX-kCJq8d7SQ` | the cleaned PaliGemma/JAX LLaVA tab |
-| `EqR` / `EqR-jax` | `17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0` | `EqR-refactored`. `EqR-reproduction` is pre-refactor, read-only history |
-| char-LM / torch-rnn | `17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0` | `charlm-torchrnn (qiaos)`. Every metric cell is `mean +- sd` over 4 seeds; one cell = one wandb group. Headline columns are the HELD-OUT split; the selection split has its own trailing column. Row format and the `gsheets --` trap: `../projects/charlm_torchrnn.md` |
-| looped nanoGPT (the idea line) | `1chHYhhEnTfgkKmLnZiC7jjoFCE-ywsDCxPLXFdSTl20` (its own workbook) | `looped nanogpt (cleaned 2)` — the curated research tab for parcae / loopformer / ouro (`../research/looped_nanogpt_per_site.md`). The superseded `looped nanogpt (cleaned)` tab and the older `looped nanogpt` tab in the same workbook, plus the same-titled tab in `17pvrMbOKOKFiIa-…` and `Parcae unroll-optim (qiaos)` there, are read-only history. |
-| MoR (Mixture-of-Recursions recipe on SmolLM-360M, parcae-torch port) | `1chHYhhEnTfgkKmLnZiC7jjoFCE-ywsDCxPLXFdSTl20` (same workbook as looped nanoGPT) | `MoR SmolLM-360M` (`sheetId = 905260049`, created 2026-10-04) — every MoR-recipe run (configs `mor-smollm-360m-*.yml`, repo MoR-sqa): vanilla, recursive N_r = 2 / 3 / 4, and their per-site (f, w) variants. Row 3 holds the shared recipe once; rows 4–8 are the orange `official baseline` block (MoR paper Table 3, 20B-token rows). E / F are NLL / ppl at the trained depth T = N_r (F = exp(E)); I is the depth sweep D1-D(N_r)-D(2N_r); K is the per-site stepsize f / w (mean over core matrices), blank for plain AdamW rows. Same `[3 seed]` fold rule as below. |
-| RR (Retrofitted Recurrence, TinyLlama (4,8,4) train-recurrence-4, etd-rr port) | `1chHYhhEnTfgkKmLnZiC7jjoFCE-ywsDCxPLXFdSTl20` (same workbook as looped nanoGPT) | `RR TinyLlama-484` (`sheetId = 1406021947`, created 2026-10-05, a format clone of the MoR tab) — every RR run in repo etd-rr (branch retrofit-rr): training runs `rr-tinyllama-484-rec4{,-rhofro-ema,-rhofro-raw}.yml` and downstream eval jobs `rr-eval-*.yml`. Row 3 holds the shared recipe once; rows 4–5 are the orange `official baseline` block (RR paper Appendix Table 3, GSM8K / MATH at test R = 1 / 4 / 32); rows 7–8 are the calibration block (the released rec4 checkpoint through our eval_rr harness, XID 296193527). E / F are the fixed-set val loss / bpb at R = 4 (the train mean recurrence); G / H are GSM8K flexible-extract % and MATH math_verify % at R = 1 / 4 / 32; I is the val depth sweep D1-D4-D32; J / K are the per-site rho_fro / f means, `n/a` for the baseline optimizer. An eval job of one of our trained checkpoints goes directly under its training row as `  ↳ eval of the row above`. Same `[3 seed]` fold rule as below. |
-| nanochat (karpathy/nanochat repro: d24 released checkpoints + d12 from scratch, base → SFT → RL, repo `~/work/nanochat`) | `1chHYhhEnTfgkKmLnZiC7jjoFCE-ywsDCxPLXFdSTl20` (same workbook as looped nanoGPT) | `nanochat repro` (`sheetId = 1585203617`, created 2026-10-05, a format clone of the MoR tab) — every nanochat job (exp names `nanochat-*`, presets in `configs/load_config.py`: `eval_repro` / `sft_repro` / `rl_repro` / `posttrain_repro` / `full_d12_pipeline`). **One row per stage**; one job = one titled block (`<model> <what> (XID …, config …)`), stages `s<k> <stage name>` in order. Row 3 holds the shared recipe once; rows 4–8 are the orange reference block (GPT-2 CORE 0.256525, README leaderboard run 6, and the meta of the released d24 base step 5568 / SFT step 466 checkpoints). D = final train loss (debiased EMA; RL rows: token-level PG loss, reward in L); E = final val bpb (base: ClimbMix val; SFT: chat val mixture); F = CORE (base_eval, 22 DCLM tasks, every example; per-task accuracies in L) or ChatCORE (chat_eval); G–K = ARC-Easy / ARC-Challenge / MMLU / GSM8K / HumanEval % from the full chat_eval. SFT-stage G–K are the in-train ChatCORE estimate (GSM8K / HumanEval capped at 24 problems) and say `(in-train)`; the full eval is the next row. wandb = `n/a` (nanochat runs use `--run dummy`). |
+See [knowledge/environment/result-workbooks.md §Which Tab](../knowledge/environment/result-workbooks.md#which-tab).
 
-**Every parcae / loopformer / ouro run, and any new nanoGPT-setting run, logs to
-the `looped nanogpt (cleaned 2)` tab (`sheetId = 117747425`) of workbook
-`1chHYhhEnTfgkKmLnZiC7jjoFCE-ywsDCxPLXFdSTl20` by default.** It is the operator's
-re-cleaned copy (2026-10-01) of the previous `looped nanogpt (cleaned)` tab and
-keeps only the new-weight-recipe blocks and reference baselines worth comparing
-against. The superseded `looped nanogpt (cleaned)` tab (`sheetId = 1779859670`)
-is retired as of 2026-10-01: do not write to it, and do not take row numbers
-from it. The older `looped nanogpt` tab (`sheetId = 642888791`) in the same
-workbook and the tab with the title `looped nanogpt` in the EqR workbook are
-unpruned history. All of these are read-only. Resolving an old title or the
-wrong workbook writes into a frozen tab and nothing errors, and
-`looped nanogpt (cleaned)` is a prefix of the live title, so match the FULL
-title exactly. Pick the workbook by ID, then the tab by exact title
-(`looped nanogpt (cleaned 2)`).
-Three exceptions log to their own tab of the same workbook, never to
-`looped nanogpt (cleaned 2)`: a MoR-recipe run (SmolLM-360M, `mor-smollm-360m-*`
-configs) goes to `MoR SmolLM-360M`, an RR run (etd-rr, `rr-tinyllama-484-*` /
-`rr-eval-*` configs, exp names `rr-*`) goes to `RR TinyLlama-484`, and a nanochat
-job (repo `~/work/nanochat`, exp names `nanochat-*`) goes to `nanochat repro`. Their model,
-data, budget and eval set share nothing with the nanoGPT rows, so their numbers
-are not comparable to them.
-Inside the tab, put a new row next to its comparison target (§Where The Row
-Goes); a new line of work opens a titled block below the method it belongs to.
-The call/loss-diagonal line's own `nanoGPT (qiaos)` tab is a separate line and
-stays in the EqR workbook (`../projects/nanogpt_depth.md`).
+### Re-Read The Header Every Time
 
-**Resolve a tab by title, never by gid.** Both workbooks hold a tab with the same
-gid for different projects, plus dated backup tabs of each other. A gid writes
-into a frozen snapshot nobody reads. A new line of work opens a titled BLOCK at
-the bottom of the live tab, as every family there does; not a new tab.
+See [result-logging skill §Re-Read The Header Every Time](../harness/skills/result-logging/SKILL.md#re-read-the-header-every-time).
 
-**The two EqR tabs use the same column positions but opposite metric NAMES, so
-copying a number by name swaps a 99.2 with a 34.8.** In both tabs I is per-token
-and J is whole-board exact; it is the names that trade places. `acc` means
-whole-board exact in `EqR-refactored` and `accuracy` means per-token in
-`EqR-reproduction`, so the shorter name flips meaning between the two. Map by
-position and semantics, never by metric name, and re-derive from the live header
-(row 2; row 1 is a banner, and `EqR-refactored`'s banner states the rename).
+### Where The Row Goes
 
-| Tab | I (per-token) | J (whole-board exact) | columns the other lacks |
-|---|---|---|---|
-| `EqR-refactored` | `final train/token_acc (SMOOTHED)` | `final train/acc (SMOOTHED)` | S `final train/total_loss`, T `in-train eval: acc / token-acc @ step` |
-| `EqR-reproduction` | `final train/accuracy (SMOOTHED)` | `final train/exact_accuracy (SMOOTHED)` | — |
+See [result-logging skill §Where The Row Goes](../harness/skills/result-logging/SKILL.md#where-the-row-goes).
 
-## Re-Read The Header Every Time
+### A Row That Is Already Filled Can Still Be Wrong
 
-**Never write from a remembered column map.** A stale map does not error when
-someone adds a column, renames a metric or reorganizes a tab. It files your
-number under the wrong benchmark. Build the map from the live header, and expect
-the header not to be row 1: these tabs open with a banner row and often a
-reference row of trivial scores. Read the neighborhood before picking a range. A
-helper must re-derive the map every run, because code and spreadsheet drift
-apart; it is never a source of truth.
+See [result-logging skill §A Row That Is Already Filled Can Still Be Wrong](../harness/skills/result-logging/SKILL.md#a-row-that-is-already-filled-can-still-be-wrong).
 
-## Where The Row Goes
+### Row Numbers Are Invalidated By Your Own Write
 
-**Decide the row before the values.** The tab is a set of ablation groups, not a
-log. Readers navigate by adjacency, so appending at the end destroys the
-comparison.
+See [result-logging skill §Row Numbers Are Invalidated By Your Own Write](../harness/skills/result-logging/SKILL.md#row-numbers-are-invalidated-by-your-own-write).
 
-| Case | Rule |
-|---|---|
-| Opening a family | A full baseline row carrying the configuration fixed beneath it, a free-text line naming the family, a blank row between families. |
-| One axis changed | A variant row directly under its baseline, stating only what changed, written `- <change>` (`- only 128 tokens`). The leading `- ` marks a delta. |
-| Filling a delta | Leave inherited columns empty; restating the baseline buries what the row is about. A delta is relative to the block's baseline, not the row above, so say so when changes stack. |
-| Placing it | Keep an ablation axis contiguous: insert beside the comparison target. A change big enough to break the comparison starts a new baseline block, not a delta. |
-| A published number | A reference and a run of ours are different rows. Give each dataset an `official baseline` row; restating its numbers in a run's cells guarantees the copies drift apart. |
-| A train run and its eval | Two paired rows, eval directly under, titled `  ↳ eval of the row above`. Different job ids, configs and failure modes, so collapsing them loses which half went wrong. A train row without an eval row has no conclusion: mark it, and never quote its in-training numbers as results. |
-| A run past the block's budget | Two rows, same job id: metric columns compare only if every row stopped at the same step. Put the block-budget value in the run's own row, and pair the longer result beneath as `  ↳ @<steps>, same run`, `Details` naming each segment. Still rising at the budget: that point is also its peak; otherwise record the pre-budget peak. Never widen the tab with a second set of metric columns: empty on every normal-budget row, they read as a missing measurement, not an inapplicable one. |
-| A run that was resumed under new job ids | ONE row. The XID column lists EVERY id that wrote training steps into the run's checkpoint dir, oldest first, each with its step range (`285906137 (0-113700) → 286366489 (115000-128300) → 286551193 (128000-…, LIVE)`). The **Flatboard chart** column carries one link per segment id (`http://flatboard/xid/<XID>`), whereas the **W&B** column carries ONE link to the full stitched `step 0 .. end` curve across all segments (§The W&B Link Column). Never overwrite the old XID with the live one. Read the segment set off the tfevents file names in the checkpoint dir (`qiaos_group_<xid>`) or the lineage chain, not off the live job board alone. |
-| A multi-seed run (e.g., 3 seeds `s42`/`s43`/`s44`) | ONE row, never separate `[s43]` / `[s44]` child rows. Append `[3 seed]` (or `[n seed]`) to the parent run label in `Col A`, write `mean ± std` (sample std, `ddof=1`) in all metric columns (`D`, `E`, `F`, `G`, and `D8=mean±std` in `I`), average update-geometry in `Col J`, list all seed XIDs and per-seed numbers in `Status` (`Col L`), and join the Flatboard / W&B links with ` , ` in `Col M` and `Col N`. |
+### Short Cells; Formatting Is Part Of The Result
 
-## A Row That Is Already Filled Can Still Be Wrong
+See [result-logging skill §Short Cells; Formatting Is Part Of The Result](../harness/skills/result-logging/SKILL.md#short-cells-formatting-is-part-of-the-result).
 
-**Before adding a rung to a ladder, re-derive the ladder head's summary from the
-same source — a summary row is a claim about cells that have since changed.** A
-head row reading "FINAL 0/5 at every rung" was written when that was true; one
-rung later finished 2/5 and nobody re-read the head, so the tab asserted the
-opposite of its own data while every individual cell row stayed correct. The
-head is the row people quote. Re-derive it whenever you touch any rung under it,
-and say `CORRECTED <date>` in the note rather than silently swapping the number.
+### A Colour Check That Cannot Fail
 
-**When a tab carries two pre-registered metrics, check whether they peak at
-DIFFERENT rows before writing "single peak".** The phrase is almost always
-produced by quoting one metric and reading it as a property of the ladder. Two
-metrics that disagree are the finding; collapsing them re-picks the metric after
-seeing the data, which is what pre-registration exists to prevent.
+See [result-logging skill §A Colour Check That Cannot Fail](../harness/skills/result-logging/SKILL.md#a-colour-check-that-cannot-fail).
 
-**Re-harvest from the ARCHIVE, not from the working copy, before overwriting a
-row that already holds numbers.** A relaunch overwrites the on-disk log of the
-batch that finished, so the disk holds the corpse of the retry while the tracker
-still holds both. Correcting a completed 60k row from a crashed 30k retry's log
-reads as diligence and destroys the result. When the two disagree, the archive
-wins and the discrepancy itself goes in the note.
+### Every Row Carries Its Train Metrics
 
-**Mark a row harvested mid-run as `NOT FINAL` in the note and put the step in the
-verdict cell.** A verdict cell reading `FINAL 1/5` is indistinguishable from a
-finished cell six weeks later; `FINAL 1/5 -- STILL RUNNING at 50800/60000` cannot
-be quoted by accident.
+See [result-logging skill §Every Row Carries Its Train Metrics](../harness/skills/result-logging/SKILL.md#every-row-carries-its-train-metrics).
 
-**Never put an agent/session version, a run-batch tag or any other internal
-bookkeeping token in a results row.** A tab records WHAT WAS RUN, not who ran
-it or in which shift. `v14_ihts_10` names a session; `truestate k=10 (W_ih
-complete)` names an experiment, and only the second lets a reader six months
-later know what the number means or what it compares against. The launcher's
-arm string is internal too — translate it into the tab's own vocabulary, which
-you get by reading the neighbouring block headers, not by inventing one.
-A row named after the batch also hides its comparison: once the arm above is
-called `truestate k=10`, the right place for its W_ih-complete twin is directly
-beneath it, which the internal name actively obscures.
+### A Split That Selects Is Not A Held-Out Split
 
-## Row Numbers Are Invalidated By Your Own Write
+See [result-logging skill §A Split That Selects Is Not A Held-Out Split](../harness/skills/result-logging/SKILL.md#a-split-that-selects-is-not-a-held-out-split).
 
-**`insert-rows` shifts every row below it, so any row index resolved before the
-insert is stale — including the ones in the note you are about to write.** Cite
-rows as "content + row N", never a bare `row N`, and re-read the neighbourhood
-after any structural write. `mutate clear` is worse: it DELETES the row and
-shifts everything up, so it is never the way to blank a cell — write an empty
-value to the specific range instead.
-**Use the range form, `mutate insert-rows "$SID" --range "'Tab'!35:37"` (inserts three blank rows BEFORE row 35, nothing else changes). Verified on a throwaway tab on 2026-09-05: values above stay put, values below shift down intact. The `--start=N` form is the one recorded as blanking the row below (`projects/rnn_unroll_adding.md`); do not use it. Read the label column back across the whole shifted region before writing into the new rows.**
+### Stop If It Is Not Comparable
 
-**A full-sheet read collapses blank rows, so line numbers computed from it are
-not the sheet's row numbers.** Always read a bounded range (`A176:J198`) when you
-need true indices.
+See [result-logging skill §Stop If It Is Not Comparable](../harness/skills/result-logging/SKILL.md#stop-if-it-is-not-comparable).
 
-**`Wrote 1 rows.` absent, with rc=0, means the write did not happen.** Read the
-cell back every time; rc is not evidence.
+### The W&B Link Column
 
-**A `raw-batch` `updateCells` value must be wrapped `{"userEnteredValue": {…}}`; a bare `{"numberValue": …}` or `{"stringValue": …}` prints `Raw batch request executed successfully` and writes nothing.** With `fields: "userEnteredValue"` the API finds no `userEnteredValue` in the malformed cell and clears that field — invisible when the target was already empty, so the whole batch looks like it applied. `{"userEnteredValue": {"numberValue": 8.19}}` is the cell; the per-cell read-back is what catches the silent no-op.
+See [result-logging skill §The W&B Link Column](../harness/skills/result-logging/SKILL.md#the-wb-link-column).
 
-**Pass cell values after a `--` separator.** A value containing `/` or a leading
-dash is otherwise parsed as a flag: `gsheets mutate write` prints its help text,
-returns rc=0 and writes nothing. A header row reading
-`config / run,seed n,...` failed exactly this way and the tab kept its previous
-contents while the command looked fine. `mutate write "$SID" "$TAB!A2:I2" --
-"$VALUES"` is the safe form, and the read-back above is what catches it.
-**A cell value that starts with `+` or `=` is parsed as a formula and lands as
-`#ERROR!`** (`+0.150 (live)` did; `0.150 (live)` is fine), so write signed
-numbers without the leading plus, or lead with a word, and read the cell back.
-**Someone else may reorder the tab between your write and your read-back, so
-re-derive the row map from a bounded read immediately before every write, not
-once per session.** A verified-correct read-back is a claim about the layout at
-that instant: one shift later, rows that were 19-23 are 21-23 with a new blank
-at 18, and the next write lands on the wrong experiment while every command
-returns `Wrote 1 rows.` Cheap defence: read `A<lo>:B<hi>` and match on the
-Settings text, never on a row number you resolved earlier.
+### Chart Links
 
-**A column whose every cell reads `n/a` or empty is a column the pipeline cannot
-produce; delete it rather than leaving it as an apparent gap.** `eval/loss`,
-`eval/cot_em` and `peak eval/acc` sat in a tab for weeks reading as missing
-measurements, when the evaluator only ever emits accuracy/correct/total. Confirm
-by scanning every row (not a sample) before deleting, back the range up first,
-and re-read the header afterwards because deleting shifts every column right of
-it. `gsheets mutate delete-cols <SID> --range '<tab>!H:I'` — passing the columns
-as bare positional args fails with `accepts 1 arg(s)` and deletes nothing.
-
-**One fact, one column.** An id that already has a home in `xm link` / `logdir`
-does not belong in `Notes` too; the copies drift and the wide cell pushes the
-metric columns off screen. Notes carries only what changes interpretation.
-
-**Keep one unit per metric column, and state the unit in the header.** A column
-mixing `0.4344` with `43.06%` cannot be sorted or eyeballed, and the mix is
-invisible until someone compares two rows. The same rule caught a `final
-train/loss` column holding a last-step point value on some rows and a 5k-step
-mean on others: at n=1319 the two differ by ~0.09, which is ten times the 5k
-window's standard error, so the mixed column reversed the ranking of two arms.
-Put the protocol in the header (`final train/loss (final-5k avg)`) so the next
-writer cannot guess wrong.
-
-
-## Short Cells; Formatting Is Part Of The Result
-
-**Do not write essays in a spreadsheet.** A cell helps the next reader find and
-interpret the number, never how the run got that way. The test: does a reader
-need this sentence to USE the number? History belongs in the commit message or
-the project guide; a bug is never explained in a cell. The tab is read at a
-glance, and a row that looks different reads as meaning something different, so
-match the block you write into.
-
-| Rule | Detail |
-|---|---|
-| Settings stay short | A whole baseline configuration fits in roughly 15–75 characters. |
-| Notes carry only what changes interpretation | Protocol, sample count, what differs from the comparison row, any caveat on trusting the number: one clause each. |
-| Shared context goes in the block's header row, once | Repeating a protocol per row is how these tabs decay: cells here reached 1,900 characters with one paragraph copied across seven rows. |
-| Color is a defined signal; never invent or repurpose one | Applying one loosely destroys it for every row that used it correctly. Project semantics and which colors are taken: `../projects/vlm_metrics.md`. Check it first; a color that looks free usually is not. |
-| Clear inherited formatting, then apply intentionally | Inserting a row copies the neighbor's, backgrounds included, encoding a condition your run does not meet. |
-| The CLI splits cell text on `,` and `|` | A comma starts a new COLUMN, a pipe a new ROW, so an unescaped prose note scatters across the metric columns and the row below, overwriting real data that reads back as plausible. Escape commas (`\,`), keep pipes out of the text, and read the whole written range back. |
-| Keep the metric columns visible | Long text in an early column defeats the side-by-side comparison the layout exists for. |
-| Read colors back, not just values | Export xlsx and parse it with a real parser (§A Colour Check That Cannot Fail); render a PNG too after a structural change. |
-
-## A Colour Check That Cannot Fail
-
-**Before trusting any colour reading, export the sheet TWICE with no edit in
-between and diff the two: a reader that reports changes there is measuring
-itself, not the sheet.** `inspect-cell` does not return colour at all, so it
-cannot be the check. A hand-rolled xlsx XML/regex reader is worse, because it
-returns plausible numbers: mine reported 13 changed rows between two identical
-exports, and told me a successful one-row edit had recoloured 42 rows purple.
-Both readings were false, and both would have sent me to "repair" a sheet that
-was already correct. Parse the exported xlsx with a real parser (`openpyxl`),
-resolve each cell to its actual RGB, and run the zero-change control first;
-only then compare a before/after pair. Style INDICES are not comparable across
-two exports of the same workbook — the same fonts come back in a different
-order.
-
-**Recolour by explicit row range, not with a command that edits by style
-index.** `mutate format` applies to a style, so recolouring one row silently
-recolours every other row sharing it; two such passes hit unrelated rows twice
-on one tab. A `raw-batch` `repeatCell` request over explicit
-`startRowIndex`/`endRowIndex` touches only those rows (measured collateral: 0
-over 125 rows). Keep the pre-change xlsx as the rollback, and state the
-measured collateral count when you report the change.
-
-**When a colour is given a second meaning, rewrite the legend in the same
-edit.** Grey on one tab meant "W_hh-only"; it was reused for "predates the fix"
-and for one shift both meanings were live with no note saying so. The row that
-defines the colour is the row readers quote.
-
-## Every Row Carries Its Train Metrics
-
-**A results row is incomplete until its train-metric columns are filled, and
-train loss is never optional.** Eval is the headline. The train columns
-(`final train/lm_loss`, `final train/token_acc`, `final train/acc`) show *why* an
-arm sits where it does. An arm that never fit and one that fit but failed to
-generalize read identically in eval, oppositely in train loss. Eval filled with
-train columns blank discards half of every lr×wd comparison.
-
-- Harvest them inside the transaction. Step 4 ("pull final metrics from logs")
-  covers them; they are not a separate errand to skip when the log is awkward.
-- "The log rotated" is a lookup problem, not an exemption. The framework prints
-  per-step train metrics from one worker only, and after a preemption that worker
-  is a *different* physical log file. Find it before writing "see chart". Which
-  `rank_<n>.log` holds the final train curve: `../projects/eqr_jax.md`
-  §Harvesting Final Train Metrics.
-- Report a train metric as a tail-window mean over the logged curve, not the
-  single last row. See §Stop If It Is Not Comparable ("Converged value or single
-  sample") and `../projects/eqr_jax.md` §Divisors and cadence.
-- Exception, when the log line is ALREADY a mean: a column literally named
-  `Final train loss` (the `looped nanogpt (cleaned 2)` / parcae-torch tab) takes the plot's
-  last point, not a tail-window average. That logger prints every row as a
-  trailing mean (`loss X (mean of N steps)`), so the cell is the LAST such line
-  verbatim; averaging those rows again pulls in the still-descending tail and
-  reads ~0.04-0.06 high at full length, which flipped an lr-sweep ranking. Take
-  it from the last NON-EMPTY `rank_0_attempt<k>.log` (a resumed run's endpoint is
-  in a later attempt; earlier attempts stop mid-descent), and sanity-check
-  train <= eval -- train > eval means a mid-run point, or a multi-depth /
-  aux-inclusive objective, was grabbed. Specifically, Col D (`Final train loss`)
-  in `looped nanogpt (cleaned 2)` MUST report the **pure `loop=8` (T=8) CE loss**:
-  - **Parcae**: `train/loss` (already pure T=8 CE).
-  - **Loopformer**: `train/loss_long` (pure T=8 LM CE; do NOT use `train/loss`
-    which adds `0.1*short + 0.1*consistency` — record the total objective in
-    `Status`).
-  - **Ouro**: `train/ce_D8` (equivalently `train/final_ce`, pure T=8 LM CE; do
-    NOT use `train/loss` or `train/task_loss`, which in post-`e23e147` non-halting
-    runs is the equal-weight mean across all depths `D1..D8` `(ce_D1+...+ce_D8)/8`
-    ~0.06 higher than `ce_D8`, and in pre-`e23e147` halting-ON runs is the
-    halting-weighted expected CE minus `entropy_beta * H` — record those in
-    `Status`).
-- Match the block's format per column. These tabs are inconsistent: `token_acc`
-  is a percent in one section, a fraction in another. The wrong convention reads
-  as a 100x error, so read the neighbors, not your memory. On `maze64-clean` the accuracy columns (ss20 /
-  ss100 `solution_acc`, D/E) use a 0-100 scale (`0.924` → `92.4`; a genuine `0`
-  stays `0`). Convert fraction-scale values first, and normalize a mixed column
-  to 0-100 in one pass. A sub-1% accuracy (e.g. `0.3` meaning 0.3%) is a
-  legitimate 0-100 value, so disambiguate by the arm, not the magnitude.
-- Unrecoverable is rare, and it is stated, not left blank. Exhaust the lookup,
-  then write why in one clause (`train log lost to N preemptions`), so a blank
-  never reads as an unlogged oversight.
-
-## A Split That Selects Is Not A Held-Out Split
-
-**If a split chose the checkpoint, the hyperparameter or the arm, it has been
-fitted to, and a number measured on it carries an optimistic bias.** Selecting
-on it can still be the right protocol -- most published LM recipes do exactly
-that -- but then the tab must show the bias rather than hide it: report the
-selected model AND the selection-free one (the final model at the step budget)
-side by side, plus their difference. A single column cannot distinguish "this
-arm generalises better" from "this arm got a luckier checkpoint out of 18".
-Never compare one arm's selected number against another arm's unselected one.
-
-The trap is that the upstream repository's own naming is often wrong for this:
-`torch-rnn` calls its selection split "val" and never touches its "test" split
-at all, so copying its vocabulary imports the confusion. When you re-role a
-split, version the prepared-data directory and make the loader REFUSE the old
-layout: the same file name now means different bytes, and a silent load puts
-every headline number on the wrong slice.
-
-**Loss and accuracy do not peak at the same step, so "the best checkpoint" is
-only best on the metric that chose it.** On the char-LM line one seed selected
-at step 2000 on val loss and its accuracy there was 1.9 points BELOW the final
-model's -- invisible in the loss column. If the tab carries both metrics, carry
-both models too.
-
-## Stop If It Is Not Comparable
-
-**Do not write when the run and the sheet are not directly comparable**: a metric
-missing or renamed, a differing split or protocol, disagreeing final evaluations,
-unexplained training continuity, conflicting target cells, or a task needing
-cross-region access. Report the discrepancy instead; the user decides how to
-represent an out-of-distribution result. Duplicate the worksheet before bulk
-reformatting or structural cleanup, unless the user authorizes editing the
-original.
-
-The recurring failure is two numbers that look alike and mean different things;
-`../engineering.md` §Communicating a result owns the general rule. Five things
-decide whether a value may enter a row:
-
-| Settle | Because |
-|---|---|
-| The population | An eval padded to a fixed batch shape reports over padded rows, and padding can score as correct, inflating derived figures while one unaffected metric quietly disagrees. Establish the real denominator, correct explicitly, note it. |
-| Converged value or single sample | A "final" training metric is usually the one step that landed on the logging grid, carrying full batch-to-batch variance. Record a tail-window mean with its step range and compare on that. |
-| The protocol behind it | An in-training periodic eval runs at whatever is cheap: a health signal, not a headline. The paired eval row is the result. |
-| Whether the run finished | Just short of budget may be a log-point boundary; well short is an interruption. Record steps completed: an eval of a short checkpoint is pessimistic, and the row must admit it. |
-| Which variant of a benchmark | Averaging convention, answer extraction, split and scoring mode each change the number under one benchmark name, and each has its own trivial-score floor. |
-
-Two checks settle a disputed correction: it must agree exactly with an
-independent metric of the same thing, and multiplying by the population must give
-a whole count. Project semantics: `../projects/eqr_jax.md`,
-`../projects/vlm_metrics.md`.
-
-## The W&B Link Column
-
-**A finished `tpu` run auto-uploads its full ancestor chain (`step 0 .. end`) to
-a single W&B run, so each row carries one stitched W&B link, but only after you
-confirm the upload landed with a complete curve.** The upload is unattended only
-for a job whose chain carries a `config.wandb` identity and that finished after
-the daemon's baseline tick; every other job is skipped without error. How to
-check completeness, and how to force a chain-stitched repair on the final XID,
-is owned by `../jobs/wandb_upload.md` (§Check the daemon, §Upload or repair one
-job now). A repair moves the run to a new id, so write the link it prints on its
-`UPLOADED` line and fix every cell that linked the old one.
-
-- **One single W&B link per row**: the URL the daemon's `state/tpu_uploaded.json`
-  records for the final XID (its id family: `../jobs/wandb_upload.md` §A
-  re-upload replaces the run under a new id). A row may list several resumed or
-  standalone eval XIDs and one Flatboard chart link per segment. Its W&B column
-  still holds ONE run URL, which merges the entire `step 0 .. end` curve across
-  all segments.
-- The same run may appear in SEVERAL rows -- its own result row and, in another
-  block, a base/reference row for a later experiment -- and each carries the
-  link, as it already carries that run's chart link. Find every row by its
-  `Train XID` cell, not a remembered row number (the tab is reordered often), or
-  filling only the obvious result row leaves the reference row blank.
-- The link does not replace the chart link or the `logdir` / `stagedir`
-  pointers -- it is another handle on the same run, filled alongside them.
-
-## Chart Links
-
-A cluster job has no external tracker run, so "the chart" is a different URL per
-backend. Resolve the one the job wrote; a URL rendering an empty page is worse
-than no link.
-
-| Link | Shows |
-|---|---|
-| `http://flatboard/xid/<XID>` | the metric curves; this is the link to log |
-| `http://datatable/xid/<XID>/data` | the raw scalar table behind them |
-| `http://xids/<XID>` | the experiment page (status, work units, config) |
-
-**An empty page means no data was written, not a broken link.** The writer
-announces itself on rank 0 at startup. A "could not start" or "log-only" warning
-means the curves do not exist. Opting in to the table writer must be explicit,
-since the default writes nothing and no error. A short `eval_only` job may never
-reach the flush threshold, so its durable evidence is the metrics files under the
-checkpoint bucket. Log that path too. Wiring: `../projects/eqr_jax.md`
-§Experiment tracking: the logging surface.
+See [harness/skills/result-logging/references/chart-links.md §Chart Links](../harness/skills/result-logging/references/chart-links.md#chart-links).
 
 ### Reading The Curves From The Workstation
 
-**The workstation CAN read a job's curves. What it cannot do is call the
-datatable service through its Stubby client, so a report must never say "the
-workstation cannot read the datatable"; it says which of the three routes below
-was tried and what came back.** Every route here was performed, not inferred;
-re-perform route 3 against any finished XID before relying on it, because its
-failure is a service state, not a rule.
-
-| Route | Do | Gives | State |
-|---|---|---|---|
-| 1. The job's own bucket, first | torch lines: `fileutil cat <bucket>/sanity/<XID>_<WID>_att<N>_rank0.jsonl`. `EqR-torch-maze128` writes a `train_metrics` record per log interval (every `train/*` column, `samples_per_second` included), `eval_done` / `final_eval_done` carry the eval keys with values, `model_built` carries `tf32` and the matmul precision in force. Other torch lines built on the same `infra/beacon.py` have the lifecycle and eval records but not the train rows: port the one `beacon.emit(..., "train_metrics", ...)` call from `borg_trainer.py`. JAX lines: `fileutil cat <bucket>/logs/rank_<n>_attempt<k>.log` (which rank and which attempt hold the final curve: `../projects/eqr_jax.md` §Harvesting Final Train Metrics); `~/work/xid2wandb/` parses those logs (`xid2wandb <XID> --dry-run` prints every row it recovered). | exact numbers at every logged step | works, no service in the loop |
-| 2. The rendered page | `/google/bin/releases/gemini-agents-gbrowser/gbrowser --corp screenshot "http://flatboard/xid/<XID>" out.png`, then view the PNG. `--corp` is the persistent Chrome profile carrying corp auth; a login page in the PNG means `gbrowser login` once from a real terminal. The page auto-creates a dashboard whose plot 0 is `train/lm_loss`; `?activePlot=N` selects another. | the curve as a picture, data-freshness stamp included | works |
-| 3. The numeric reader (Stubby) | `/google/bin/releases/gemini-agents-flatboard/flatboard_tool read_data --query=/datatable/xid/<XID>/data --limit=500 [--json --columns=step,train/lm_loss]`; `get_url --xid=<XID>` lists its dashboards. | the table as rows | the credential mints, then `Flatfish RPC failed ... /DataService.ReadTableData ... DEADLINE_EXCEEDED` on every table. This is the Stubby path a restricted LOAS cannot open; use route 4 instead of raising the deadline. |
-| 4. The numeric reader (SSO, WORKS) | `ffhttp.py` in `experimental/users/qiaos/fbread/` (also vendored in `~/work/wandb-upload-daemon/`). Replays the Flatboard web UI's own HTTP call to `https://flatfish.corp.googleapis.com` via `gosso` — no Stubby, no LOAS. `python3 ffhttp.py --address=/datatable/xid/<XID>/data --columns=step,train/loss --n=0 --subset_mode=none`; or import it: `get_columns(addr)` lists every column, `read_table(addr, cols)` returns row dicts. | the table as rows, all columns | **works, including from a non-interactive (cron/tmux) shell** — verified 2026-09-12 reading real curves off a finished job. This is what the wandb-upload daemon uses. |
-
-`gbrowser --corp text` and `html` return only the app shell: flatboard and the
-datatable viewer are JS applications that fetch their data after load, so
-route 2 is a screenshot, never a scrape. `xmanager` sees status, not scalars.
+See [harness/skills/result-logging/references/chart-links.md §Reading The Curves From The Workstation](../harness/skills/result-logging/references/chart-links.md#reading-the-curves-from-the-workstation).
 
 ### Why Only A Work Unit Can Write One
 
-Writing a datatable requires a Borg credential; a workstation cannot. The table
-lives at `owner=…deepmind-jobs realm=… type=PROD`, and a workstation LOAS is a
-*restricted* credential: `DatatableService.CreateTable` / `Read` through the
-LOAS client both return `PERMISSION_DENIED` (`go/loas-restricted-credentials`),
-as do `analog` and `xmanager tail_logs`. That is a statement about that client,
-not about the curves (§Reading The Curves From The Workstation). A metric
-reaches a table only from inside a work unit, which mints a real prod
-credential; `blaze run` on the workstation fails at table creation and cannot
-verify the write either. So a job drops its own evidence where `fileutil`
-reaches (route 1), and its log line `writing to http://flatboard/xid/<XID>` is
-the proof that the table exists.
-
-A finished run's empty chart can be backfilled from its text log. Such a run
-predates the datatable writer but still has every logged scalar in its
-`_boot_log` stream on CNS. A tiny CPU replay job (parse the rank-0 log, re-emit
-via the same writer, keyed by the *new* job's XID) reconstructs the curves. The
-source XID's table cannot be written once its work unit ends, so the row points
-at the replay XID. Run it as a g9 PROD CPU controller
-(`--tpu_type=cpu=N --group=9 --tier=PROD --skip-preflight --cell=<in-metro>`).
-The g8 shared CPU pool routinely sits unscheduled: experiment `RUNNING`, work
-unit never executes, no heartbeat, no log. The PROD controller schedules in
-~1 min (§the CPU-only bullet in `../jobs.md`).
+See [harness/skills/result-logging/references/chart-links.md §Why Only A Work Unit Can Write One](../harness/skills/result-logging/references/chart-links.md#why-only-a-work-unit-can-write-one).
 
 ### Provenance: what the chart link does not carry
 
-**A chart link resolves to metrics only.** It cannot say which code produced
-them, so a chart-link-only row cannot answer "which snapshot was this?" — the
-question a reproduction table exists for. The launcher writes these to the job
-registry (`~/.tpu_jobs.json`, keyed by job id); none reaches the chart or the
-experiment page:
-
-| Field | Why the chart cannot recover it |
-|---|---|
-| `stagedir` | The immutable source snapshot that was packaged. The home checkout has moved on, so this is the only pointer to the exact code. |
-| `logdir` | The launch log: command, resolved flags, allocator verdict. |
-| eval outputs | Per-point metrics files and the FULLY RESOLVED eval config, including arch merged from the checkpoint. Survive when the table service has nothing. |
-
-```bash
-python3 -c "import json; e=json.load(open('$HOME/.tpu_jobs.json'))['<XID>'];
-print(e['stagedir'], e['logdir'], e['bucket_cp_path'], sep='\n')"
-```
-
-`tpu clear` archives rather than deletes, so an old id still resolves from the
-legacy file. But that registry is one local file on one workstation: the second
-reason to copy these fields into the sheet.
+See [harness/skills/result-logging/references/chart-links.md §Provenance: what the chart link does not carry](../harness/skills/result-logging/references/chart-links.md#provenance-what-the-chart-link-does-not-carry).
