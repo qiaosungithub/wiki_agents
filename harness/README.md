@@ -12,6 +12,7 @@ Task skills below describe one workflow each and link to the
 | Skill | Use |
 |---|---|
 | [agent-web-operations](skills/agent-web-operations/SKILL.md) | Redeploy, move between machines, health-check, or add a subdomain to the agent web / Jetski stack (`~/work/agent-web-gemini`), and triage its classic misleading bugs. |
+| [agent-messaging](skills/agent-messaging/SKILL.md) | Send a message to another agent session (a Jetski conversation, or an amply run or session) from a shell, a script, or another agent, and confirm it was received and answered. |
 | [amply-operations](skills/amply-operations/SKILL.md) | Restart or revive the amply UX gateway, check and repair its local Spanner database, read host health, and diagnose an `amp` session that only looks dead. |
 | [charlm-runs](skills/charlm-runs/SKILL.md) | Launch, verify, harvest, and log char-LM torch-rnn reproduction runs on the GPU boxes, where one cell is one W&B group of seeds and one spreadsheet row. |
 | [eqr-jax-runs](skills/eqr-jax-runs/SKILL.md) | Launch, triage, place, harvest, and keep the peak checkpoint of an EqR-jax sudoku or maze run, and run the RoboTwin Diffusion-Policy baseline and its A100 close-loop eval. |

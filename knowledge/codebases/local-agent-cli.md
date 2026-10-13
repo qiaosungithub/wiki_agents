@@ -8,7 +8,9 @@ what still runs where are in [knowledge/environment/workstation.md](../environme
 `~/.amply/dashboard_url` (the port changes per start).
 
 Chapter 1 is the CLIs you type and how a named session starts. Chapter 2 is the
-local database behind the amply gateway. The runbook for the gateway and its
+local database behind the amply gateway. Chapter 3 is how a message gets into a
+Jetski or amply session from outside it; the procedure is the
+[agent-messaging skill](../../harness/skills/agent-messaging/SKILL.md). The runbook for the gateway and its
 local database is
 [amply-operations skill §Chapter 1 — Operating The Amply Service](../../harness/skills/amply-operations/SKILL.md#chapter-1--operating-the-amply-service),
 and the classic ways a run only looks dead are
@@ -149,3 +151,39 @@ Health in one line, a query by hand, the repair after a reboot, and the traps
 met while building the universe are in
 [Checking And Repairing The Amply Database](../../harness/skills/amply-operations/SKILL.md#checking-and-repairing-the-amply-database)
 in the amply-operations skill.
+
+---
+
+## Chapter 3 — Messaging Interfaces
+
+### Jetski: Every Conversation Is Reachable Through The Local Hub
+
+**`jetski-hub-server` (its `--port` is in its argv, usually 5388) lists and
+accepts messages for every local conversation, including those driven by a
+`gemini` CLI PTY daemon.** A message sent through the hub runs as a normal user
+turn in that conversation; this was checked on a conversation hosted by the
+`gemini` helper. Each `cli` process also listens on two ports of its own, but
+they need a CSRF token that is not discoverable (`GET /` returns 404 or 400), so
+the hub is the interface. The client is
+`/google/bin/releases/gemini-agents-jetski/jetski`, whose stderr is init log
+noise.
+
+| Behavior | What happens | How it was measured |
+|---|---|---|
+| Send without `--model` to a conversation started by the `gemini` helper | The CLI prints `Message sent` and exits 0, then the conversation logs `failed to construct executor: plan model not specified` and goes IDLE without a turn | Conversations created with `new-conversation --model=...` accept a send without `--model`; the helper-started one did not |
+| Send while the conversation is RUNNING | The new message preempts the in-flight turn; its running tool call is abandoned and never reported | A `sleep 45` tool call was cut off by a second message, which got the only reply |
+| Transient model errors during a turn | Logged as `error_message` steps (`RESOURCE_EXHAUSTED (code 429)`, `INVALID_ARGUMENT (code 400)`), then retried; the turn still ends with a reply | Seen in a test turn that answered correctly after both errors |
+| `list-conversations` line format | Plain: `Conversation: <id>, Status: CASCADE_RUN_STATUS_<X>` with nothing after the status. `--verbose` appends `, Archived: ..., Title: ...` | A regex that required a comma after the status read nothing from the plain format |
+| `send-message` exit code | 0 whenever the hub accepted the request, regardless of whether a turn ran | See the first row |
+
+### Amply: Three Ways In, One Per Kind Of Sender
+
+**An amply session can be reached by a peer agent (`send_message`), by any
+process that knows the run id (`amply_notify`), or by an outside caller posing as
+the operator (the gateway's `/chat/send`).**
+
+| Channel | Needs | Arrives as | Notes |
+|---|---|---|---|
+| `send_message` tool | Being an agent in the same run | A peer message in the target's stream | Wakes a parked target |
+| `~/.amply/bin/amply_notify <session_id> <text>` (`-` reads stdin) | `AMPLY_RUN_ID` in the environment and a live worker for that run; nothing else (works from `env -i`) | An environment message | Reaches the worker's control port, not Spanner. Exit codes `0` delivered, `1` argv or env, `2` worker unreachable, `3` session unknown or terminal. `$AMPLY_NOTIFY` itself is unusable here (ACL'd release binary) |
+| `POST <dashboard_url>/chat/send?run_id=<run>` with form field `content` | The gateway URL from `~/.amply/dashboard_url` and the run id | An operator message to the run's chatbot | Folds into a running turn at the next tool boundary ([§`amp` Sends Operator Messages While The Agent Works](#amp-sends-operator-messages-while-the-agent-works)); a 2xx reply (204) only means accepted. Read `GET /chat/messages?run_id=<run>` for the reply |
