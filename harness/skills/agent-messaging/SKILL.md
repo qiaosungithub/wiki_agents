@@ -19,6 +19,7 @@ recipient.**
 | From → to | Channel | Recipient sees |
 |---|---|---|
 | Any shell or script → a Jetski conversation | `tools/jetski_send.py send <conv> "<text>"` (the `jetski` CLI against the local hub underneath) | a user message that starts a turn |
+| Any shell or script → a Jetski conversation hosted by a live `gemini` PTY daemon (`~/.gemini/jetski/pty/cid-<conv>.json` exists with live pids) | `tools/jetski_send.py pty-send <conv> "<one-line text>"` (types into the live CLI) | a user message typed into its TUI |
 | An agent in an amply run → another session in the same run | the `send_message` tool, with the target session id | a peer message |
 | A process with `AMPLY_RUN_ID` set (any bash child of an amply agent) → a session in that run | `~/.amply/bin/amply_notify <session_id> "<text>"` | an environment message |
 | Anything outside amply (Jetski, cron, a script) → an amply run's chatbot, as the operator | `curl -X POST "$(cat ~/.amply/dashboard_url)/chat/send?run_id=<run_id>" --data-urlencode "content=<text>"` | an operator message, folded into a running turn |
@@ -34,9 +35,19 @@ message.**
 
 1. Find the conversation id by its title:
    `~/miniforge3/bin/python3 ~/work/wiki_agents/tools/jetski_send.py find "<title substring>"`.
+   Then run `jetski_send.py live-status <conv>`. If it names a PTY host, the
+   conversation lives in a `gemini` PTY daemon: the hub's status and transcript
+   for it may be stale, `send` and `feed` refuse it, and you use step 2b.
 2. Send one message and wait for the answer:
    `jetski_send.py send <conv> "<text>"`, or `send <conv> @message.md` for a long one.
    Add `--interrupt` only when you mean to cancel the agent's current turn.
+
+   2b. For a PTY-hosted conversation: `jetski_send.py pty-send <conv> "<text>"`.
+   It joins the text into one line (Enter submits in the TUI), waits until the
+   live store shows the agent idle, types the line, and exits 0 only when the
+   store has your user step and an assistant step after it. Put long content in
+   a file and send a one-line pointer to it. Read the answer from the store with
+   `live-status`, or ask the operator to look at the terminal.
 3. Send several, one per turn: put them in one file separated by lines reading
    `===MSG===`, then run it detached so it survives your session:
    `setsid nohup ~/miniforge3/bin/python3 ~/work/wiki_agents/tools/jetski_send.py feed <conv> msgs.md --notify <your amply session id> > feed.log 2>&1 < /dev/null &`.
@@ -89,3 +100,4 @@ them.**
 | A checker reports failure although the agent answered | It treated any `error_message` step as failure; Jetski logs a retried 429 or 400 that way and still finishes the turn | Judge by the assistant reply after the message |
 | `jetski` against a `cli` process's own ports returns 404 or 400 | Those embedded ports need their own CSRF token | Talk to the hub on the port in the `jetski-hub-server` argv |
 | A background notification never arrives | The script called `$AMPLY_NOTIFY` | Use `~/.amply/bin/amply_notify` |
+| The hub says a conversation is RUNNING for hours and its transcript stopped long ago, but the operator says the agent finished | The conversation is hosted by a `gemini` PTY daemon and the hub's view of it froze (seen: hub at step 732, live store at 1177) | Read `~/.gemini/jetski/conversations/<conv>.db` (`live-status`) and message it with `pty-send`; never send through the hub, which would run a turn on its old copy |

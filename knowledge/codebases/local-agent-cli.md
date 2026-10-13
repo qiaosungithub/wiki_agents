@@ -156,12 +156,14 @@ in the amply-operations skill.
 
 ## Chapter 3 — Messaging Interfaces
 
-### Jetski: Every Conversation Is Reachable Through The Local Hub
+### Jetski: The Local Hub Reaches Every Conversation It Has A Current View Of
 
 **`jetski-hub-server` (its `--port` is in its argv, usually 5388) lists and
-accepts messages for every local conversation, including those driven by a
-`gemini` CLI PTY daemon.** A message sent through the hub runs as a normal user
-turn in that conversation; this was checked on a conversation hosted by the
+accepts messages for every local conversation, but for one hosted by a live
+`gemini` PTY daemon its view can go stale; see
+[§`gemini`-Hosted Conversations](#gemini-hosted-conversations-type-into-the-pty-daemon).**
+A message sent through the hub runs as a normal user turn; this was checked on
+conversations created by `new-conversation` and on a fresh one started by the
 `gemini` helper. Each `cli` process also listens on two ports of its own, but
 they need a CSRF token that is not discoverable (`GET /` returns 404 or 400), so
 the hub is the interface. The client is
@@ -175,6 +177,26 @@ noise.
 | Transient model errors during a turn | Logged as `error_message` steps (`RESOURCE_EXHAUSTED (code 429)`, `INVALID_ARGUMENT (code 400)`), then retried; the turn still ends with a reply | Seen in a test turn that answered correctly after both errors |
 | `list-conversations` line format | Plain: `Conversation: <id>, Status: CASCADE_RUN_STATUS_<X>` with nothing after the status. `--verbose` appends `, Archived: ..., Title: ...` | A regex that required a comma after the status read nothing from the plain format |
 | `send-message` exit code | 0 whenever the hub accepted the request, regardless of whether a turn ran | See the first row |
+
+### `gemini`-Hosted Conversations: Type Into The PTY Daemon
+
+**A conversation started by the agent-island `gemini` helper lives in a PTY
+daemon, and its source of truth is the local sqlite store, not the hub.** The
+daemon is published at `~/.gemini/jetski/pty/cid-<conv>.json`
+(`daemon_pid`, `cli_pid`, `sock_path`); the store is
+`~/.gemini/jetski/conversations/<conv>.db`, table `steps(idx, step_type, status,
+..., step_payload)`, where `step_type` 14 is a user input and 15 an assistant
+`planner_response`. Copy the `.db`, `-wal` and `-shm` files before reading, so
+the live CLI is never locked.
+
+| Behavior | What happens | How it was measured |
+|---|---|---|
+| Hub view of a long-lived `gemini`-hosted conversation | Can freeze: `get-conversation` stopped at step 732 and the listing still said RUNNING, while the store had 1177 steps and had been idle for 20 minutes | Compared `jetski get-conversation` with the store of the same conversation |
+| Hub send to such a frozen conversation | Not tried on purpose: the hub would start a turn on its 450-step-old copy next to the live CLI | Inferred from the row above; `tools/jetski_send.py send` refuses PTY-hosted conversations |
+| Typing through the daemon socket | Connect `AF_UNIX` to `sock_path`, read one JSON handshake line (`full_id` is the conversation), then send frames of 1 type byte + big-endian u32 length + payload. An `I` frame is written verbatim to the PTY: send the text, then a separate `\r` | On a throwaway `gemini new` session the typed line became user step 2 and the assistant replied with the requested nonce in step 4 |
+| Other attached terminals | The daemon accepts several clients at once and broadcasts output to all, so a user's open terminal stays attached; keystrokes from both interleave | Read in `gemini-session-helper.sh` (daemon loop) |
+| Newlines in the typed text | Enter submits in the TUI, so a newline would send a partial message | Collapse the message to one line; point at a file for long content |
+| Idle check | The hub status cannot be trusted, so idle means the last stored step is a 15 and the store files did not change across two polls | Used by `jetski_send.py pty-send`; tested end to end |
 
 ### Amply: Three Ways In, One Per Kind Of Sender
 
