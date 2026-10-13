@@ -133,13 +133,24 @@ class Jetski:
 
 
 def pty_host(conv: str) -> dict | None:
-    """Metadata of the live `gemini` PTY daemon hosting *conv*, or None."""
-    p = JROOT / "pty" / f"cid-{conv}.json"
-    if not p.exists():
-        return None
-    meta = json.loads(p.read_text())
-    alive = all(pathlib.Path(f"/proc/{meta[k]}").exists() for k in ("daemon_pid", "cli_pid"))
-    return meta if alive else None
+    """Metadata of the live `gemini` PTY daemon hosting *conv*, or None.
+
+    Checks `cid-<conv>.json` first, then every per-daemon `d-*.json`: the cid index file
+    can vanish while the daemon keeps running (seen on a 4-hour-old daemon), and the
+    helper itself falls back the same way.
+    """
+    root = JROOT / "pty"
+    for p in [root / f"cid-{conv}.json", *sorted(root.glob("d-*.json"))]:
+        try:
+            meta = json.loads(p.read_text())
+        except (OSError, ValueError):
+            continue
+        if meta.get("cid") != conv:
+            continue
+        pids_alive = all(pathlib.Path(f"/proc/{meta.get(k)}").exists() for k in ("daemon_pid", "cli_pid"))
+        if pids_alive and os.path.exists(meta.get("sock_path", "")):
+            return meta
+    return None
 
 
 class LiveStore:

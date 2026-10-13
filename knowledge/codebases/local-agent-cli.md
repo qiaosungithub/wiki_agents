@@ -197,6 +197,7 @@ the live CLI is never locked.
 | Other attached terminals | The daemon accepts several clients at once and broadcasts output to all, so a user's open terminal stays attached; keystrokes from both interleave | Read in `gemini-session-helper.sh` (daemon loop) |
 | Newlines in the typed text | Enter submits in the TUI, so a newline would send a partial message | Collapse the message to one line; point at a file for long content |
 | Idle check | The hub status cannot be trusted, so idle means the last stored step is a 15 and the store files did not change across two polls | Used by `jetski_send.py pty-send`; tested end to end |
+| Finding the daemon | `cid-<conv>.json` can disappear while the daemon keeps running; the per-daemon `d-<id>.json` (same fields, including `cid`) stays. Scan both, as the helper's `_find_live_pty_daemon` does | Seen on a 4-hour-old daemon: its `cid-` file was gone, pids and socket alive; delivery through the `d-` file then succeeded (user step 1177, reply 1189) |
 
 ### Amply: Three Ways In, One Per Kind Of Sender
 
