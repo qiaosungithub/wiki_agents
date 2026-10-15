@@ -181,11 +181,12 @@ matched, full schedule per arm, final checkpoint only.
 | A4 | Schedule shape | WSD, cosine over the last 60% to 0.001x, one factor for both groups | No ablation |
 | A5 | Which layers form prelude / core / coda | full model 0-9 / 10-17 / 18-21 (ours); RR (4,8,4) = 0-3 / 10-17 / 18-21 | Small search on Llama-1B by FineWeb-Edu train loss (Fig. 12), ShortGPT comparison (Fig. 13) |
 | A6 | Delete layers or keep all | keep all (ours); RR deletes 4-9 | Deleting is motivated only by FLOPs per recurrence; (6,10,6) keeping all scores higher at more FLOPs (Fig. 14), (7,8,7) gains little (Fig. 15). Never compared at equal FLOPs |
-| A7 | Truncated BPTT window | `s = min(r, 8)` grad passes, the rest no-grad | Inherited from Huginn; only "schedule the max backprop depth" is ablated (Fig. 18) |
+| A7 | Truncated BPTT window | `s = min(r, 8)` grad passes, the rest no-grad (8 is the config cap `mean_backprop_depth`, inactive for r <= 8, so fixdist r truncates at r). Pure-Poisson runs: window `2 x mean` (operator decision 2026-10-14) | Inherited from Huginn; only "schedule the max backprop depth" is ablated (Fig. 18) |
 | A8 | Depth shared by the batch or per sample | one draw per 512-row group, shared by all ranks | Not ablated (a side effect of seeding by the micro-batch counter) |
-| A9 | Depth distribution | `1 + Poisson-lognormal` (sigma 0.5) and fixed k; target: the simplest Poisson, no curriculum | Poisson-lognormal only |
+| A9 | Depth distribution | `1 + Poisson-lognormal` (sigma 0.5) and fixed k; target: the simplest Poisson, no curriculum. Running at 10k (CtL, branch `rr-loop-poisson`): fixdist5 299799793, fixdist6 299800698 (fixdist2-4 done); poisson m = 2..6 with `p = 1 + Poisson(m - 1)` (E[p] = m, realized FLOPs = fixed k = m within 0.5%), window 2m: 299818015 / 299818036 / 299817849 / 299818276 / poisson6 queued on b200-8 | Poisson-lognormal only |
 | A10 | pass@k / maj@k vs loops at matched inference FLOPs; do loops stack with pass@k | greedy only, never measured | Not measured |
-| A11 | Muon on fused vs separate matrices | being unified to separate | Fused in the recurrent model, separate in the dense baseline |
+| A11 | Muon on fused vs separate matrices | Hard-coded to separate row blocks in the raven optimizer, no config key (branch `rr-muon-split` @89e224f, not merged yet). Every RR result before it used the fused geometry. Loop decoders were always separate | Fused in the recurrent model, separate in the dense baseline |
+| A12 | Loop state update: residual vs LSTM-style gating | Residual: each core pass adds its update to the stream, `h_t = core(z_t)`. Candidate (operator, 2026-10-15): LSTM gates on the cross-pass update (forget / input / output gates from `[h_{t-1}; p]`), initialised to reproduce the current variant exactly | Not considered |
 
 ## 8. Open Questions
 
