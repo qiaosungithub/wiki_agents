@@ -1,6 +1,6 @@
 ---
 name: result-logging
-description: Write an experiment result into its project's shared results spreadsheet (right tab, right row, comparable metrics, train metrics, W&B and chart links, read-back), find a job's chart, or read a job's curves from the workstation.
+description: Write an experiment result into its project's shared results spreadsheet (right tab, right row, comparable metrics, train metrics, W&B and chart links, read-back), find a job's chart, read a job's curves from the workstation, or render a results table or plot for the operator.
 ---
 
 # Spreadsheet Result Logging
@@ -19,7 +19,8 @@ HTTP 429 quota) and its skill, never by scraping the URL.
 
 Chapter 1 is the transaction and when to stop; Chapter 2 is where the row goes
 and what it must carry; Chapter 3 is the cells and the writes that go wrong;
-Chapter 4 is the link columns. Chart links, reading curves from the
+Chapter 4 is the link columns; Chapter 5 is the tables and plots you render for
+the operator. Chart links, reading curves from the
 workstation and provenance are in [references/chart-links.md](references/chart-links.md).
 
 ---
@@ -362,3 +363,23 @@ is owned by [knowledge/infrastructure/wandb-upload.md](../../../knowledge/infras
 Chart links (which URL to log per backend), reading a job's curves from the
 workstation, why only a work unit can write a datatable, and the provenance a
 chart link does not carry are in [references/chart-links.md](references/chart-links.md).
+
+---
+
+## Chapter 5 — Tables And Plots For The Operator
+
+### Where A Figure Goes And What It Contains
+
+**When the operator asks for a table or a plot, deliver a paper-ready PDF and
+PNG in its own directory under `~/work/figures/<project>/<figure_name>/`,
+written in English and showing only results.** The operator should be able to
+drop either file into a paper unchanged. Converse about it in Chinese as usual
+([harness/policy.md](../../policy.md#global-rules)).
+
+| Aspect | Rule |
+|---|---|
+| Directory | One directory per figure: `<figure_name>.pdf`, `<figure_name>.png`, the generator script and the data file it reads. Rerunning the script regenerates both images. No scratch files. |
+| Format | Tables: LaTeX (`standalone` + `booktabs`) through `pdflatex`, PNG from the PDF with `pdftoppm -r 300`; never a matplotlib table or a markdown dump. Plots: vector PDF plus a 300 dpi PNG. |
+| Content | Only what a paper shows: methods named in plain words, metrics with units and a direction arrow, best value in bold and second best underlined when rows compete. No spreadsheet row numbers, job ids, config or code names, paths, dates, or status notes. |
+| Caption | Minimal: the setup (model, budget, what varies), metric units, normalization, seed count, and what the marks mean. Nothing else. |
+| Check | Open the PNG before reporting. A `standalone` page narrower than the tabular clips the last column without any error. |
