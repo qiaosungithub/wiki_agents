@@ -371,8 +371,9 @@ chart link does not carry are in [references/chart-links.md](references/chart-li
 ### Where A Figure Goes And What It Contains
 
 **When the operator asks for a table or a plot, deliver a paper-ready PDF and
-PNG in its own directory under `~/work/figures/<project>/<figure_name>/`,
-written in English and showing only results.** The operator should be able to
+PNG in its own directory under the project's plot directory,
+`~/work/<project>-plot/<figure_name>/` (for example `~/work/rr-plot/`), written
+in English and showing only results.** The operator should be able to
 drop either file into a paper unchanged. Converse about it in Chinese as usual
 ([harness/policy.md](../../policy.md#global-rules)).
 
