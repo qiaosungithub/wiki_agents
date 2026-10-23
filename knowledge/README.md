@@ -25,6 +25,7 @@ as a constraint.
 | [local-agent-cli.md](codebases/local-agent-cli.md) | The agent CLIs (`clod`, `amp`, `gpt`, `gemini`) and the amply database |
 | [remote-control.md](codebases/remote-control.md) | The git-driven remote-control job interface |
 | [survival.md](codebases/survival.md) | The survival game and its sqa-remote commit-to-run wrapper |
+| [next-connectionism.md](codebases/next-connectionism.md) | The Next Connectionism v2 multi-agent Commit-0 codebase (`~/work/next-connectionism`) |
 
 ## Infrastructure
 
@@ -56,4 +57,5 @@ as a constraint.
 | Page | Owns |
 |---|---|
 | [research/README.md](research/README.md) | Index of the research pages |
-| [looped_nanogpt_per_site.md](research/looped_nanogpt_per_site.md) | The core research idea page |
+| [looped_nanogpt_per_site.md](research/looped_nanogpt_per_site.md) | The looped-nanoGPT per-site optimizer idea page |
+| [next_connectionism.md](research/next_connectionism.md) | The Next Connectionism idea page (new agent-network paradigm & cross-domain organizational generalization) |

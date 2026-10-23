@@ -37,7 +37,7 @@ that evolved after the initial spec.**
 | Personality System (`types.py`, `prompts.py`) | Homogeneous base `system_prompt` | When `enable_personality: true` (default), `sample_agent_personalities()` draws 3 uniform $p=0.5$ axes per agent (`social_agency`: `proactive`/`reactive`, `epistemic_style`: `intuitive`/`analytical`, `construal_level`: `concrete`/`abstract`) and injects `## Personality Profile` into `system_prompt` (persisted in `personality.json`) |
 | `comm_mode` names (`config.py`) | `message`, `git`, `shared_workspace` | Canonical names are `message`, `email`, `none` (`normalize_comm_mode` maps `git` to `email` and `shared_workspace` to `none`) |
 | Email notifications (`tools.py`, `infra/`) | `wake_agent(target_id)` only | Incoming emails are silent unless the agent calls `wake_agent(target_id)` or copies `/shared/infra/email_alarm.py` to `/private/<id>/email_alarm.py` (`on_arrival` or `interval` mode, saved in checkpoints) |
-| Interactive Update (`runtime.py`) | `update_allow_interaction=True` is planned | Implemented: setting `update_allow_interaction: true` with `update_comm_mode` runs multi-turn post-mortem communication before finalizing `AGENTS.md` |
+| Interactive Update & Feedback Agents (`runtime.py`, `trainer.py`) | `update_allow_interaction=True` is planned | Implemented: before Update, `compact_conversation_for_update()` compacts long Solve transcripts (`>6` turns), optional `feedback-0..feedback-{F-1}` agents (`enable_feedback_agents: true`) inspect `/shared/_step_report/` to write `feedback_report.md`, and `update_allow_interaction: true` runs multi-turn post-mortem communication before finalizing `AGENTS.md` |
 | Multi-task bundles & online eval (`trainer.py`) | 1 Commit-0 repo per step, standalone eval only | `task_groups` / `tasks_per_step` run $K$ repos per step (`repos/<task_id>`, timeout $\ge 100\text{s} \times K$), and `online_eval_steps` pauses training in-loop to call `run_online_eval` |
 | Multi-domain 6+3 suite (`suite_env.py`) | Commit-0 only | `commit0_env.py` routes `suite_train_6` / `suite_eval_3` and 9 individual benchmarks to `suite_env.py` (6 train: `enterpriseops_gym`, `appworld`, `bbeh_mini`, `ifbench`, `spreadsheetbench`, `swebench_pro`; 3 OOD eval: `arc_agi_2`, `terminal_bench_4`, `automationbench`) |
 
@@ -88,24 +88,56 @@ system `python3` lacks `litellm` and `datasets`.
 
 ```bash
 cd /usr/local/google/home/qiaos/work/next-connectionism
-/usr/local/google/home/qiaos/miniforge3/bin/pytest tests/
-/usr/local/google/home/qiaos/miniforge3/bin/python3 main.py \
-  --config configs/commit0_smoke.yml --prepare-only
-# Or run the 6-Train + 3-OOD-Eval multi-domain suite:
-/usr/local/google/home/qiaos/miniforge3/bin/python3 main.py \
-  --config configs/suite_6train_3eval_n50_k5.yml
+PYTHONPATH=. /usr/local/google/home/qiaos/miniforge3/bin/pytest tests/
+scripts/launch_staged.sh \
+  --config configs/suite_6train_3eval_haiku55_n100_k10.yml \
+  --name preflight_smoke \
+  --foreground -- --prepare-only
 ```
 
-### Train, resume, and evaluate checkpoints
+### Launch, resume, and evaluate via immutable stagedirs
 
-**Pass `--resume-training` with `--load-checkpoint` to continue an interrupted
-training run, or `--eval-only` to freeze `AGENTS.md` and skip the Update stage.**
-Checkpoints live under `<out_dir>/checkpoints/{step_000, step_XXX, latest,
-best}` and store `agents/<id>/AGENTS.md`, optional `email_alarm.py`, and
-`checkpoint_state.json`. When `online_eval_steps` (such as `[0, 3, 7, 10]`) and
-`online_eval_task_groups` are configured, `trainer.run()` pauses after those
-steps to evaluate the frozen checkpoint and writes
-`<out_dir>/online_eval/step_XXX/eval_summary.json`.
+**Always launch training and evaluation jobs through `scripts/launch_staged.sh`
+rather than running `python main.py` directly inside `~/work/next-connectionism`,
+because `trainer.py` and `evalparallel.py` spawn child processes across steps
+that will read mutated code if the working tree changes mid-run.**
+
+`scripts/launch_staged.sh` snapshots `next-connectionism` and `survival` into a
+read-only (`chmod -R a-w`) stage directory under
+`~/.cache/next_connectionism/stages/<run_name>_<ts>_<gitsha>/` (with
+`.stage_ready`, `stage_meta.json`, `git_head.txt`, and `git_diff.patch`), creates
+the paired logdir `~/.cache/next_connectionism/runs/<run_name>/` (with resolved
+`config.frozen.yml`, `train.log`, `pid.txt`, `launch_info.json`,
+`launch_command.sh`, and `stagedir` symlink), and executes `main.py` strictly
+from `stagedir`.
+
+```bash
+cd /usr/local/google/home/qiaos/work/next-connectionism
+
+# Launch a staged background training run (logs to ~/.cache/next_connectionism/runs/<name>/train.log):
+scripts/launch_staged.sh \
+  --config configs/suite_6train_3eval_sonnet55_n100_k10.yml \
+  --name suite_6train_3eval_sonnet55_n100_k10_fb_seed42 \
+  -- --seed 42
+
+# Resume an interrupted training run in-place:
+scripts/launch_staged.sh \
+  --config configs/suite_6train_3eval_sonnet55_n100_k10.yml \
+  --name suite_6train_3eval_sonnet55_n100_k10_fb_seed42 \
+  -- --resume-training
+
+# Evaluate a frozen checkpoint without running the Update stage:
+scripts/launch_staged.sh \
+  --config configs/suite_6train_3eval_sonnet55_n100_k10.yml \
+  --name eval_step010_sonnet55 \
+  -- --eval-only --load-checkpoint ~/.cache/next_connectionism/runs/suite_6train_3eval_sonnet55_n100_k10_fb_seed42/checkpoints/step_010
+```
+
+Checkpoints live under `<logdir>/checkpoints/{step_000, step_XXX, latest, best}`
+and store `agents/<id>/AGENTS.md`, optional `email_alarm.py`, and
+`checkpoint_state.json`. When `online_eval_steps` and `online_eval_task_groups`
+are configured, `trainer.run()` pauses after those steps to evaluate the frozen
+checkpoint and writes `<logdir>/online_eval/step_XXX/eval_summary.json`.
 
 ---
 

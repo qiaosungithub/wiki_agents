@@ -46,6 +46,7 @@ score floors).
 | `raft/` | 2 | RAFT-small optical flow (C+T) reproduction and the per-relative-distance optimizer on its 12 tied update calls. Data + runs on `qiaos-4a100` only. | [knowledge/codebases/raft.md](raft.md) |
 | `remote-control/`, `remote-control-pipeline/`, `google-job-info/`, `google-job-info-daemon/` | n/a | The git-driven remote job interface for lyy: push a commit to launch a run, read status back as a git repo. Four checkouts, one system. | [knowledge/codebases/remote-control.md](remote-control.md) |
 | `survival/`, `survival-pipeline/`, `many-agent-result/` | n/a | Collaborator's stay-alive multi-agent game + the git-driven pipeline: each `sqa-remote` commit == one LOCAL amply run on this box; results pushed back as a git repo. codex→amply adaptation. | [knowledge/codebases/survival.md](survival.md) |
+| `next-connectionism/` | n/a | **The Next Connectionism (v2)** multi-agent network training & evaluation codebase (`next-connectionism-v2` worktree of `survival/`): Initialization → Solve → Evaluate → Update on Commit-0 (`claude-haiku-5-5`, per-agent `AGENTS.md`, `bwrap` sandbox, `message` / `email` / `none` communication modes). | [knowledge/codebases/next-connectionism.md](next-connectionism.md), [knowledge/research/next_connectionism.md](../research/next_connectionism.md) |
 
 ## Boundaries That Are Easy To Miss
 

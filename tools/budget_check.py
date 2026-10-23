@@ -34,6 +34,43 @@ def is_exempt_group(group_or_alloc):
     return any(frag in s for frag in _EXEMPT_ALLOC_FRAGMENTS)
 
 
+# ---- lyy allowlist: named jobs admitted past the G9 income/10 cap ----------
+# lyy 2026-10-22 (#904f52). The job's queue name comes from BUDGET_JOB_NAME
+# (explicit: the resident promoter, tests), else from the build worker's row:
+# route_check.Submitter exports TPU_LOCAL_JOB_ID and npu-build-worker.sh exports
+# TPU_LOCAL_QUEUE_FILE. Admitted only if the row's launch exp_name or its queue
+# name EXACTLY equals a line of the file. Missing file / name / any error ->
+# not allowlisted, i.e. today's result. Revert: empty the file, or restore
+# budget_check.py.bak-20261022.
+LYY_ALLOWLIST_FILE = os.path.expanduser('~/lyy-work/tools/budget_exempt_names.txt')
+
+
+def lyy_allowlisted_name():
+    """The allowlisted queue name of the job being gated, or None."""
+    try:
+        with open(LYY_ALLOWLIST_FILE) as f:
+            allowed = {line.split('#', 1)[0].strip() for line in f}
+        allowed.discard('')
+        if not allowed:
+            return None
+        names = [os.environ.get('BUDGET_JOB_NAME', '').strip()]
+        job_id = os.environ.get('TPU_LOCAL_JOB_ID', '').strip()
+        qfile = os.environ.get('TPU_LOCAL_QUEUE_FILE', '').strip()
+        if job_id and qfile and os.path.exists(qfile):
+            with open(qfile) as f:
+                for e in json.load(f).get('entries', []):
+                    if e.get('job_id') == job_id:
+                        names += [(e.get('launch_kwargs') or {}).get('exp_name') or '',
+                                  e.get('name') or '']
+                        break
+        for n in names:
+            if n and n in allowed:
+                return n
+    except Exception:  # pylint: disable=broad-except
+        return None
+    return None
+
+
 def get_income():
     money_file = os.path.expanduser("~/.tpu_quota_cache_dir/money.txt")
     if not os.path.exists(money_file):
@@ -106,8 +143,8 @@ def get_default_cap(tpu_type):
         # column ("5.00 ok (policy)"), i.e. the same limit-order bound the
         # submit path already enforces, so the gate and the submit path agree.
         'a100': 5,
-        'h100': 10,
-        'h200': 10,
+        'h100': 20,
+        'h200': 20,
         'b200': 20,
         'gb200': 20,
         'gb300': 20,
@@ -334,6 +371,29 @@ def get_job_cost(tpu_type, tier, override=None):
     price, _basis = chip_price(tpu_type)
     return chips * price
 
+# ---- lyy running-only caliber (lyy 2026-10-22, #3e373c Phase 2) -------------
+# For lyy's registry ONLY, count jobs that are actually RUNNING, not every
+# pending/queued XID at market price: lyy's pending v7 XIDs wait at their
+# per-XID limit order (20) and lyy's budget_scheduler.py raises the limit of
+# as many as the bar allows, so a new build may take its XID and wait too.
+# Every other registry (sqa's ~/.tpu_jobs.json, anyone's) keeps option B.
+# Fail closed: a missing or stale (> LYY_CACHE_MAX_AGE_S) check cache means
+# we cannot tell running from pending -> option B for lyy as well.
+# Revert: restore budget_check.py.bak-20261022b.
+LYY_JOBS_FILE = os.path.expanduser('~/lyy-work/.npu_jobs.json')
+LYY_CACHE_MAX_AGE_S = 30 * 60
+
+
+def lyy_running_only(jobs_file, cache_file):
+    """True iff jobs_file is lyy's registry and its check cache is fresh."""
+    try:
+        if os.path.realpath(jobs_file) != os.path.realpath(LYY_JOBS_FILE):
+            return False
+        return (time.time() - os.path.getmtime(cache_file)) <= LYY_CACHE_MAX_AGE_S
+    except Exception:  # pylint: disable=broad-except
+        return False
+
+
 def compute_current_cost(jobs_file, cache_file, warn=None):
     """Sum the credits/hr of jobs that count against the G9 bar (option B).
 
@@ -354,6 +414,8 @@ def compute_current_cost(jobs_file, cache_file, warn=None):
             if warn:
                 warn(f"Error parsing {cache_file}: {e}")
     current_cost, stale_rows, stale_cost = 0.0, 0, 0.0
+    running_only = lyy_running_only(jobs_file, cache_file)
+    counted = ('running',) if running_only else ('running', 'pending', 'queued')
     if os.path.exists(jobs_file):
         try:
             jobs = json.load(open(jobs_file))
@@ -365,8 +427,10 @@ def compute_current_cost(jobs_file, cache_file, warn=None):
             if info.get('status') not in ('SUBMITTED', 'RUNNING'):
                 continue
             # Option B: count running+pending+queued; drop only terminal zombies.
-            if xid in cache_status and cache_status[xid] not in ('running', 'pending', 'queued'):
+            if xid in cache_status and cache_status[xid] not in counted:
                 continue
+            if running_only and xid not in cache_status:
+                continue  # lyy: not seen running by a fresh cache -> not running
             # g3/g5 draw on their own balance -> not part of the G9 aggregate.
             if is_exempt_group(info.get('alloc', '')):
                 continue
@@ -409,10 +473,14 @@ def _run_query(new_tpu_type, new_tier, new_lo_price, new_group):
     bar = income / 10.0
     current_cost, _sr, _sc = compute_current_cost(jobs_file, cache_file)
     headroom = bar - current_cost
-    fits = exempt or (current_cost + new_cost) <= bar
+    allow = lyy_allowlisted_name()
+    fits = exempt or bool(allow) or (current_cost + new_cost) <= bar
     out = {"income": round(income, 1), "bar": round(bar, 1),
            "current": round(current_cost, 1), "headroom": round(headroom, 1),
            "new_cost": round(new_cost, 1), "exempt": exempt, "fits": fits}
+    if allow:  # keys added ONLY on a match, so every other caller's JSON is unchanged
+        out["allowlist"] = allow
+        out["reason"] = "exempt: lyy allowlist (budget_exempt_names.txt)"
     print(json.dumps(out))
     sys.exit(0 if fits else 3)
 
@@ -484,6 +552,12 @@ def main():
     print(f"\033[36m[budget check] {agent_name} agent current cost: {current_cost:.1f} credits/hr\033[0m")
     print(f"\033[36m[budget check] new job cost: {new_cost:.1f} credits/hr\033[0m")
     print(f"\033[36m[budget check] total projected: {total_cost:.1f} (Limit: {limit:.1f} = 1/10 of G9 income {income:.1f})\033[0m")
+
+    _allow = lyy_allowlisted_name()
+    if _allow:
+        print(f"\033[32m[budget check] exempt: lyy allowlist (budget_exempt_names.txt) -- "
+              f"'{_allow}' admitted regardless of the G9 aggregate.\033[0m")
+        sys.exit(0)
 
     # A g3/g5 launch draws on that pool's OWN credit balance, not G9's income,
     # so the 1/10-of-G9 cap does not apply to it. Admit regardless of the G9
