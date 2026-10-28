@@ -102,9 +102,11 @@ the row before filling it, keep cells short, and treat formatting as part of the
 result ([result-logging skill](skills/result-logging/SKILL.md)).
 
 **Literature reviews count only screened papers.** Read each paper's full text
-and check whether its results hold before it may shape a plan, a novelty
-judgment or a citation. A paper that fails screening is ignored completely, even
-when its idea is the same as ours ([literature-review skill](skills/literature-review/SKILL.md)).
+and judge both whether its evidence can be trusted and whether it is worth our
+attention (age, maturity, size of contribution) before it may shape a plan, a
+novelty judgment or a citation. A paper with untrustworthy evidence is ignored
+completely, even when its idea is the same as ours; overselling a comparison to
+outside models is a caveat, not a reason to discard ([literature-review skill](skills/literature-review/SKILL.md)).
 
 **Project-local instructions.** A repository's own `AGENTS.md` / `CLAUDE.md` is
 authoritative for its code semantics. The shared infra, storage, and

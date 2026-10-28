@@ -12,19 +12,54 @@ deep-reading report of a single paper is the [paper-reading skill](../paper-read
 
 ## The Rule
 
-**Only papers that pass screening count. A paper whose results do not hold up is ignored completely:
-it is not cited, its numbers are not used, and it does not count as prior work even when its idea is
-the same as ours.** This is an operator rule. Low-quality papers are common enough that an unscreened
-review is mostly noise: the first screening (47 papers on looped models and fast weights) discarded 7,
-three of them well-known papers whose baseline rows were copied from other papers despite a different
-stated training setup.
+**Only papers that pass screening count, and screening asks two questions: can the evidence be
+trusted, and is the paper worth our attention. A tier D paper (untrustworthy evidence) is ignored
+completely, even when its idea is the same as ours; a tier C paper (correct but low value) stays out
+of the main review.** This is an operator rule. Low-quality papers are now common, and in a hot topic
+most new papers are less than a month old: of 20 looped-LM KV papers screened, 12 were under two
+months old and none of those reached tier A.
 
-- Overlap with our idea is recorded separately and never changes a verdict. A discarded paper that
+- Overlap with our idea is recorded separately and never changes a tier. A discarded paper that
   "already did our idea" does not make the idea taken.
 - A discarded paper's released model or code can still be used as an artifact. Measurements of that
   artifact made by a kept paper count; the discarded paper's own numbers, including its sub-results,
   do not.
-- A paper we could not read in full is UNVERIFIED and is treated as discarded until read.
+- A paper we could not read in full is UNVERIFIED and is treated as tier D until read.
+
+## Calibration: Integrity Is Not Overclaim, Consistency Is Not Value
+
+**Discard a paper for untrustworthy evidence, never for overselling a comparison to outside models;
+and never keep a paper only because its tables are internally consistent.** The first screening got
+both wrong. It discarded Ouro, a well-known paper whose released checkpoints most later looped-LM
+papers test on, because its in-house re-evaluation of other LLMs ran below their published numbers.
+At the same time it kept every recent paper whose tables added up, although a carefully written (or
+LLM-written) paper can be consistent and still add nothing.
+
+| Finding | Treatment |
+|---|---|
+| Baseline rows copied from another paper while a different setup is stated; shifted copies; a stated protocol the paper's own numbers contradict | Tier D |
+| The headline rests on a confound the paper created (a trick given only to the method that is worth the whole gain) | Tier D |
+| Overclaim against external models (in-house re-evaluation under a weaker protocol, "matches a 12B model"), when the paper's own artifact or core result is real and independently re-measured | Caveat; list the claims not to cite |
+| Reusing published baseline numbers under the same setup, with attribution | Normal practice, no penalty |
+| An arithmetic slip in a baseline row that does not carry the headline | Caveat |
+| Gains within noise on a single seed | Weak evidence: lowers the tier (usually C), not an integrity failure |
+
+## Value And Maturity
+
+**For every paper also record its age, its maturity signals and the size of its contribution,
+checking each signal rather than guessing.**
+
+- **Age.** The arXiv id `yymm` gives the month. A paper under two months old has had no time for
+  independent use, so it cannot be tier A.
+- **Maturity signals.** Peer-reviewed venue; code or checkpoints released and resolving (check the
+  links; a repository commit can appear after the paper); independent adoption (other papers using
+  its model, method or numbers: grep the related papers' full texts and run an arXiv API abstract
+  search for its name); independent replication or contradiction; revised arXiv versions. Semantic
+  Scholar citation counts are often rate-limited and are only a weak signal anyway.
+- **Contribution.** New method, measurement, system or theory. Ask whether it is a reusable idea or
+  finding, or an incremental tweak measured against in-house baselines. An inference engine or a
+  quantization scheme can be correct and still be low value for a research question.
+- **Independence.** Agreement between papers that share authors is one piece of evidence, not two.
 
 ## Procedure
 
@@ -35,14 +70,16 @@ stated training setup.
    precedents listed on its research page.
 2. **Screen one paper at a time from the full text** (`https://arxiv.org/html/<id>`, else the PDF),
    never from the abstract. Write the headline claim with its number, find the table that is supposed
-   to support it, run every check below, then give a verdict.
+   to support it, run every check below, record value and maturity, then give a tier.
 3. **Fan out above about six papers.** One read-only screener per 5 to 7 papers, all reading one
    shared rubric file and each writing one output file in the same per-paper format. The parent
-   re-checks every DISCARD reason and every large headline it intends to rely on before using it.
-4. **Report kept papers first,** each with its caveat inside the sentence that cites it, and the
-   claims of that paper that must not be cited. Discarded papers appear only in a short ignored list
-   with a one-line reason.
-5. **Record the result** on the topic's research page (id, verdict, one-line reason, what to use) and
+   re-checks every tier D reason, and every large headline it intends to rely on, from the primary
+   source before using it, and sanity-checks the tiers against field knowledge: a well-known paper
+   in tier D, or a stack of one-month-old papers in tier A or B, means the calibration is off.
+4. **Report tier A first, then tier B flagged as unvetted concurrent work,** each with its caveat
+   inside the sentence that cites it and the claims of that paper that must not be cited. Tier C and
+   D papers appear only in an appendix with a one-line reason.
+5. **Record the result** on the topic's research page (id, tier, one-line reason, what to use) and
    keep the full per-paper audit in a durable file that page points to, so the next review starts from
    it instead of re-screening.
 
@@ -72,18 +109,20 @@ papers it corroborates; agreement among papers by the same group is not independ
 **independent replication** (a later independent paper reproduced it or failed to, and what you
 searched).
 
-## Verdicts
+## Tiers
 
-**A paper is judged on whether its results hold, not on whether we like the idea.**
+**A tier combines trust in the evidence with value and maturity; a paper is never tiered on whether
+we like its idea.**
 
-| Verdict | When | How a review uses it |
+| Tier | When | How a review uses it |
 |---|---|---|
-| KEEP | Every check PASS, or only minor CONCERNs | Cite and build on |
-| KEEP-CAVEAT, strength 1 to 3 | Results hold within a stated limit (scale, seeds, one task family), or a secondary claim fails while the headline holds | Cite with the caveat in the same sentence; list the claims not to cite. Strength 3 is near KEEP, strength 1 barely passes |
-| DISCARD | A FAIL on C1, C2 or C3 that the headline depends on; any C6 FAIL that touches the headline; C10 junk; every headline gain within noise (C4) with nothing else in the paper standing; or two or more FAILs elsewhere | Ignore completely |
-| UNVERIFIED | Full text not read | Treat as DISCARD |
+| A, established | Results hold (no headline-carrying FAIL) and the paper is mature: a venue or released artifacts, plus independent use or replication | Core evidence; cite with its caveats and its do-not-cite claims |
+| B, credible recent | Results hold and the paper is directly relevant with decent evidence, but it is too new or unreplicated to rely on | Included, flagged "unvetted concurrent work" in the same sentence; conclusions resting on it get lower confidence |
+| C, low value | Not untrustworthy, but incremental, weakly evidenced (gains within noise, in-house baselines only), or not informative for the question | Appendix only, one line |
+| D, discard | Untrustworthy evidence per the calibration table: fabrication-like copies, a stated protocol contradicted by the numbers, a headline resting on a self-made confound, or no evidence | Ignored completely, even if the idea overlaps ours |
+| UNVERIFIED | Full text not read | Treat as D until read |
 
-## Red Flags That Decided Real Verdicts
+## Red Flags That Decided Real Tiers
 
 **The checks that caught bad papers were mechanical comparisons, not impressions.**
 
