@@ -111,6 +111,16 @@ capacity remained. Same trick in reverse at europe-west4: shrinking the disk to
 100GB surfaced `GPUS_PER_GPU_FAMILY exceeded`, proving the disk was never the
 blocker there and the real one was H100 quota held by someone else's VM.
 
+**A gcloud failure is not a GCE failure; a create can succeed while the local
+gcloud crashes.** About 14 concurrent `gcloud` processes crash the cloudtop ECP
+proxy (`gcloud crashed (ECPProxyError): ECP HTTP Proxy is not running`), and
+some of those "failed" creates had already been accepted server-side and came
+up RUNNING. So: cap concurrency at 2-3 gcloud processes; classify ECP/gcloud
+crashes as retryable, never as a dead target; and since instance names are
+unique per ZONE only, list the name across all zones before every create and
+adopt what exists (RUNNING = won, TERMINATED = switch to `start`), or the next
+zone in the list gets a duplicate box under the same name.
+
 **Restarting a hunter resets counters it should inherit.** Seed "how many boxes
 do I already hold" and "which names are taken" from the on-disk won-list, or a
 restart re-wins its full quota on top of what it already has and reuses a live
