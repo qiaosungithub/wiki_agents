@@ -37,7 +37,11 @@ always-running TPU dispatch-worker (kept alive by the `*/2` ops watchdog) is the
 SOLE builder and drains the queue by itself — do NOT start a `tpu build-worker`,
 a second builder only spins refusing the per-queue singleton lock. That single
 serial builder is what dodges the concurrent-build zombie XID. Use `tpu queue`
-one-shot only when no other build is in flight.
+one-shot only when no other build is in flight. Once the user has agreed on an
+experiment design, enqueue its jobs directly: the user does not want a
+confirmation round before each submission (user, 2026-10-28). Still enqueue
+from a clean commit (a fresh `git worktree` if another agent is editing the
+repo), because `tpu enqueue` snapshots the working tree as it is.
 Never call `xm launch` / `xmanager launch` directly ([knowledge/infrastructure/cluster-jobs.md §The launcher, config, and packaging](../knowledge/infrastructure/cluster-jobs.md#the-launcher-config-and-packaging)).
 
 **Never train on BATCH.** Every TRAINING job passes `--tier=PROD` explicitly.

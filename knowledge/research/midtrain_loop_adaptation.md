@@ -150,8 +150,52 @@ Reading:
 
 ## 6. The Depth Distribution
 
-The current random-depth code is the Huginn draw of section 3, step 4. Two
-configurations exist:
+### Default since 2026-10-28: loop scaling protocol v2
+
+Every loop experiment uses this protocol unless the experiment is about the
+protocol itself. Do not re-choose depths per experiment. Code source of truth:
+`README.md` section "Loop scaling protocol (default)" and
+`configs/remote_run_config.yml` on `main` of `qiaosungithub/nanoETD_adapt_loop`
+(pushed at `ced27ed`).
+
+- Scaling points R in {4, 8, 16, 32}. A single-point experiment runs all four.
+- Depth law: RR's Huginn draw `p = 1 + Poisson(LogNormal(log R - sigma^2/2,
+  sigma = 0.5))`, one draw per 512-row group, plus a forward cap `p <= R`
+  (`max_mean_recurrence: R`, `max_passes: R`).
+- Truncated backprop, window 8 (`mean_backprop_depth: 8`): the last
+  `min(p, 8)` passes carry grad. For R <= 8 the cap makes this full backprop.
+- No curriculum (`recurrence_warmup_frac: 0`). Eval depth `k = R`.
+- Partition 7+8+7 (no layer deletion), our optimizer (consistent-RMS Muon, one
+  lr 5e-4), 10k updates, seed 74 (75 / 76 for the final wave).
+- Data: Nemotron-CC-Math-v1 `4plus` at ctx 1024 is the default. think10b-v2
+  only for experiments specifically about the new data (operator 2026-10-28;
+  `main`'s global default was reverted to the old data).
+- No fixed-number-of-loops arms (operator 2026-10-28). Untied-core arms stop
+  at R = 8: under window 8 the early copies never get a gradient, and R >= 16
+  does not fit in memory.
+- Why R is not FLOP-matched to RR: matching RR's training FLOPs with our
+  7+8+7 forces `r = 0.84 / 2.60 / 5.50 / 12.22` (47% single-pass draws at the
+  R = 4 point). Matching inference FLOPs gives depth `R - 0.75`, so the
+  operator fixed R = 4 / 8 / 16 / 32. Inference FLOPs = RR + a constant 6
+  layers per token (`14 + 8R` vs `8 + 8R`). Training FLOPs per token as
+  multiples of the dense 22-layer model: CtL 1.88 / 3.04 / 4.09 / 5.71x,
+  adaLN 2.58 / 4.42 / 6.07 / 8.61x, official RR (curriculum, uncapped)
+  1.29 / 1.92 / 2.77 / 4.02x. Plot results against both FLOP axes.
+- The v2 ladder arms: RR-1 = the full official RR recipe ((4,8,4), random
+  adapter, noise latent init, curriculum, uncapped, window `min(r, 8)`) at 10k
+  updates with only our optimizer swapped in; RR-2 = the RR injection on
+  7+8+7 under v2; CtL; adaLN. A 50k dense lr sweep {2e-4, 5e-4, 1e-3} on
+  the old data tests whether RR's official non-loop baseline was under-tuned.
+- Configs: `experiments/v2-*.yml`, rendered by `tools/make_protocol_v2.py` and
+  `tools/make_protocol_v2_batch2.py`; FLOPs by `tools/protocol_v2_flops.py`.
+  Every v1 loop-scaling run (CAP/STD ladders, capladder, scaling-adaln, the
+  think final-wave loop arms, diag, transfer, kvsplit, multiepoch-adaln) was
+  stopped on 2026-10-28 and re-launched under v2.
+
+### Before v2 (history)
+
+The random-depth code is the Huginn draw of section 3, step 4. Two
+configurations existed:
 
 - `rand<r>`: RR 1-sqrt curriculum to mean `r` over the first 75%.
 - `fixdist<r>`: the same draw with the curriculum removed (`r` constant from
@@ -182,9 +226,9 @@ matched, full schedule per arm, final checkpoint only.
 | A4 | Schedule shape | WSD, cosine over the last 60% to 0.001x, one factor for both groups | No ablation |
 | A5 | Which layers form prelude / core / coda | full model 0-9 / 10-17 / 18-21 (ours); RR (4,8,4) = 0-3 / 10-17 / 18-21 | Small search on Llama-1B by FineWeb-Edu train loss (Fig. 12), ShortGPT comparison (Fig. 13) |
 | A6 | Delete layers or keep all | keep all (ours); RR deletes 4-9 | Deleting is motivated only by FLOPs per recurrence; (6,10,6) keeping all scores higher at more FLOPs (Fig. 14), (7,8,7) gains little (Fig. 15). Never compared at equal FLOPs |
-| A7 | Truncated BPTT window | `s = min(r, 8)` grad passes, the rest no-grad (8 is the config cap `mean_backprop_depth`, inactive for r <= 8, so fixdist r truncates at r). Pure-Poisson runs: window `2 x mean` (operator decision 2026-10-14) | Inherited from Huginn; only "schedule the max backprop depth" is ablated (Fig. 18) |
+| A7 | Truncated BPTT window | v2 (2026-10-28): window 8 at every R, see section 6. Before: `s = min(r, 8)` grad passes, the rest no-grad (8 is the config cap `mean_backprop_depth`, inactive for r <= 8, so fixdist r truncates at r). Pure-Poisson runs: window `2 x mean` (operator decision 2026-10-14) | Inherited from Huginn; only "schedule the max backprop depth" is ablated (Fig. 18) |
 | A8 | Depth shared by the batch or per sample | one draw per 512-row group, shared by all ranks | Not ablated (a side effect of seeding by the micro-batch counter) |
-| A9 | Depth distribution | `1 + Poisson-lognormal` (sigma 0.5) and fixed k; target: the simplest Poisson, no curriculum. Running at 10k (CtL, branch `rr-loop-poisson`): fixdist5 299833418 (rerouted from 299799793), fixdist6 299800698 (fixdist2-4 done); poisson m = 2..6 with `p = 1 + Poisson(m - 1)` (E[p] = m, realized FLOPs = fixed k = m within 0.5%), window 2m: 299818015 / 299818036 / 299817849 / 299837359 (rerouted from 299818276) / poisson6 queued on b200-8 | Poisson-lognormal only |
+| A9 | Depth distribution | v2 (2026-10-28): Huginn draw with forward cap `p <= R`, R in {4, 8, 16, 32}, see section 6. Before: `1 + Poisson-lognormal` (sigma 0.5) and fixed k; target: the simplest Poisson, no curriculum. Running at 10k (CtL, branch `rr-loop-poisson`): fixdist5 299833418 (rerouted from 299799793), fixdist6 299800698 (fixdist2-4 done); poisson m = 2..6 with `p = 1 + Poisson(m - 1)` (E[p] = m, realized FLOPs = fixed k = m within 0.5%), window 2m: 299818015 / 299818036 / 299817849 / 299837359 (rerouted from 299818276) / poisson6 queued on b200-8 | Poisson-lognormal only |
 | A10 | pass@k / maj@k vs loops at matched inference FLOPs; do loops stack with pass@k | greedy only, never measured | Not measured |
 | A11 | Muon on fused vs separate matrices | Hard-coded to separate row blocks in the raven optimizer, no config key (branch `rr-muon-split` @89e224f, not merged yet). Every RR result before it used the fused geometry. Loop decoders were always separate | Fused in the recurrent model, separate in the dense baseline |
 | A12 | Loop state update: residual vs LSTM-style gating | Residual: each core pass adds its update to the stream, `h_t = core(z_t)`. Candidate (operator, 2026-10-15): LSTM gates on the cross-pass update (forget / input / output gates from `[h_{t-1}; p]`), initialised to reproduce the current variant exactly | Not considered |
