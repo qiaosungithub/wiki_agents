@@ -8,7 +8,8 @@ per-token recurrence is the Gauss-Seidel order. The experiments live on
 [midtrain_loop_adaptation.md](midtrain_loop_adaptation.md). How papers were screened, and the rule that
 only kept papers count: [literature-review skill](../../harness/skills/literature-review/SKILL.md).
 The full per-paper audits (claim, C1 to C10 with table references) are in
-`~/work/lit-review/looped_kv_fastweight/G{1..5}_*.md`.
+`~/work/lit-review/looped_kv_fastweight/G{1..5}_*.md`; the independent re-check of every DISCARD's
+decisive numbers is `DISCARD_VERIFY.md` in the same directory.
 
 Chapter 1 is what the kept papers establish; Chapter 2 is the kept list; Chapter 3 is the ignored
 list; Chapter 4 is where the idea is still open.
@@ -106,13 +107,13 @@ one GD step on such a fast weight (2212.07677).
 
 | id | Paper | Why it was discarded |
 |---|---|---|
-| 2510.25741 | Ouro | "Matches up to 12B models" rests on in-house baselines far below their published numbers (Qwen3-4B GSM8K 72.86 vs 87.79), implausible table cells, and tables that disagree; its own same-data FLOP-matched test favors standard models. Its released checkpoints remain usable as artifacts |
+| 2510.25741 | Ouro | "Matches up to 12B models" rests on in-house baselines far below their published numbers (Qwen3-4B GSM8K 72.86 vs 87.79, partly a 3-shot vs 4-shot protocol difference), an implausible cell (Gemma3-1B MATH500 41.0 with GSM8K 2.05), and the same baselines differing between its Tables 7 and 8; its own same-data FLOP-matched test favors standard models. Its released checkpoints remain usable as artifacts |
 | 2501.00663 | Titans | The over-2M-context headline exists only in a figure with an unstated protocol; a baseline average is miscomputed; no code, and an independent reimplementation did not reproduce it |
 | 2504.13173 | Miras (It's All Connected) | Baseline rows copied unchanged from other papers; its ablation numbers match no main-table row; no code |
 | 2512.24695 | Nested Learning / Hope | Claims every model was retrained on a new mix, yet baseline rows are copied from Titans and Miras, including the miscomputed average; no code |
 | 2609.15160 | T-LoopFormer | Baseline table is a shifted copy of LoopFormer's despite a different stated setup; uncited Mixture-of-Recursions mechanisms; gains within noise |
-| 2610.28489 | Asymmetric Looped Transformers | A layerwise-LR method given only to the method is worth as much as the reported gains; 1B gap 0.05 perplexity, single seed |
-| 2609.37379 | Looped Transformers as Optimizers | All gains within single-seed noise on an aggregate that counts GSM8K and HumanEval twice (borderline; multi-seed evidence would reopen it) |
+| 2610.28489 | Asymmetric Looped Transformers | A layerwise-LR method given only to the method is worth about as much as the reported gains at 135M to 1B, where no same-optimizer control exists; the 1B gap is 0.05 perplexity, single seed. Only at 60M does a same-optimizer comparison exist, and there the architecture gain survives |
+| 2609.37379 | Looped Transformers as Optimizers | All gains (+1.0 to +1.7 EM, alignment gains +0.15 / +0.54) are 0.6 to 1.5 binomial SE, single seed; the 5B gain is mostly MMLU. Its aggregate counts GSM8K and HumanEval twice, which adds noise but does not inflate the gain (borderline; multi-seed evidence would reopen it) |
 
 ---
 
