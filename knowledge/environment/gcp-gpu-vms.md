@@ -26,7 +26,7 @@ to "grant iap.tunnelResourceAccessor".
 
 ## Our Own Boxes (we can delete these)
 
-**Three boxes, all `enable-oslogin=FALSE` + metadata ssh-key, so the login user
+**Our boxes are all `enable-oslogin=FALSE` + metadata ssh-key, so the login user
 is `qiaos@`, not the `qiaos_google_com@` the OS-Login boxes want. All DLVM
 `pytorch-2-9-cu129-ubuntu-2404-nvidia-580` (driver preinstalled, torch
 2.9.1+cu129, NV12 all-pairs NVLink), on-demand STANDARD, not preemptible.**
@@ -34,14 +34,32 @@ is `qiaos@`, not the `qiaos_google_com@` the OS-Login boxes want. All DLVM
 | Box | Shape | Cards | Zone | Disk |
 |---|---|---|---|---|
 | `qiaos-4a100` | `a2-highgpu-4g` | 4×A100-SXM4-**40GB** | us-central1-f | 1TB pd-ssd |
+| `qiaos-4a100-uc1-1` | `a2-highgpu-4g` | 4×A100-SXM4-**40GB** | us-central1-b | 500GB pd-standard |
+| `qiaos-4a100-uc1-2` | `a2-highgpu-4g` | 4×A100-SXM4-**40GB** | us-central1-f | 500GB pd-standard |
 | `qiaos-4a100-2` | `a2-highgpu-4g` | 4×A100-SXM4-**40GB** | us-east1-b | 1TB pd-ssd |
-| `qiaos-4a100-3` | `a2-ultragpu-4g` | 4×A100-SXM4-**80GB** | us-central1-a | 1TB pd-ssd |
+| `qiaos-4a100-3` | `a2-ultragpu-4g` | 4×A100-SXM4-**80GB** | us-central1-a | 1TB pd-ssd + 4×375GB local SSD |
 
 ```bash
-gcloud compute ssh qiaos@qiaos-4a100   --zone=us-central1-f --project=viscam-cloud
-gcloud compute ssh qiaos@qiaos-4a100-2 --zone=us-east1-b     --project=viscam-cloud
-gcloud compute ssh qiaos@qiaos-4a100-3 --zone=us-central1-a  --project=viscam-cloud
+gcloud compute ssh qiaos@qiaos-4a100       --zone=us-central1-f --project=viscam-cloud
+gcloud compute ssh qiaos@qiaos-4a100-uc1-1 --zone=us-central1-b --project=viscam-cloud
+gcloud compute ssh qiaos@qiaos-4a100-uc1-2 --zone=us-central1-f --project=viscam-cloud
+gcloud compute ssh qiaos@qiaos-4a100-2     --zone=us-east1-b    --project=viscam-cloud
+gcloud compute ssh qiaos@qiaos-4a100-3     --zone=us-central1-a --project=viscam-cloud
 ```
+
+The `-uc1-*` boxes are fresh images: no venv, no project checkout, slow
+pd-standard boot disk (the region's SSD quota was full). Stopping
+`qiaos-4a100-3` needs `--discard-local-ssd=true` and wipes its local SSDs; keep
+anything durable on the boot disk.
+
+**A box being TERMINATED does not mean it is free to start, and does not tell
+you who stopped it.** Other project members stop idle boxes to save cost, and a
+failed `start` (STOCKOUT) also rewrites `lastStopTimestamp`, so several boxes
+showing the same stop time can be one failed restart script, not a batch stop.
+Ask the audit log instead:
+`gcloud logging read 'protoPayload.resourceName:"<vm>" AND logName:"cloudaudit.googleapis.com"' --project=viscam-cloud`
+(`principalEmail` says who; `protoPayload.status.message` shows
+`ZONE_RESOURCE_POOL_EXHAUSTED` on failed starts).
 
 Others' boxes we are lent time on live in the same project and are NOT ours to
 delete — notably `deepflow-4a100-40gb-junhwahur-1` (us-central1-b, 4×A100-40GB).
@@ -49,6 +67,28 @@ List what actually exists rather than trusting any table, including this one:
 `gcloud compute instances list --project=viscam-cloud --filter="status=RUNNING"`.
 
 Creating a new box is [§Creating A 4-Card Box](../../harness/skills/gcp-gpu-ssh/SKILL.md#creating-a-4-card-box) in the skill.
+
+## Quota Map (limits; usage readings are unreliable)
+
+**GPU quota exists only in these regions; everywhere else a GPU family is
+absent or capped at 1. The project is shared, so others' running VMs consume
+the same limits.**
+
+| Family (metric) | Region: limit |
+|---|---|
+| H100 (`GPUS-PER-GPU-FAMILY`, `gpu_family=NVIDIA_H100`) | us-central1: 8, europe-west4: 8 |
+| A100-80GB (`NVIDIA_A100_80GB_GPUS`) | us-central1: 12, us-east4: 9, europe-west4: 8, us-east7: 4 |
+| A100-40GB (`NVIDIA_A100_GPUS`) | us-central1: 16, us-east1: 4 |
+| L4 (`NVIDIA_L4_GPUS`) | 8 in nearly every region |
+
+Non-GPU limits that block GPU boxes: `SSD_TOTAL_GB` is near full in
+us-central1 and full in europe-west4 (use a pd-standard boot disk for A2,
+hyperdisk-balanced for A3; pd-balanced counts as SSD); europe-west4 `CPUS`
+= 208, and an `a3-highgpu-4g` alone takes 104 vCPUs; us-east7 `CPUS` = 48 fits
+exactly one `a2-ultragpu-4g`. Refresh with `gcloud compute regions list
+--format=json` (legacy metrics) and `gcloud alpha quotas info list
+--service=compute.googleapis.com --filter="quotaId:GPUS-PER-GPU-FAMILY-per-project-region"`
+(H100/H200/B200; takes about a minute).
 
 ## Quota Readings Are Stale; Only An Insert Is Evidence
 
