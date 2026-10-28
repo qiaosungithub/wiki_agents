@@ -235,6 +235,10 @@ matched, full schedule per arm, final checkpoint only.
 
 ## 8. Open Questions
 
+Prior work on per-token K/V refinement, last-K/V reads and K/V sharing across
+loops (the `loop.kv_mode` line) is screened in
+[looped_kv_literature.md](looped_kv_literature.md); cite only its kept papers.
+
 - Which loop arm is the reference method: ctl (best GSM8K at equal FLOPs), or
   rreye (`[I | 0]` adapter, best at equal data)?
 - Does the val/accuracy decoupling survive a token-class split of val loss?

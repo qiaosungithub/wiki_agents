@@ -101,6 +101,11 @@ layout drifts and a stale column map mis-files a number without erroring. Place
 the row before filling it, keep cells short, and treat formatting as part of the
 result ([result-logging skill](skills/result-logging/SKILL.md)).
 
+**Literature reviews count only screened papers.** Read each paper's full text
+and check whether its results hold before it may shape a plan, a novelty
+judgment or a citation. A paper that fails screening is ignored completely, even
+when its idea is the same as ours ([literature-review skill](skills/literature-review/SKILL.md)).
+
 **Project-local instructions.** A repository's own `AGENTS.md` / `CLAUDE.md` is
 authoritative for its code semantics. The shared infra, storage, and
 external-write rules here supersede stale operational sections in old project
