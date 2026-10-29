@@ -10,7 +10,10 @@ tiers mean: [literature-review skill](../../harness/skills/literature-review/SKI
 review report on KV handling in looped LMs is `~/work/reports/looped_kv_cache_literature_review.html`.
 Per-paper audits live in `~/work/lit-review/looped_kv_fastweight/`: `G{1..5}_*.md` hold the rubric
 checks, `E{1..4}_notes.md` the tier, maturity, training and inference notes, and `DISCARD_VERIFY.md`
-the primary-source re-check of the decisive numbers.
+the primary-source re-check of the decisive numbers. The same directory holds our own measurements:
+`OURO_VS_HUGINN.md` (the Ouro-1.4B pilot probe), `inhouse_kv_sharing_results.md` (13-checkpoint
+factorial) and `inhouse_kv_zeroshot_generation.md` (GSM8K / MATH generation); they are summarized in
+[midtrain_loop_adaptation.md §9](midtrain_loop_adaptation.md#9-last-loop-kv-sharing).
 
 Chapter 1 is what the tier A and B papers establish; Chapter 2 is the tiered list; Chapter 3 is where
 the idea is still open.
@@ -19,13 +22,28 @@ the idea is still open.
 
 ## Chapter 1 — What The Tier A And B Papers Establish
 
-**Whether a looped model can read only the last loop's K/V depends on how it was trained, and four
-independent groups agree.** Models trained with random depth, truncated backprop or damped updates
-tolerate it zero-shot (Huginn 2502.05171; Towards II 2610.06833 and BeNice 2610.31633, both B).
-Ouro (2510.25741, fixed 4 loops) collapses once generations or contexts are long: MATH500 75.9 to 45.9
-and RULER-16K 77.5 to 7.0 (HLA 2610.07940, B), GSM8K 0.794 to 0.000 (LLA 2607.15456, B), Core 54.6 to
-25.2 (BeNice). Ouro's own Table 14 (GSM8K 78.92 to 78.85) holds only for short few-shot answers.
-Fixed-depth training halves GSM8K under sharing (Towards II: 50.6 to 21.2).
+**Whether a looped model can read only the last loop's K/V zero-shot depends first on input injection
+and then on training: four independent groups agree on the phenomenon, and our own factorial (one seed,
+1.1B, short answers only) points to injection as the cause.** Models trained with random depth,
+truncated backprop or damped updates tolerate it zero-shot (Huginn 2502.05171; Towards II 2610.06833
+and BeNice 2610.31633, both B); all three inject the input on every loop. Ouro (2510.25741, fixed 4
+loops, every-loop supervision, whole stack looped with no injection) collapses once generations or
+contexts are long: MATH500 75.9 to 45.9 and RULER-16K 77.5 to 7.0 (HLA 2610.07940, B), GSM8K 0.794 to
+0.000 (LLA 2607.15456, B), Core 54.6 to 25.2 (BeNice). Ouro's own Table 14 (GSM8K 78.92 to 78.85)
+holds only for short few-shot answers. Within injected architectures, fixed-depth training halves GSM8K
+under sharing (Towards II: 50.6 to 21.2), and removing injection raises the sharing penalty from
++21.9% to +232% (Towards II Table 18).
+
+- In-house ([midtrain_loop_adaptation.md §9](midtrain_loop_adaptation.md#9-last-loop-kv-sharing)):
+  without injection (ETD, like Ouro) the loop-entry pass's K/V cannot be replaced by the last pass's.
+  With random depth the exact last-K/V loss rises by about 10 nats, concentrated in pass-1 layers 0-1,
+  which is the entry-cell signature of our Ouro pilot probe and of BeNice's Parcae diagnosis; with fixed
+  depth it rises by 0.23 nats, spread over all pass-1 layers.
+- With injection (AdaLN, CtL) the only cost is about 0.03 nats for fixed-depth, last-pass-only
+  supervision, and either multi-exit supervision or random depth removes it. So for injected models
+  every-loop supervision acts like random depth, and Ouro fails because it has no injection, not
+  because of its objective. Our injected random-depth checkpoints stay within about 1 point on GSM8K /
+  MATH under zero-shot last-K/V generation, for answers of at most 256 tokens.
 
 **Methods that work either train the cross-loop read pattern in or keep loop-specific information.**
 Trained in: MoR (2507.10524, recursion-wise caching or first-recursion sharing, 0.7 pt cost), PLT
@@ -139,6 +157,9 @@ training), LCKV and Implicit LMs (outside looped LLMs).
 - Risks the literature names for a parallel approximation of the sequential read: extra sweeps may not
   converge to sequential serving (Kirsch), and naive parallel training of a refined-K/V architecture
   can fail outright (MELT).
+- For injected, random-depth models last-K/V sharing is already free zero-shot (Chapter 1), so a
+  method trained in the Gauss-Seidel order must win on quality or on loop count at equal quality, not
+  on memory, and must be compared against per_loop training plus zero-shot last-K/V.
 - Untested: whether last-K/V recurrence trained in the Gauss-Seidel order improves state tracking or
   reasoning in a looped LLM, not only memory, and whether loop count can act as the number of inner
   steps on an explicit fast weight with per-token adaptive depth in training.

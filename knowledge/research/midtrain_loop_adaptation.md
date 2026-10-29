@@ -2,8 +2,8 @@
 
 Owns the mid-training loop-adaptation research line: the problem statement,
 the benchmark (recipe + metrics) and every known way the inherited RR recipe is
-dirty, the val-loss vs downstream-accuracy decoupling, and the depth
-distribution. Sibling idea page: [looped_nanogpt_per_site.md](looped_nanogpt_per_site.md)
+dirty, the val-loss vs downstream-accuracy decoupling, the depth
+distribution, and what our checkpoints show about last-loop K/V sharing. Sibling idea page: [looped_nanogpt_per_site.md](looped_nanogpt_per_site.md)
 (optimizer line, unrelated). Code lives in the `etd-rr-*` worktrees of
 `qiaosungithub/nanoETD_adapt_loop` (`docs/RR_PORT.md`, `docs/RR_LOOPVAR.md`,
 `docs/RR_EVAL.md` on those branches); results in the `RR TinyLlama-484` tab
@@ -238,9 +238,69 @@ matched, full schedule per arm, final checkpoint only.
 Prior work on per-token K/V refinement, last-K/V reads and K/V sharing across
 loops (the `loop.kv_mode` line) is screened in
 [looped_kv_literature.md](looped_kv_literature.md); cite only its kept papers.
+Our own K/V-sharing measurements are [section 9](#9-last-loop-kv-sharing).
 
 - Which loop arm is the reference method: ctl (best GSM8K at equal FLOPs), or
   rreye (`[I | 0]` adapter, best at equal data)?
 - Does the val/accuracy decoupling survive a token-class split of val loss?
 - Does a stationary distribution beat fixed `k` at equal realized FLOPs, and
   does it buy depth extrapolation (R > trained depth)?
+
+## 9. Last-Loop K/V Sharing
+
+**With input injection (AdaLN, CtL), a checkpoint trained with random depth or
+multi-exit supervision can serve from last-pass K/V only, zero-shot; without
+injection (ETD) it cannot, whatever the depth training.** This rests on one
+seed, 1.1B, 10k-update adaptations, val loss on 64 rows (exact) or 2048 rows
+(one-shot), and generations of at most 256 tokens; long chain-of-thought is
+untested. Full tables with every eval XID:
+`~/work/lit-review/looped_kv_fastweight/inhouse_kv_sharing_results.md` (13
+checkpoints, keep sets) and `inhouse_kv_zeroshot_generation.md` (GSM8K / MATH,
+raw data in `inhouse_kvlast_data/`); discussion in section 5.5 of
+`~/work/reports/looped_kv_cache_literature_review.html`.
+
+Terms. per_loop = every pass keeps its own K/V (R copies). Exact last-K/V
+(`kv_block 1`) = token by token, every token reads earlier tokens' last-pass
+K/V only. kv_split = the second half of the sequence reads the first half's
+last-pass K/V in one shot. A keep set leaves listed (core pass, core layer)
+cells per-loop and shares the rest; a same-size control cell tells an entry
+effect from a diffuse one. All deltas are paired, within one checkpoint.
+
+| Regime (10+8+4, 10k updates) | Arms | Exact last-K/V delta at depth 4 (nats) | Where the loss sits |
+|---|---|---|---|
+| No injection, random depth | etd-fixdist4 | +10.2 (worse than uniform; per_loop itself is depth-stable) | Pass-1 layers 0-1: keeping them recovers 92%; under kv_split keeping pass-1 layer 0 alone recovers 98.6% |
+| No injection, fixed 4 | etd-k4 | +0.23 (+0.82 at depth 8) | All pass-1 layers: keeping pass 1 recovers 84%, layers 0-1 only 28% |
+| Injection, fixed 4, last-pass loss | adaln-k4, ctl-k4 | +0.035 / +0.033 | Diffuse over passes and positions: keeping pass 1 recovers at most 32%, single cells at most 5%, like the control |
+| Injection, fixed 4, multi-exit | adaln-k4-2exit, adaln-k4-allexit | +0.005 / +0.001 | none to speak of |
+| Injection, random depth | adaln/ctl fixdist4, adaln cap4 (1-, 2-, all-exit), ctl 2+8+12 | within 0.0005 | none |
+
+- The ETD rows are entry mismatch: pass 1 reads the prelude output and later
+  passes read the state, so pass-1 K/V live in a different basis. Random depth
+  makes it worse because the converged state is far from the entry. The
+  injected fixed-depth cost is non-convergence, not entry. We have no ETD
+  multi-exit arm, so Ouro's exact combination is not measured.
+- Unexplained: for etd-fixdist4 under exact last-K/V, keeping all of pass 1
+  (+1.76) is worse than keeping only layers 0-1 (+0.87), with a 10x larger SE.
+- Uninformative arms: ctl 0+8+14 (no prelude) has a loop that is a no-op after
+  pass 1. ctl-k4 is the step-8000 checkpoint. adaln-k4's per_loop works only
+  at depths 4 and 8.
+- Generation, injected random-depth checkpoints (AdaLN / CtL 7+8+7 10k, CtL
+  50k, AdaLN 10+8+4 50k, raven rec4 released and our 50k, v2 RR-1 R4 10k):
+  across about 150 paired comparisons, last-K/V moves GSM8K / MATH by -1.2 to
+  +2.0 points. The only consistent cost is MATH -0.5 to -1.0 near the trained
+  depth on the two 50k AdaLN / raven checkpoints, gone at twice the depth; at
+  R = 32 raven outputs are unchanged. AdaLN 10+8+4 50k is a stand-in whose arm,
+  partition and optimizer differ from the other rows.
+- Consequence for `gs_kv`: on injected random-depth models (v2 AdaLN is one)
+  the memory motivation is weak, so `gs_kv` must win on quality or loop count
+  under exact last-K/V eval against per_loop plus zero-shot last-K/V. With
+  detached memory and block size 1, the core W_K / W_V got gradient only from
+  the diagonal; `loop.gs_mem_grad=st_last` (straight-through, forward bitwise
+  unchanged, 0.997x throughput) fixes that. `gs_kv` at R = 4 costs 1.73x
+  per_loop wall clock on H100 against 1.25x by FLOPs, so match compute by wall
+  clock or say which axis is matched.
+- Code (`qiaosungithub/nanoETD_adapt_loop`): `rr-kvshare-eval` @ f43b6a3 and
+  `rr-kvshare-keep` @ ae117d6 (`loop.eval_kv_keep`; eval configs
+  `experiments/kvshare-*.yml`, `experiments/kvkeep-*.yml` name their
+  checkpoints), `rr-kvlast-zeroshot` @ dde656f and `rr-kvlast-raven` @ 5eead13
+  (generation), `rr-gs-kv-memgrad` @ ab603af (`gs_mem_grad`).
