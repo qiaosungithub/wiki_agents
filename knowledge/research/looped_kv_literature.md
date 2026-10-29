@@ -13,7 +13,9 @@ checks, `E{1..4}_notes.md` the tier, maturity, training and inference notes, and
 the primary-source re-check of the decisive numbers. The same directory holds our own measurements:
 `OURO_VS_HUGINN.md` (the Ouro-1.4B pilot probe), `inhouse_kv_sharing_results.md` (13-checkpoint
 factorial) and `inhouse_kv_zeroshot_generation.md` (GSM8K / MATH generation); they are summarized in
-[midtrain_loop_adaptation.md §9](midtrain_loop_adaptation.md#9-last-loop-kv-sharing).
+[midtrain_loop_adaptation.md §9](midtrain_loop_adaptation.md#9-last-loop-kv-sharing). Per-token adaptive depth (exit
+rules, the K/V an exited token exposes, realized speedups) is owned by
+[per_token_adaptive_depth_literature.md](per_token_adaptive_depth_literature.md).
 
 Chapter 1 is what the tier A and B papers establish; Chapter 2 is the tiered list; Chapter 3 is where
 the idea is still open.
