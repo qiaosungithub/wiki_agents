@@ -20,12 +20,12 @@ split.
 
 | Thing | Path |
 |---|---|
-| Code | `~/work/charlm/` (`data_prep.py`, `data_loader.py`, `model.py`, `metrics.py`, `train.py`, `test_data.py`; unroll: `unroll_model.py`, `unroll_optimizer.py`, `unroll_util.py`, `site_probe.py`, `test_unroll.py`) |
+| Code | `~/work/charlm/` on the boxes; the cloudtop checkout was removed 2026-11-03 and its full history (incl. the optimizer/sitemom WIP) is on GitHub `qiaosungithub/charlm` branch `local-main-20261103` (unrelated to that repo's `main` snapshot) (`data_prep.py`, `data_loader.py`, `model.py`, `metrics.py`, `train.py`, `test_data.py`; unroll: `unroll_model.py`, `unroll_optimizer.py`, `unroll_util.py`, `site_probe.py`, `test_unroll.py`) |
 | Interpreter on the box | `~/work/charlm/.venv/bin/python` (see [charlm-runs skill §Use the venv python on the box](../../harness/skills/charlm-runs/SKILL.md#use-the-venv-python-on-the-box) for why the bare `python3` fails) |
 | Launcher | `~/work/charlm/run_official.sh` — the torch-rnn default, every flag spelled out, not inherited |
 | Upstream Lua mirror (read-only) | `~/work/torch-rnn-upstream/` |
 | Native docs | `~/work/charlm/README.md` — measured config table, deliberate divergences, exact logging keys |
-| Compute | the 4×A100 boxes (SSH in [gcp-gpu-ssh skill](../../harness/skills/gcp-gpu-ssh/SKILL.md)). `~/work/charlm` + `.venv` + prepared data live on `qiaos-4a100-3` (80GB, the main one), `qiaos-4a100` and `qiaos-4a100-2` (40GB). The cloudtop copy is the source of truth; md5s must match before a launch |
+| Compute | the 4×A100 boxes (SSH in [gcp-gpu-ssh skill](../../harness/skills/gcp-gpu-ssh/SKILL.md)). `~/work/charlm` + `.venv` + prepared data live on `qiaos-4a100-3` (80GB, the main one), `qiaos-4a100` and `qiaos-4a100-2` (40GB). The source of truth was the cloudtop copy until 2026-11-03; it is now GitHub `qiaosungithub/charlm@local-main-20261103` (clone it back before editing); md5s must match before a launch |
 | W&B | project `charlm-torchrnn-baseline`, entity `zhh24-massachusetts-institute-of-technology` |
 | Results tab | EqR workbook `17pvrMbOKOKFiIa-eorO8Od12qc5JmrFCSXcXKeoe_u0`, tab **`charlm-torchrnn (qiaos)`** (resolve BY TITLE) |
 

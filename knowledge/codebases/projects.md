@@ -39,7 +39,7 @@ score floors).
 | `agent-island/` | n/a | Terminal session managers for `clod`, `amp`, `gpt`, `gemini` | [knowledge/codebases/local-agent-cli.md](local-agent-cli.md), then native docs |
 | `work/reports/` | n/a | Paper deep-reading reports | [paper-reading skill](../../harness/skills/paper-reading/SKILL.md) |
 | `rnn_unroll/` | 2 | RNN unroll-optimizer science line: gradient propagation / adding problem (vanilla RNN). Two remote 4×A100 boxes, not Borg. | [knowledge/codebases/rnn-unroll.md](rnn-unroll.md) |
-| `charlm/` | 2 | Character-level LM on tiny-shakespeare, reproducing `jcjohnson/torch-rnn`. Dense-supervision counterpart to the adding-problem line. Same 4×A100 boxes. | [knowledge/codebases/charlm.md](charlm.md) |
+| `charlm/` (boxes only; cloudtop checkout removed 2026-11-03, code at GitHub `qiaosungithub/charlm@local-main-20261103`) | 2 | Character-level LM on tiny-shakespeare, reproducing `jcjohnson/torch-rnn`. Dense-supervision counterpart to the adding-problem line. Same 4×A100 boxes. | [knowledge/codebases/charlm.md](charlm.md) |
 | `nanogpt_depth/` | 2 | FineWeb-Edu nanoGPT pretraining; exact same-position call/loss gradient and two-band Adam, copied from lyy. | [knowledge/codebases/nanogpt-depth.md](nanogpt-depth.md) |
 | `nanochat/` | 2 | Full-pipeline LLM testbed (`Base Pretrain` → `Chat SFT` → `Chat RL` → `Maj@k` scaling, `d12` / `d24`) for studying whether and when recurrent looping is useful. | [knowledge/codebases/nanochat.md](nanochat.md) |
 | `paper-with-agent/` | n/a | The paper on the per-site optimizer idea, co-written with the user in three layers; `hie1/` is user-only. | [knowledge/codebases/paper-with-agent.md](paper-with-agent.md) |
