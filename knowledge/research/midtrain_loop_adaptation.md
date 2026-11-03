@@ -299,7 +299,9 @@ effect from a diffuse one. All deltas are paired, within one checkpoint.
   unchanged, 0.997x throughput) fixes that. `gs_kv` at R = 4 costs 1.73x
   per_loop wall clock on H100 against 1.25x by FLOPs, so match compute by wall
   clock or say which axis is matched.
-- Code (`qiaosungithub/nanoETD_adapt_loop`): `rr-kvshare-eval` @ f43b6a3 and
+- Code (`qiaosungithub/nanoETD_adapt_loop`; since 2026-11-03 these branch names are
+  deleted and every commit below is reachable from `archive/kvsplit` @ 6ce1eb5,
+  so `git checkout <sha>`): `rr-kvshare-eval` @ f43b6a3 and
   `rr-kvshare-keep` @ ae117d6 (`loop.eval_kv_keep`; eval configs
   `experiments/kvshare-*.yml`, `experiments/kvkeep-*.yml` name their
   checkpoints), `rr-kvlast-zeroshot` @ dde656f and `rr-kvlast-raven` @ 5eead13
