@@ -47,7 +47,9 @@ The files in `~/work/paper-with-agent/hie1/` (`hie1-paper-scope.md`, `looped-nan
 | Design | Branch | Checkout |
 |---|---|---|
 | parcae (clean + official repro) | `parcae` / `persite-stepsize` | `~/work/parcae-jax`, `~/work/parcae-stepsize` |
-| loopformer | `loopformer` | `~/work/loopformer` (`origin` = local `~/work/parcae-jax`) |
-| ouro | `ouro` | `~/work/ouro` |
+| loopformer | `loopformer` | none (local checkout removed 2026-11-03, line closed; last local WIP on branch `archive/wip-20261103-loopformer`) |
+| ouro | `ouro` | none (local checkout removed 2026-11-03, line closed; last local WIP on `archive/wip-20261103-ouro`, stashes on `archive/stash-20261103-ouro-{0,1}`) |
+
+The last uncommitted work in `~/work/parcae-jax` is on `archive/wip-20261103-parcae`.
 
 Results are logged to `looped nanogpt (cleaned 2)` in workbook `1chHYhhEnTfgkKmLnZiC7jjoFCE-ywsDCxPLXFdSTl20` per [knowledge/environment/result-workbooks.md §Which Tab](../environment/result-workbooks.md#which-tab).
