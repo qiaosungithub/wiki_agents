@@ -112,6 +112,19 @@ Reading:
 - layermix ≈ CtL at every cap, and cross-attention without adaLN ≈ CtL at
   R = 4. This favors H2 over H1: re-injecting at every layer is not enough by
   itself; the condition has to enter through a non-additive path.
+- **layermix ties CtL because it trains itself into early fusion, not because
+  its gates stay shut.** Its logged per-layer gains (`train/loop/layermix_gain_<j>`,
+  the rms of `alpha_j W_j c` per unit-rms `c`) settle at about 0.20 / 0.08 /
+  0.06 / 0.08 / 0.06 for core layers 1-5 and under 0.005 for layers 6-8, with
+  the same shape at R = 4 / 8 / 16. Against the pretrained residual rms at those
+  layers (0.054 at the first core layer, 0.08-0.11 at layers 2-5) the first
+  layer's add is about 4x the residual, so `h_{t-1}` dominates the core input,
+  and the last three layers add nothing because the residual already carries
+  the earlier adds. Two caveats: the reference scale is the pretrained model's,
+  not the trained checkpoint's, and the gain assumes an isotropic `c`. Gates
+  that sit at zero under Muon may also be stuck rather than unwanted. For
+  comparison, CtL learns `w` ≈ 0.83, so `h_{t-1}` carries roughly 30% of its
+  core input's energy at the pretrained scale.
 - adaLN beats its swap at R = 4 (MATH 26.9 vs 23.6) and R = 8, and they tie at
   R = 32: weak support for H3.
 - Previous-pass K/V without adaLN collapses to the no-loop model (GSM8K ~25 at
