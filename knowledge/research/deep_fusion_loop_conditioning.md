@@ -12,7 +12,7 @@ default protocol v2); results live in the `RR TinyLlama-484` tab
 `run_steps`, `models/loop_ops.py` `_adaln_layer`).
 
 Chapter 1 is the claim; Chapter 2 is the in-house evidence and its confounds;
-Chapter 3 is the plan for side evidence; Chapter 4 is the literature status.
+Chapter 3 is the plan for side evidence; Chapter 4 is what the screened literature says.
 
 ---
 
@@ -166,21 +166,50 @@ checkpoints.
 
 ---
 
-## Chapter 4 — Literature Status
+## Chapter 4 — What The Literature Says
 
-**No VLM or conditioning paper may be cited for this idea until it has passed
-screening ([literature-review skill](../../harness/skills/literature-review/SKILL.md));
-the screened list replaces this chapter.** Candidates to screen, with the
-justification each is known for: Flamingo (gated cross-attention interleaved
-into a frozen LM, tanh gates at zero), CogVLM (visual expert in every layer,
-argued as LoRA-like deep fusion against p-tuning-like shallow alignment, and
-for keeping language ability), NVLM (decoder-only vs cross-attention vs hybrid
-in one controlled study), Llama 3 vision adapters (cross-attention to keep text
-ability), DeepStack (visual tokens stacked into several layers), Idefics2 /
-"What matters when building VLMs" (cross-attention vs fully autoregressive,
-frozen vs unfrozen backbone; a likely counterexample), mPLUG-Owl3, LLaMA-Adapter
-(zero-init attention), DiT (in-context vs cross-attention vs adaLN-Zero
-conditioning ablation), FiLM, P-tuning v2 and VPT (deep vs shallow prompts),
-ControlNet (zero-init per-block injection), Attention Bottlenecks for
-Multimodal Fusion (early vs mid fusion), and the shallow vs deep fusion of
-language models in NMT / ASR (Gulcehre et al.).
+**Screened review (59 papers read in full, 41 tier A, 7 B, 11 C, none
+discarded): deep fusion beats early fusion by a wide margin only when the host
+network is frozen; with a trained host, which is our case, the gain comes from
+how the condition enters a layer (modulation or attention, plus zero-init), not
+from re-injecting it at every layer.** Full review, per-paper audits and the
+verification log: `~/work/lit-review/deep_fusion/SUMMARY.md`. Almost every
+comparison below is a single seed, and most deep arms carry extra parameters.
+
+| Hypothesis | Literature verdict | Strongest kept evidence |
+|---|---|---|
+| H1 dilution | Holds only for frozen or small hosts, and shrinks with scale | Deep vs shallow prompts: VPT, prefix-tuning, eP-ALM; P-tuning v2 gap +15 to +24 points near 350M, +1.2 at 10B |
+| H2 access form | Best supported | Additive per-layer re-injection ties a single injection in six settings (DeepStack dummy, BERT-fused additive, ResFormer hidden residual, VPT add, LaVi shift-only, U-ViT skips); modulation or attention at the same sites wins (ADM AdaGN vs addition, FiLM scale term, ResFormer value path, BERT-fused attention, DiT adaLN-Zero) |
+| H3 role separation | Weak once parameters are matched | Positive results all carry about 2x parameters (MoT, MMDiT, LMFusion, CogVLM); Bugliarello (10 seeds) finds single- and two-stream equal on 4 of 5 tasks; DiT-Air ties MMDiT with 66% fewer parameters |
+| H4 preservation | Zero-init is the most consistently measured ingredient; forgetting results are mixed | Flamingo tanh gate (-4.2 without it), LLaMA-Adapter zero vs random init, DiT adaLN-Zero vs adaLN; NVLM's token arm keeps text better than cross-attention, LaVi's modulation keeps it best |
+
+What proponents argue vs what they measured:
+
+- CogVLM's "shallow alignment is like p-tuning, deep fusion like LoRA" is argued
+  only; its own Table 4 shows input tokens plus an unfrozen LLM recover most of
+  the visual expert's gain.
+- "Cross-attention keeps text ability" (Llama 3 vision, NVLM-X) comes from
+  freezing the LM, not from cross-attention.
+- "Every layer" is rarely the best placement: RETRO and MBT score worst with
+  all-layer fusion, FiLM in block 1 only matches all blocks, StyleGAN's input
+  latent with the same mapping network matches per-layer styles. Sparse,
+  spread-out injection wins most placement sweeps; shallow-only also loses.
+- Efficiency on long visual sequences, a main VLM argument for cross-attention,
+  does not apply: `h_{t-1}` is as long as the sequence.
+
+**VLM early fusion is not our early fusion, which makes one baseline
+missing.** A VLM's early fusion gives the condition its own token positions,
+which every layer re-reads through attention; ours mixes vectors into the same
+positions. So the VLM counterexamples (NVLM, Idefics2, mPLUG-Owl3, DiT-Air) say
+per-layer cross-attention is unnecessary when the condition has its own tokens,
+not that CtL is enough. The matching arm, `h_{t-1}` appended as extra tokens
+that the core attends to, was dropped from the cond study for doubling the
+sequence; it is the baseline a VLM reviewer will ask for.
+
+Prediction for our arms: adaLN's gain is mostly access form plus zero-init; the
+conditioning-block and two-stream gains are the most likely to be extra
+capacity. The designs that test this are E1, E2 and E4 above, plus three the
+literature adds: an access-form ablation at fixed sites (adaLN scale-only,
+shift-only, gate-only, and per-layer zeroing at test time), zero-init on vs
+off, and shared vs per-layer adaLN (PixArt and DiT-Air disagree on whether
+per-layer is needed).
