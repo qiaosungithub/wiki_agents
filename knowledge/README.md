@@ -58,4 +58,5 @@ as a constraint.
 |---|---|
 | [research/README.md](research/README.md) | Index of the research pages |
 | [looped_nanogpt_per_site.md](research/looped_nanogpt_per_site.md) | The looped-nanoGPT per-site optimizer idea page |
+| [deep_fusion_loop_conditioning.md](research/deep_fusion_loop_conditioning.md) | The deep-fusion idea page for loop adaptation (early vs deep fusion of the loop state) |
 | [next_connectionism.md](research/next_connectionism.md) | The Next Connectionism idea page (new agent-network paradigm & cross-domain organizational generalization) |
