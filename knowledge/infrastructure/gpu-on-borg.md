@@ -133,12 +133,17 @@ manifest limit. Three fixes are live:
   last no-op check `~/.tpu_stage_ws_rotate.heartbeat.<family>`, failed members
   `~/.tpu_stage_ws_bad`, `python3 stage_ws_rotate.py status` for the table.
   `stage_ws_rotate.py retire` only reports which members could go (not the
-  newest healthy one, manifest >= 9 MiB, no stage for 30 days, no stagedir
-  named by a queue entry, an active-registry entry or a record under 30 days
-  old); `ensure` logs it daily and warns above 60 CitC clients. `retire
-  --execute` (wired nowhere) first archives every referenced stagedir with an
-  XID index under `/cns/go-d/home/qiaos/eqr_data/stage_ws_retired/<client>/`;
-  `retire restore --xid X` brings one back so `--resume_xid` works again.
+  newest healthy one, manifest >= 9 MiB, no stage for 30 days, and no stagedir
+  named by a blocking record). A queue or active-registry entry stops blocking
+  only once it is terminal (queue DONE/FAILED; registry COMPLETED, CANCELLED,
+  FAILED, TERMINAL_RECONCILED, TERMINAL_NOT_RUNNING) AND ended over 30 days
+  ago. A live or unknown status, or a missing end time, still blocks, and so
+  does any old XID that a still-blocking entry lists (resume chains). Other
+  records block while under 30 days old. `ensure` logs it daily and warns
+  above 60 CitC clients. `retire --execute` (wired nowhere) first archives
+  every referenced stagedir, old ones included, with an XID index under
+  `/cns/go-d/home/qiaos/eqr_data/stage_ws_retired/<client>/`; `retire restore
+  --xid X` brings one back so `--resume_xid` works again.
 
 ### FlashAttention Is Available, With Two Conditions
 
