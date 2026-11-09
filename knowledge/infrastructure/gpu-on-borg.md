@@ -103,6 +103,43 @@ machine. Fine, since the ports pin nothing, but rederiving as "newest wins"
 picks differently. Worse than any version gap: a drained root that takes writes
 and loses them minutes later.
 
+**Correction (2026-11-09): masked GQA attention DOES need torch >= 2.15.** On
+torch 2.13 `F.scaled_dot_product_attention(attn_mask=..., enable_gqa=True)`
+has no efficient kernel and falls back to MATH, which materialises fp32
+`[B*H, T, T]` scores per layer (TinyLlama doc-mask runs OOMed: XID 310045786).
+The stage-workspace rotation had silently moved every build to
+`hg_recovery_20260906` (torch 2.13) when the preferred roots crossed the 10 MiB
+manifest limit. Three fixes are live:
+
+- `tpu_wrapper.sh`'s pool holds the torch 2.15 family workspaces (CL
+  989229158 = torch 2.15.0a0; third point), and a torch-version guard logs
+  `[stage-ws] torch job: ... torch=<v>` for every non-resume torch build,
+  moves to a healthy pool root with torch >= `${TPU_STAGE_WS_MIN_TORCH:-2.15}`,
+  and warns (never refuses) when none exists.
+- `xm_launcher.py`'s prebuilt-MPM cache key now includes
+  `ws=<workspace>@<baseline CL>`. Before, it was `target_label + bazel args`
+  only, and a content-addressed label hashes the source, not the workspace, so
+  the same code staged into a new root reused the old root's MPM (and its torch)
+  for the 5-day TTL. Verify a build by its rank-0 log, never by the staging
+  root: `pytorch_version='2.15.0a0+google3'` (XID 310225585).
+- Workspaces fill up (the 10 MiB limit stays; it guards CitC's ~12 MB
+  auto-keyframe cliff), so `~/work/tpu_cmd/stage_ws_rotate.py` keeps one with
+  headroom per operator: families `tpu_staging_t215_<YYYYMMDD>[_n]` (qiaos)
+  and `tpu_staging_lyy_t215_<YYYYMMDD>[_n]` (lyy, first member created
+  2026-11-09), all qiaos-owned, all at CL 989229158. The wrapper globs every
+  member into its operator's pool (oldest first), calls `ensure --background`
+  on each stage (creates the next member once none is below 9 MiB), and calls
+  it blocking when no pool member is usable. Log `~/.tpu_stage_ws_rotate.log`,
+  last no-op check `~/.tpu_stage_ws_rotate.heartbeat.<family>`, failed members
+  `~/.tpu_stage_ws_bad`, `python3 stage_ws_rotate.py status` for the table.
+  `stage_ws_rotate.py retire` only reports which members could go (not the
+  newest healthy one, manifest >= 9 MiB, no stage for 30 days, no stagedir
+  named by a queue entry, an active-registry entry or a record under 30 days
+  old); `ensure` logs it daily and warns above 60 CitC clients. `retire
+  --execute` (wired nowhere) first archives every referenced stagedir with an
+  XID index under `/cns/go-d/home/qiaos/eqr_data/stage_ws_retired/<client>/`;
+  `retire restore --xid X` brings one back so `--resume_xid` works again.
+
 ### FlashAttention Is Available, With Two Conditions
 
 **`//third_party/py/flash_attn` builds against the in-tree torch, but its
