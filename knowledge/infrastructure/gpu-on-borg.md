@@ -145,6 +145,50 @@ manifest limit. Three fixes are live:
   `/cns/go-d/home/qiaos/eqr_data/stage_ws_retired/<client>/`; `retire restore
   --xid X` brings one back so `--resume_xid` works again.
 
+**Correction (2026-11-13): the staging workspace must also be at or above the
+security baseline CL, or XManager rejects the experiment.** From about 19:20Z
+on 2026-11-13, every launch staged from a CL 989229158 workspace failed with
+`MPM package '.../user_resources/qiaos/<hash>' ... was built at CL 989229158
+(unpatched ...), which is older than the minimum required CL 1015040045 ...
+go/tangerinefawn-faq-viewonly [INVALID_ARGUMENT]`. That was the Tangerine Fawn
+admission check. The job MPM is built from the staging workspace, so the
+workspace's baseline CL is the MPM's CL. The router saw it as "build failed 3
+times, never produced an XID" and parked 33 rows HELD, across every agent. The
+full text is in the local launch log `~/logs/eqr_run_<ts>/xm_launch.log`; the
+dispatch-worker log truncates it.
+
+- Floor: `TPU_STAGE_WS_MIN_CL` (default 1015087249). That is the rejection's
+  1015040045 rounded up past the `[1014008457, 1015087249)` Kansas regression
+  window. `tpu_wrapper.sh`'s `_tpu_ws_healthy` treats a workspace below the
+  floor, or with an unreadable `.citc/srcfs_workspace.ascii`, as unhealthy,
+  exactly like a full one. So neither the manifest rotation nor the torch guard
+  can fall back to an old root. Under `TPU_STAGE_WS_FORCE=1` it only prints a
+  red warning. `TPU_STAGE_WS_MIN_CL=0` disables the floor.
+- `stage_ws_rotate.py` creates new family members at
+  `DEFAULT_BASELINE_CL = 1021221105` (torch 2.16.0a0; the same CL as the NPU
+  queue's `lyy_stage_head_20261113`). It marks members below `DEFAULT_MIN_CL`
+  unhealthy, and `ensure` refuses to create one below it. The family prefixes
+  keep their historical `t215` infix because the wrapper globs them by name;
+  the infix no longer names the torch version. First member at the new CL:
+  `tpu_staging_t215_20261113` (created 21:28Z). The first build from it,
+  XID 312584459, was accepted.
+- No CL at or above the floor still has torch 2.15. torch is 2.16.0a0 at
+  1015040045, 1015087249, 1015640903, 1021221105 and HEAD. Every build after
+  the repin, warm restarts included, links torch 2.16.0a0. A resumed run
+  therefore changes torch version mid-run; record the update it switched at.
+  Verify a build by its rank-0 `pytorch_version`, as above.
+- Tests: `stage_ws_rotate_test.py` (`test_min_baseline_cl`, with negative
+  controls), `stage_ws_retire_test.py` (fixtures moved to the new baseline),
+  and `stage_ws_min_cl_test.sh`. The last one runs the wrapper's real
+  `_tpu_ws_healthy` block against fake workspaces. Rows parked by such a wave
+  come back with `tpu requeue <job_id> ...`, which keeps their queue position.
+  Requeue by explicit id: a bare `tpu requeue` would also release rows HELD
+  for other reasons.
+- When a future campaign raises the floor again, bump both `DEFAULT_MIN_CL`
+  and `DEFAULT_BASELINE_CL` in `stage_ws_rotate.py`, and the wrapper's
+  `TPU_STAGE_WS_MIN_CL` default. Keep the baseline at or above the floor; the
+  test asserts it.
+
 ### FlashAttention Is Available, With Two Conditions
 
 **`//third_party/py/flash_attn` builds against the in-tree torch, but its
