@@ -106,6 +106,60 @@ duty cycle under the 0.20 floor, and the WIM pruner deletes the job with no
 preemption notice and no crash. Copy the checkpoint to the compute cell's CNS
 prefix first (swap the prefix, keep the tail verbatim) and point `LOAD_FROM` there.
 
+### Checkpoint Cadence On Preemptible GPU (`checkpoint_minutes`)
+
+**A preemptible run must bank a checkpoint faster than it is killed, measured in
+minutes, not updates.** GPU PROD tasks (xborg, above-floor g9 and floor groups
+alike) are killed WHOLE and from outside every few minutes to ~1 h: no rank exit
+line, no traceback, every rank log stops in the same second. The last log line is
+wherever the kill landed, so it is not a diagnosis. In the torch package
+(nanoETD_adapt_loop) a restart cost ~16 min before update 1, 11 of them in the
+serial `resume_share` turns for a 17 GB checkpoint. With only `checkpoint_interval: 500`
+(~26 min of B200, ~50 min of H100 on the 10B-token OLMo runs) attempts died before
+saving, and the router's in-place thrash rule (>= 3 restarts since the newest
+own-bucket checkpoint) cancelled and requeued them into hours of GQM pending. That was
+146 thrash cancels over 65 rows in 2026-11-10..12, including OLMo 10B ctrl-R4 stuck
+at step 500 for 24 h and b0-R2 with zero steps in 26 h.
+
+The fix is on main from 2026-11-12. `checkpoint_minutes` (top-level, default 15;
+0 = the update cadence only) also saves once that much training has passed since
+the last save. It checks every 10 updates, and all ranks agree through one
+all-reduce. A timed save is an ordinary `steps/step_<N>.pt` (`N` need not be a
+multiple of the interval; keep_last applies). It changes no math: losses, weights
+and optimizer state are bitwise identical with and without it, and a resume from a
+timed save is bitwise (tests/test_ckpt_clock.py). The key is outside the run
+contract, so old checkpoints resume. `resume_share` with
+`$RESUME_SHARE_CONCURRENT=auto` (the default) broadcasts the checkpoint once and
+resumes all ranks together when host RAM fits, about 2.5x the file per receiver
+plus 32 GiB (GPU hosts have 2-4 TiB). Otherwise it keeps the serial turns. A run on
+an older snapshot has neither: move it to a commit with the fix at its next
+requeue, with `load_from` set to its newest step file.
+
+**Saves are asynchronous from 2026-11-14 (`checkpoint_async`, default true), so
+the default cadence is `checkpoint_minutes: 5`.** A synchronous 17 GB save stalled
+training 97-139 s (10-15% of wall time at 15 min). Now the update boundary pays only
+the collectives (`optimizer.gathered()`) and a device -> host copy into reusable
+pinned buffers. `torch.save` and the CNS write run on one background thread of the
+chief: `.step_N.pt.tmp`, then flush/fsync and a size check, then an atomic rename to
+`step_N.pt`, then a hidden `.step_N.pt.complete.json`. Every reader (own-bucket resume,
+`LOAD_FROM`, resume_share, the router's probe) matches only `step_*.pt`, so a write
+killed mid-way leaves a stale `.tmp` and the previous checkpoint wins (seen live: a
+task killed during a write left an 11.4 GB `.step_250.pt.tmp`, ignored). Measured with
+the OLMo 10B config: 0.3 s stall per save on b200-8 (XID 312662638) and 0.6 s on
+h100-8 (XID 312640427); 7-11 s for the first save of an attempt, which allocates the
+buffers and self-checks them. The write took 156 s at ~109 MB/s on b200 and ~100 s at
+~170 MB/s on h100, and s/update during a write was never above idle (b200 3.010 vs
+3.070, h100 5.941 vs 6.235). That is about
+200 GB/h of CNS writes per OLMo job, and 5 files kept: newest `checkpoint_keep_last`
+update-cadence plus newest `checkpoint_keep_timed` (2) timed. At most one write is in
+flight. A timed trigger is deferred while a write runs, and skipped when the write
+would outlast the gap to the next update-cadence save, which would otherwise wait
+for it. Update-cadence and final saves, exports, online evals and the end of `fit`
+wait for the in-flight write. With `checkpoint_async: false` every save is
+synchronous again, so use 15 min there. Both keys are outside the run contract.
+Code and tests: `utils/async_ckpt.py`, `tests/test_async_ckpt.py`; README
+"Checkpoints are written every ...".
+
 ---
 
 ## Chapter 2 — New Training Package Startup Contract
