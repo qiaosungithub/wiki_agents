@@ -50,6 +50,23 @@ W&B link ([§The W&B Link Column](#the-wb-link-column)) and the `logdir` / `stag
 resolved config, which keeps cells short. Without a chart every reader rebuilds
 the URL by hand ([harness/skills/result-logging/references/chart-links.md §Chart Links](references/chart-links.md#chart-links)).
 
+### Reporting A Logged Batch To The Operator
+
+**In the report, name every run by what it is in plain words, never by its
+config tag or experiment number.** The operator reads the report, not the sheet,
+and will not decode a tag such as `Exp 3b`, `2s-hbg`, `ltc`, `bcarry`,
+`10c mread-even-untie2` or `dil4-untie4` from memory. Reports named this way
+have been rejected repeatedly. A launcher tag is internal vocabulary here for
+the same reason it is in a results row ([§A Row That Is Already Filled Can Still Be Wrong](#a-row-that-is-already-filled-can-still-be-wrong)).
+
+| Part of the report | Rule |
+|---|---|
+| A run's name | Base method, the one thing it changes against its fixed-axis control, and R (plus model or data size when not the default). Write "two-stream ctrl-enc whose second stream reuses the main loop's weights, R = 8", not "Exp 3b R8" or "ctrl-enc-tied R8". |
+| The control | Named the same plain way, on the same line as the comparison. |
+| Identifiers | Keep the XID after the plain name, because the operator greps for it. A shorthand is allowed only if it is defined in the same sentence in this report; a definition from an earlier report does not count. |
+| Coverage | One final report lists every run of the batch. Never split a batch across messages. |
+| Comparison | First against the run's fixed-axis control, with an explicit verdict (positive / neutral / negative), then context. Positives first. |
+
 ### Re-Read The Header Every Time
 
 **Never write from a remembered column map.** A stale map does not error when
