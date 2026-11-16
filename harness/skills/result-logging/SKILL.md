@@ -59,13 +59,19 @@ and will not decode a tag such as `Exp 3b`, `2s-hbg`, `ltc`, `bcarry`,
 have been rejected repeatedly. A launcher tag is internal vocabulary here for
 the same reason it is in a results row ([§A Row That Is Already Filled Can Still Be Wrong](#a-row-that-is-already-filled-can-still-be-wrong)).
 
+**Shape the report around the question the batch asks, not around a fixed
+template.** An ablation batch reads best grouped by the axis being ablated, with
+each group's conclusion first. A batch that tries new methods can lead with what
+helped. Do not force a positive / neutral / negative split onto a batch where
+that split is not the point.
+
 | Part of the report | Rule |
 |---|---|
 | A run's name | Base method, the one thing it changes against its fixed-axis control, and R (plus model or data size when not the default). Write "two-stream ctrl-enc whose second stream reuses the main loop's weights, R = 8", not "Exp 3b R8" or "ctrl-enc-tied R8". |
-| The control | Named the same plain way, on the same line as the comparison. |
-| Identifiers | Keep the XID after the plain name, because the operator greps for it. A shorthand is allowed only if it is defined in the same sentence in this report; a definition from an earlier report does not count. |
-| Coverage | One final report lists every run of the batch. Never split a batch across messages. |
-| Comparison | First against the run's fixed-axis control, with an explicit verdict (positive / neutral / negative), then context. Positives first. |
+| The control | Named the same plain way, on the same line as the comparison. A verdict word means "against the fixed-axis control" unless the sentence names another reference. |
+| Identifiers | Keep the XID after the plain name, because the operator greps for it. A shorthand is allowed only if it is defined in this report; a definition from an earlier report does not count. |
+| Numbers already in a figure | When an updated table or plot under `~/work/rr-plot/` carries a group's numbers, give its path and the group's conclusion, and do not re-list every cell. Quote numbers in the text only for the comparison that decides the conclusion and for runs that no figure carries. |
+| Coverage | Every run of the batch is accounted for in the one final report, either in the text or in a figure the report points to. Never split a batch across messages. |
 
 ### Re-Read The Header Every Time
 
